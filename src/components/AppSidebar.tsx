@@ -1,12 +1,12 @@
 import {
   Home,
   Users,
-  // FileText, // Removed as it was only for Farm Management
   Activity,
   TrendingUp,
   Settings,
   LogOut,
   Sprout,
+  ListTodo, // Icon for Tasks & Stock
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -21,12 +21,12 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
-// Updated menu items: "Farm Management" has been removed
+// Updated menu items
 const menuItems = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Employee Management", url: "/supervisors", icon: Users },
   { title: "Field Monitoring", url: "/field-monitoring", icon: Activity },
-  { title: "Performance Review", url: "/analytics", icon: TrendingUp },
+  { title: "Tasks & Stock", url: "/tasks-stock", icon: ListTodo },
   { title: "System Settings", url: "/settings", icon: Settings },
 ];
 
@@ -101,3 +101,4 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
+

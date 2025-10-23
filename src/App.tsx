@@ -3,17 +3,16 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-// Use aliased paths without file extensions
-import AppLayout from "@/components/AppLayout";
 
-// Import all your pages using aliased paths without file extensions
-import Index from "@/pages/Index";
-import FieldMonitoring from "@/pages/FieldMonitoring";
-import Supervisors from "@/pages/Supervisors";
-import Inventory from "@/pages/Inventory";
-import Settings from "@/pages/Settings";
-import Analytics from "@/pages/Analytics"; // <-- IMPORTED
-import NotFound from "@/pages/NotFound";
+// Import using relative paths (./) and .tsx extension
+import AppLayout from "./components/AppLayout.tsx";
+import Index from "./pages/Index.tsx";
+import FieldMonitoring from "./pages/FieldMonitoring.tsx";
+import Supervisors from "./pages/Supervisors.tsx";
+import Settings from "./pages/Settings.tsx"; // <-- FIX: Corrected typo "pagesimg" to "pages"
+import TasksAndStock from "./pages/TasksAndStock.tsx"; // <-- IMPORTED
+import NotFound from "./pages/NotFound.tsx";
+// Analytics and Inventory have been removed
 
 const queryClient = new QueryClient();
 
@@ -28,11 +27,8 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/field-monitoring" element={<FieldMonitoring />} />
             <Route path="/supervisors" element={<Supervisors />} />
-            <Route path="/inventory" element={<Inventory />} />
             <Route path="/settings" element={<Settings />} />
-            
-            {/* --- ADDED ROUTE --- */}
-            <Route path="/analytics" element={<Analytics />} />
+            <Route path="/tasks-stock" element={<TasksAndStock />} /> {/* <-- ADDED */}
 
             {/* CATCH-ALL "*" ROUTE MUST BE LAST */}
             <Route path="*" element={<NotFound />} />
