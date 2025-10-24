@@ -1,19 +1,28 @@
-import { useState } from "react";
+"use client";
+
+import React, { useState, useMemo } from "react";
 import {
   ListTodo,
   Plus,
   Package,
   Calendar as CalendarIcon,
-  CheckCircle,
-  Circle,
   Tractor,
   FlaskConical,
   Search,
   Users,
   Sprout,
   Wheat,
-  User,
+  Filter,
+  PackagePlus,
+  PackageMinus,
+  Edit,
+  Trash2,
+  AlertTriangle,
+  XCircle,
+  MoreHorizontal,
+  CheckCircle,
 } from "lucide-react";
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,336 +51,396 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { cn } from "@/lib/utils"; // Assumes you have a 'lib/utils.ts' for 'cn'
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { LucideIcon } from "lucide-react";
 
-// --- Data for Page ---
+// --- Data Types ---
+interface Supervisor {
+  id: string;
+  name: string;
+  avatar: string;
+}
 
-const supervisors = [
+interface AllTask {
+  id: string;
+  type: string;
+  task: string;
+  plot: string;
+  supervisorId: string;
+  supervisor: string;
+  status: string;
+}
+
+interface MyTask {
+  id: string;
+  title: string;
+  completed: boolean;
+}
+
+interface InventoryItem {
+  id: string;
+  item: string;
+  category: string;
+  stock: number;
+  unit: string;
+  threshold: number;
+  lastUpdated: string;
+}
+
+// --- Initial Data ---
+const supervisors: Supervisor[] = [
   { id: "1", name: "Ravi Kumar", avatar: "/avatars/01.png" },
   { id: "2", name: "Amit Patel", avatar: "/avatars/02.png" },
   { id: "3", name: "Suresh Singh", avatar: "/avatars/03.png" },
   { id: "4", name: "Priya Sharma", avatar: "/avatars/04.png" },
 ];
 
-const plotNumbers = ["Plot 1", "Plot 2", "Plot 3", "Plot 4", "Plot 5", "Plot 12"];
-
-const taskTypes = [
-  { value: "inspection", label: "Inspection", icon: Search },
-  { value: "harvest", label: "Harvest", icon: Wheat },
-  { value: "fertilizer", label: "Fertilizer", icon: FlaskConical },
-  { value: "planting", label: "Planting", icon: Sprout },
-  { value: "ploughing", label: "Ploughing", icon: Tractor },
+const initialAllTasksData: AllTask[] = [
+  {
+    id: "t1",
+    type: "Inspection",
+    task: "Weekly pest inspection",
+    plot: "Plot 5",
+    supervisorId: "1",
+    supervisor: "Ravi Kumar",
+    status: "Pending",
+  },
+  {
+    id: "t2",
+    type: "Harvest",
+    task: "Harvest wheat",
+    plot: "Plot 12",
+    supervisorId: "2",
+    supervisor: "Amit Patel",
+    status: "In Progress",
+  },
+  {
+    id: "t3",
+    type: "Fertilizer",
+    task: "Apply NPK",
+    plot: "Plot 4",
+    supervisorId: "4",
+    supervisor: "Priya Sharma",
+    status: "Pending",
+  },
 ];
 
-const initialAllTasks = [
-  { id: "t1", type: "Inspection", task: "Weekly pest inspection", plot: "Plot 5", supervisor: "Ravi Kumar" },
-  { id: "t2", type: "Harvest", task: "Harvest wheat", plot: "Plot 12", supervisor: "Amit Patel" },
+const initialMyTasksData: MyTask[] = [
+  {
+    id: "m1",
+    title: "Check fertilizer inventory, stocks, and order if needed",
+    completed: true,
+  },
+  {
+    id: "m2",
+    title: "Review all pending farm tasks for the week",
+    completed: false,
+  },
 ];
 
-const initialMyTasks = [
-  { id: "m1", title: "Check fertilizer inventory, stocks, and order if needed", completed: true },
-  { id: "m2", title: "Review all pending farm tasks for the week", completed: false },
+const initialInventoryItemsData: InventoryItem[] = [
+  {
+    id: "1",
+    item: "Nitrogen Fertilizer",
+    category: "Fertilizers",
+    stock: 85,
+    unit: "kg",
+    threshold: 20,
+    lastUpdated: "2025-10-20",
+  },
+  {
+    id: "2",
+    item: "Phosphate",
+    category: "Fertilizers",
+    stock: 42,
+    unit: "kg",
+    threshold: 15,
+    lastUpdated: "2025-10-18",
+  },
+  {
+    id: "3",
+    item: "Tractor Oil",
+    category: "Equipment",
+    stock: 5,
+    unit: "L",
+    threshold: 10,
+    lastUpdated: "2025-09-30",
+  },
+  {
+    id: "4",
+    item: "Herbicide B",
+    category: "Pesticides",
+    stock: 0,
+    unit: "L",
+    threshold: 5,
+    lastUpdated: "2025-09-15",
+  },
 ];
 
-// --- Helper Components ---
-
-const TaskTypeBadge = ({ type }: { type: string }) => {
-  const taskConfig = taskTypes.find(t => t.label === type) || { icon: ListTodo };
-  const Icon = taskConfig.icon;
-  return (
-    <Badge variant="outline" className="flex items-center gap-2 text-sm">
-      <Icon className="w-4 h-4" />
-      <span>{type}</span>
-    </Badge>
-  );
+// --- Helpers ---
+const getStockStatus = (
+  stock: number,
+  threshold: number
+): { status: "OK" | "Low" | "Out"; colorClass: string; icon?: LucideIcon } => {
+  if (stock <= 0)
+    return { status: "Out", colorClass: "bg-red-50", icon: XCircle };
+  if (stock < threshold)
+    return { status: "Low", colorClass: "bg-yellow-50", icon: AlertTriangle };
+  return { status: "OK", colorClass: "bg-green-50", icon: CheckCircle };
 };
 
-// --- Main Component ---
-
+// --- Main ---
 const TasksAndStock = () => {
-  const [allTasks, setAllTasks] = useState(initialAllTasks);
-  const [myTasks, setMyTasks] = useState(initialMyTasks);
-  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
-  const [date, setDate] = useState<Date | undefined>(new Date());
+  const [allTasks] = useState<AllTask[]>(initialAllTasksData);
+  const [myTasks, setMyTasks] = useState<MyTask[]>(initialMyTasksData);
+  const [inventoryItems] = useState<InventoryItem[]>(initialInventoryItemsData);
 
-  // State for the "Add Task" dialog
-  const [taskType, setTaskType] = useState<string | undefined>();
-  const [supervisor, setSupervisor] = useState<string | undefined>();
-  const [plot, setPlot] = useState<string | undefined>();
-  
+  const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+
   const handleAddTask = () => {
-    // Logic to add the new task
-    const newTask = {
-      id: `t${allTasks.length + 1}`,
-      type: taskTypes.find(t => t.value === taskType)?.label || "Task",
-      task: `${taskTypes.find(t => t.value === taskType)?.label || "Task"} on ${plot}`,
-      plot: plot || "N/A",
-      supervisor: supervisors.find(s => s.id === supervisor)?.name || "N/A",
-    };
-    setAllTasks(prevTasks => [newTask, ...prevTasks]);
-    
-    // Reset form and close dialog
-    setIsTaskDialogOpen(false);
-    setTaskType(undefined);
-    setSupervisor(undefined);
-    setPlot(undefined);
-    setDate(new Date());
+    if (newTaskTitle.trim() !== "") {
+      const newTask: MyTask = {
+        id: Math.random().toString(),
+        title: newTaskTitle.trim(),
+        completed: false,
+      };
+      setMyTasks((prev) => [...prev, newTask]);
+      setNewTaskTitle("");
+      setIsAddTaskOpen(false);
+    }
   };
-  
-  const toggleMyTask = (id: string) => {
-    setMyTasks(tasks =>
-      tasks.map(task =>
-        task.id === id ? { ...task, completed: !task.completed } : task
-      )
-    );
-  };
-
-  const todoTasks = myTasks.filter(t => !t.completed);
-  const completedTasks = myTasks.filter(t => t.completed);
 
   return (
     <div className="min-h-screen bg-background">
-      
-      {/* --- Header --- */}
-      <div className="border-b border-border bg-card">
-        <div className="container mx-auto px-4 md:px-6 py-4">
-          <h1 className="text-2xl font-bold text-foreground">
-            Tasks & Stock Management
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Manage your daily farm operations and inventory.
-          </p>
-        </div>
-      </div>
-      {/* ---------------- */}
-
-      {/* --- Main Content Area --- */}
       <main className="container mx-auto p-4 md:p-6">
         <Tabs defaultValue="farm-ops" className="w-full">
-          {/* Tab Headers */}
-          <div className="flex justify-between items-center mb-4">
-            <TabsList className="grid grid-cols-2 w-[300px] md:w-[400px]">
-              <TabsTrigger value="farm-ops">Farm Operations</TabsTrigger>
-              <TabsTrigger value="my-tasks">My Tasks</TabsTrigger>
-            </TabsList>
-          </div>
+          <TabsList className="flex gap-2 mb-4">
+            <TabsTrigger value="farm-ops">Farm Operations</TabsTrigger>
+            <TabsTrigger value="my-tasks">My Tasks</TabsTrigger>
+          </TabsList>
 
-          {/* --- TAB 1: Farm Operations (Stock + All Tasks) --- */}
+          {/* FARM OPERATIONS TAB */}
           <TabsContent value="farm-ops" className="space-y-6">
-            <Card className="bg-green-100 border-green-300">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Farm Tasks</CardTitle>
-                <Dialog open={isTaskDialogOpen} onOpenChange={setIsTaskDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button className="bg-green-600 hover:bg-green-700">
-                      <Plus className="mr-2 h-4 w-4" /> Add Task
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                      <DialogTitle>Add New Task</DialogTitle>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="space-y-2">
-                        <Label>Task Type</Label>
-                        <Select value={taskType} onValueChange={setTaskType}>
-                          <SelectTrigger><SelectValue placeholder="Select task type" /></SelectTrigger>
-                          <SelectContent>
-                            {taskTypes.map(type => (
-                              <SelectItem key={type.value} value={type.value}>
-                                <div className="flex items-center gap-2">
-                                  <type.icon className="w-4 h-4" />
-                                  <span>{type.label}</span>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Supervisor</Label>
-                        <Select value={supervisor} onValueChange={setSupervisor}>
-                          <SelectTrigger><SelectValue placeholder="Select supervisor" /></SelectTrigger>
-                          <SelectContent>
-                            {supervisors.map(sup => (
-                              <SelectItem key={sup.id} value={sup.id}>
-                                <div className="flex items-center gap-2">
-                                  <Avatar className="w-6 h-6">
-                                    <AvatarImage src={sup.avatar} alt={sup.name} />
-                                    <AvatarFallback>{sup.name.charAt(0)}</AvatarFallback>
-                                  </Avatar>
-                                  <span>{sup.name}</span>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Plot Number</Label>
-                        <Select value={plot} onValueChange={setPlot}>
-                          <SelectTrigger><SelectValue placeholder="Select plot (1-24)" /></SelectTrigger>
-                          <SelectContent>
-                            {plotNumbers.map(num => (
-                              <SelectItem key={num} value={num}>{num}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Date</Label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
-                            >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {date ? format(date, "MM/dd/yyyy") : <span>Pick a date</span>}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0">
-                            <Calendar mode="single" selected={date} onSelect={setDate} initialFocus />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button onClick={handleAddTask} className="w-full bg-green-600 hover:bg-green-700">Add Task</Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </CardHeader>
-              <CardContent>
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base font-semibold flex items-center gap-2">
-                      <Package className="w-5 h-5" /> Fertilizer Stock
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="grid grid-cols-2 gap-4">
-                    <div className="bg-white p-4 rounded-lg">
-                      <p className="text-sm text-muted-foreground">Urea</p>
-                      <p className="text-2xl font-bold">500 kg</p>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg">
-                      <p className="text-sm text-muted-foreground">Manure</p>
-                      <p className="text-2xl font-bold">300 kg</p>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg">
-                      <p className="text-sm text-muted-foreground">Compost</p>
-                      <p className="text-2xl font-bold">200 kg</p>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg">
-                      <p className="text-sm text-muted-foreground">Npk</p>
-                      <p className="text-2xl font-bold">150 kg</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </CardContent>
-            </Card>
-            
+            {/* Supervisor Progress */}
             <Card>
               <CardHeader>
-                <CardTitle>All Tasks</CardTitle>
+                <CardTitle>Supervisor Progress</CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {supervisors.map((sup) => {
+                  const tasks = allTasks.filter(
+                    (t) => t.supervisorId === sup.id
+                  );
+                  const total = tasks.length;
+                  const completed = tasks.filter(
+                    (t) => t.status === "Completed"
+                  ).length;
+                  const completion =
+                    total > 0 ? Math.round((completed / total) * 100) : 0;
+                  const pending = total - completed;
+
+                  return (
+                    <Card
+                      key={sup.id}
+                      className="p-4 flex flex-col justify-between border shadow-sm hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <Avatar className="w-10 h-10">
+                          <AvatarImage src={sup.avatar} alt={sup.name} />
+                          <AvatarFallback>
+                            {sup.name
+                              .split(" ")
+                              .map((n) => n[0])
+                              .join("")}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-semibold">{sup.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {total} tasks assigned
+                          </p>
+                        </div>
+                      </div>
+                      <div className="space-y-1 mt-auto">
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>Completion</span>
+                          <span className="font-medium">{completion}%</span>
+                        </div>
+                        <Progress value={completion} className="h-2" />
+                        <div className="flex justify-between items-center text-xs pt-1">
+                          <Badge
+                            variant="outline"
+                            className="text-orange-600 border-orange-300"
+                          >
+                            Pending: {pending}
+                          </Badge>
+                          <Badge
+                            variant="default"
+                            className="bg-green-600 text-white"
+                          >
+                            Completed: {completed}
+                          </Badge>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </CardContent>
+            </Card>
+
+            {/* Stock Management */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Stock Management</CardTitle>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Task</TableHead>
-                      <TableHead>Plot</TableHead>
-                      <TableHead>Supervisor</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Stock</TableHead>
+                      <TableHead>Threshold</TableHead>
+                      <TableHead>Last Updated</TableHead>
+                      <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allTasks.map((task) => (
-                      <TableRow key={task.id}>
-                        <TableCell><TaskTypeBadge type={task.type} /></TableCell>
-                        <TableCell className="font-medium">{task.task}</TableCell>
-                        <TableCell>{task.plot}</TableCell>
-                        <TableCell>{task.supervisor}</TableCell>
-                      </TableRow>
-                    ))}
+                    {inventoryItems.map((item) => {
+                      const { status, colorClass, icon: Icon } = getStockStatus(
+                        item.stock,
+                        item.threshold
+                      );
+                      const stockPct =
+                        item.threshold > 0
+                          ? Math.min(
+                              100,
+                              (item.stock / (item.threshold * 2)) * 100
+                            )
+                          : item.stock > 0
+                          ? 100
+                          : 0;
+
+                      return (
+                        <TableRow key={item.id} className={cn(colorClass)}>
+                          <TableCell>
+                            {Icon && <Icon className="w-5 h-5" />}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {item.item}
+                          </TableCell>
+                          <TableCell>{item.category}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Progress
+                                value={stockPct}
+                                className="h-2 flex-1 bg-muted"
+                              />
+                              <span className="text-sm font-semibold w-16 text-right">
+                                {item.stock} {item.unit}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {item.threshold} {item.unit}
+                          </TableCell>
+                          <TableCell>{item.lastUpdated}</TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                <DropdownMenuItem>Edit</DropdownMenuItem>
+                                <DropdownMenuItem>Remove</DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* --- TAB 2: My Tasks (Checklist) --- */}
+          {/* MY TASKS TAB */}
           <TabsContent value="my-tasks" className="space-y-4">
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  My Tasks
-                </CardTitle>
-                <CardDescription>Manage your personal tasks</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>My Tasks</CardTitle>
+                <Dialog open={isAddTaskOpen} onOpenChange={setIsAddTaskOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="bg-green-600 hover:bg-green-700">
+                      <Plus className="h-4 w-4 mr-1" /> Add
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add New Task</DialogTitle>
+                      <DialogDescription>
+                        Enter a short title for your new task below.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <Input
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      placeholder="Task title..."
+                      className="mt-2"
+                    />
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsAddTaskOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button onClick={handleAddTask}>Add Task</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <h3 className="text-lg font-semibold mb-2">To Do ({todoTasks.length})</h3>
-                  <div className="space-y-2">
-                    {todoTasks.length > 0 ? (
-                      todoTasks.map(task => (
-                        <div key={task.id} className="flex items-start gap-3 p-4 border rounded-lg">
-                          <Checkbox
-                            id={`task-${task.id}`}
-                            // --- THIS IS THE FIX ---
-                            checked={task.completed} // Was: task.status === "completed"
-                            // -----------------------
-                            onCheckedChange={() => toggleMyTask(task.id)}
-                            className="mt-1"
-                          />
-                          <Label htmlFor={`task-${task.id}`} className="font-medium">
-                            {task.title}
-                          </Label>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No pending tasks. Great work!</p>
-                    )}
+              <CardContent>
+                {myTasks.map((task) => (
+                  <div key={task.id} className="flex items-center gap-2 py-1">
+                    <Checkbox
+                      checked={task.completed}
+                      onCheckedChange={(checked) =>
+                        setMyTasks((prev) =>
+                          prev.map((t) =>
+                            t.id === task.id ? { ...t, completed: !!checked } : t
+                          )
+                        )
+                      }
+                    />
+                    <span
+                      className={cn(
+                        "text-sm",
+                        task.completed && "line-through text-muted-foreground"
+                      )}
+                    >
+                      {task.title}
+                    </span>
                   </div>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold mb-2">Completed ({completedTasks.length})</h3>
-                  <div className="space-y-2">
-                    {completedTasks.map(task => (
-                      <div key={task.id} className="flex items-start gap-3 p-4 border rounded-lg bg-muted/50">
-                        <Checkbox
-                          id={`task-${task.id}`}
-                          checked
-                          onCheckedChange={() => toggleMyTask(task.id)}
-                          className="mt-1"
-                        />
-                        <Label
-                          htmlFor={`task-${task.id}`}
-                          className="font-medium line-through text-muted-foreground"
-                        >
-                          {task.title}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                ))}
               </CardContent>
             </Card>
           </TabsContent>
