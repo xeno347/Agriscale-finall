@@ -6,7 +6,6 @@ from app.db import PLOT_TABLE_NAME # Import the table name
 print("Attempting to initialize Boto3 DynamoDB resource...")
 
 # Boto3 will automatically look for credentials in environment variables,
-# shared credential file (~/.aws/credentials), or IAM role if on EC2/ECS.
 try:
     # Use the client for table creation operations
     dynamodb_client = boto3.client('dynamodb')
