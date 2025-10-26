@@ -1,0 +1,19 @@
+fastapi==0.111.0  # Or the specific version you are using
+uvicorn[standard]==0.29.0 # Includes standard dependencies like httptools
+pydantic==2.8.2 # Essential for data validation (Use the version compatible with your project)
+pydantic[email] # CRITICAL: Includes 'email-validator' to support EmailStr validation
+python-multipart # Needed for file uploads and form data parsing (good practice for FastAPI)
+
+# AWS Dependencies
+boto3==1.34.135 # The AWS SDK for Python (used for DynamoDB and S3)
+# botocore is a dependency of boto3, so it's usually not listed separately
+
+# Utilities
+python-dateutil==2.9.0 # Often required by Boto3 or other date libraries
+tenacity==8.2.3 # Useful for adding retry logic to database calls
+
+# Pydantic v1 vs v2 (If you used Pydantic v1, adjust the versions)
+# pydantic<2.0 # Use this if you are stuck on the old version
+
+# Optional: Add any specific versions for Decimal handling if necessary
+# simplejson==3.18.4
