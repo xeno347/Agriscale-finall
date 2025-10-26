@@ -2,49 +2,44 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom"; // Removed Navigate
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-// Import using relative paths and .tsx extension
-import AppLayout from "./components/AppLayout.tsx"; // AppLayout should contain <Outlet />
-import Index from "./pages/Index.tsx";
-import FieldMonitoring from "./pages/FieldMonitoring.tsx";
-import Supervisors from "./pages/Supervisors.tsx";
-import Settings from "./pages/Settings.tsx";
-import TasksAndStock from "./pages/TasksAndStock.tsx";
-import NotFound from "./pages/NotFound.tsx";
-import LoginPage from "./pages/Login.tsx";
+// Import using relative paths (./) and .tsx extension
+import AppLayout from "./components/AppLayout.tsx";
+import Index from "@/pages/Index.tsx";
+import FieldMonitoring from "@/pages/FieldMonitoring.tsx";
+import Supervisors from "@/pages/Supervisors.tsx";
+import Settings from "@/pages/Settings.tsx"; // <-- FIX: Corrected typo "pagesimg" to "pages"
+import TasksAndStock from "@/pages/TasksAndStock.tsx"; // <-- IMPORTED
+import NotFound from "@/pages/NotFound.tsx";
+import SupervisorTaskDetails from "@/pages/SupervisorTaskDetails.tsx";
+// Analytics and Inventory have been removed
 
 const queryClient = new QueryClient();
 
-// Removed AuthCheck / ProtectedRoutes component
-
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <BrowserRouter>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <Routes>
-          {/* Route for the Login Page */}
-          <Route path="/login" element={<LoginPage />} />
-
-          {/* --- FIX: Pass AppLayout directly to element prop --- */}
-          {/* AppLayout itself renders an <Outlet /> for its children routes */}
-          <Route element={<AppLayout />}>
-            <Route index element={<Index />} /> {/* Dashboard at "/" */}
-            <Route path="field-monitoring" element={<FieldMonitoring />} />
-            <Route path="supervisors" element={<Supervisors />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="tasks-stock" element={<TasksAndStock />} />
-            {/* Add other layout routes here */}
-          </Route>
-          {/* --------------------------------------------------- */}
-
-          {/* Catch-all Not Found Route */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </TooltipProvider>
-    </BrowserRouter>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <AppLayout>
+          <Routes>
+            <Route path="/" element={<Index />} />
+            <Route path="/field-monitoring" element={<FieldMonitoring />} />
+            <Route path="/supervisors" element={<Supervisors />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/tasks-stock" element={<TasksAndStock />} /> {/* <-- ADDED */}
+            <Route
+      path="supervisors/:supervisorId/tasks"
+      element={<SupervisorTaskDetails />}
+    />
+            {/* CATCH-ALL "*" ROUTE MUST BE LAST */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AppLayout>
+      </BrowserRouter>
+    </TooltipProvider>
   </QueryClientProvider>
 );
 

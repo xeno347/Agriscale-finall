@@ -1,6 +1,16 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom"; // Make sure Link is imported
+import {
+  getTasks,
+  getInventoryItems,
+  deleteInventoryItem,
+  getSupervisors,
+} from "@/lib/apiService";
+import type { Task, InventoryItem, Supervisor } from "@/types/api";
+import TaskCreationDialog from "@/components/TaskCreationDialog";
+
 import {
   ListTodo,
   Plus,
@@ -65,77 +75,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { LucideIcon } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // --- Data Types ---
-interface Supervisor {
-  id: string;
-  name: string;
-  avatar: string;
-}
-
-interface AllTask {
-  id: string;
-  type: string;
-  task: string;
-  plot: string;
-  supervisorId: string;
-  supervisor: string;
-  status: string;
-}
-
 interface MyTask {
   id: string;
   title: string;
   completed: boolean;
 }
-
-interface InventoryItem {
-  id: string;
-  item: string;
-  category: string;
-  stock: number;
-  unit: string;
-  threshold: number;
-  lastUpdated: string;
-}
-
-// --- Initial Data ---
-const supervisors: Supervisor[] = [
-  { id: "1", name: "Ravi Kumar", avatar: "/avatars/01.png" },
-  { id: "2", name: "Amit Patel", avatar: "/avatars/02.png" },
-  { id: "3", name: "Suresh Singh", avatar: "/avatars/03.png" },
-  { id: "4", name: "Priya Sharma", avatar: "/avatars/04.png" },
-];
-
-const initialAllTasksData: AllTask[] = [
-  {
-    id: "t1",
-    type: "Inspection",
-    task: "Weekly pest inspection",
-    plot: "Plot 5",
-    supervisorId: "1",
-    supervisor: "Ravi Kumar",
-    status: "Pending",
-  },
-  {
-    id: "t2",
-    type: "Harvest",
-    task: "Harvest wheat",
-    plot: "Plot 12",
-    supervisorId: "2",
-    supervisor: "Amit Patel",
-    status: "In Progress",
-  },
-  {
-    id: "t3",
-    type: "Fertilizer",
-    task: "Apply NPK",
-    plot: "Plot 4",
-    supervisorId: "4",
-    supervisor: "Priya Sharma",
-    status: "Pending",
-  },
-];
 
 const initialMyTasksData: MyTask[] = [
   {
@@ -147,45 +94,6 @@ const initialMyTasksData: MyTask[] = [
     id: "m2",
     title: "Review all pending farm tasks for the week",
     completed: false,
-  },
-];
-
-const initialInventoryItemsData: InventoryItem[] = [
-  {
-    id: "1",
-    item: "Nitrogen Fertilizer",
-    category: "Fertilizers",
-    stock: 85,
-    unit: "kg",
-    threshold: 20,
-    lastUpdated: "2025-10-20",
-  },
-  {
-    id: "2",
-    item: "Phosphate",
-    category: "Fertilizers",
-    stock: 42,
-    unit: "kg",
-    threshold: 15,
-    lastUpdated: "2025-10-18",
-  },
-  {
-    id: "3",
-    item: "Tractor Oil",
-    category: "Equipment",
-    stock: 5,
-    unit: "L",
-    threshold: 10,
-    lastUpdated: "2025-09-30",
-  },
-  {
-    id: "4",
-    item: "Herbicide B",
-    category: "Pesticides",
-    stock: 0,
-    unit: "L",
-    threshold: 5,
-    lastUpdated: "2025-09-15",
   },
 ];
 
@@ -203,14 +111,56 @@ const getStockStatus = (
 
 // --- Main ---
 const TasksAndStock = () => {
-  const [allTasks] = useState<AllTask[]>(initialAllTasksData);
+  // API State
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [myTasks, setMyTasks] = useState<MyTask[]>(initialMyTasksData);
-  const [inventoryItems] = useState<InventoryItem[]>(initialInventoryItemsData);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
+  // My Tasks Dialog State
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
 
-  const handleAddTask = () => {
+  // Data Fetching
+  // --- Data Fetching ---
+  const loadData = useCallback(async () => {
+    // Only set loading true on initial load
+    // REMOVED setIsLoading(true) from here to avoid loops
+
+    setError(null);
+    try {
+      const [tasksData, inventoryData, supervisorsData] = await Promise.all([
+        getTasks(),
+        getInventoryItems(),
+        getSupervisors(),
+      ]);
+
+      setAllTasks(tasksData);
+      setInventoryItems(inventoryData);
+      setSupervisors(supervisorsData);
+    } catch (err) {
+      console.error("Failed to fetch data:", err);
+      setError("Failed to load farm data. Please try again.");
+    } finally {
+      // Set loading false outside, in the useEffect
+    }
+  // --- CORRECTED: Empty dependency array ---
+  }, []); // loadData itself doesn't depend on changing state
+
+  useEffect(() => {
+    // --- CORRECTED: Standard pattern for single initial load ---
+    setIsLoading(true); // Set loading true *before* calling loadData
+    loadData().finally(() => {
+        setIsLoading(false); // Set loading false *after* loadData completes/fails
+    });
+  // --- CORRECTED: useEffect depends only on the stable loadData function ---
+  }, [loadData]); // Runs once on mount because loadData is stable
+  // --- END CHANGED ---\
+  
+  // Handlers
+  const handleAddTask = () => { // For "My Tasks"
     if (newTaskTitle.trim() !== "") {
       const newTask: MyTask = {
         id: Math.random().toString(),
@@ -223,6 +173,42 @@ const TasksAndStock = () => {
     }
   };
 
+  const handleRemoveInventoryItem = async (itemId: string) => {
+    if (!window.confirm("Are you sure you want to delete this item?")) {
+      return;
+    }
+    try {
+      await deleteInventoryItem(itemId);
+      setInventoryItems((prev) => prev.filter((item) => item.id !== itemId));
+    } catch (err) {
+      console.error("Failed to delete item:", err);
+      alert("Failed to delete item.");
+    }
+  };
+
+  // --- Render States ---
+  if (isLoading) {
+    return (
+      <div className="container mx-auto p-4 md:p-6 space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-48 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-4 md:p-6 text-center text-red-600">
+        <AlertTriangle className="mx-auto h-12 w-12" />
+        <h2 className="mt-4 text-xl font-semibold">{error}</h2>
+        {/* Added a button to retry fetching data */}
+        <Button onClick={() => {setIsLoading(true); loadData();}} variant="outline" className="mt-4">Try Again</Button>
+      </div>
+    );
+  }
+
+  // --- Main Render ---
   return (
     <div className="min-h-screen bg-background">
       <main className="container mx-auto p-4 md:p-6">
@@ -235,71 +221,65 @@ const TasksAndStock = () => {
           {/* FARM OPERATIONS TAB */}
           <TabsContent value="farm-ops" className="space-y-6">
             {/* Supervisor Progress */}
-            <Card>
-              <CardHeader>
+            <Card> {/* This Card wraps the Supervisor section */}
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Supervisor Progress</CardTitle>
+                {/* Pass loadData to refresh list after creation */}
+                <TaskCreationDialog onTaskCreated={loadData} />
               </CardHeader>
               <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {supervisors.map((sup) => {
-                  const tasks = allTasks.filter(
-                    (t) => t.supervisorId === sup.id
-                  );
+                  // Calculations...
+                  const tasks = allTasks.filter((t) => t.supervisor_id === sup.id);
                   const total = tasks.length;
-                  const completed = tasks.filter(
-                    (t) => t.status === "Completed"
-                  ).length;
-                  const completion =
-                    total > 0 ? Math.round((completed / total) * 100) : 0;
+                  const completed = tasks.filter((t) => t.status.toLowerCase() === "completed").length;
+                  const completion = total > 0 ? Math.round((completed / total) * 100) : 0;
                   const pending = total - completed;
+                  const initials = sup.name.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase();
 
+                  // Link wrapping the individual supervisor card
                   return (
-                    <Card
-                      key={sup.id}
-                      className="p-4 flex flex-col justify-between border shadow-sm hover:shadow-md transition-shadow"
+                    <Link
+                      key={sup.id} // Key on Link
+                      to={`/supervisors/${sup.id}/tasks`}
+                      className="block rounded-lg transition-shadow hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                     >
-                      <div className="flex items-center gap-3 mb-3">
-                        <Avatar className="w-10 h-10">
-                          <AvatarImage src={sup.avatar} alt={sup.name} />
-                          <AvatarFallback>
-                            {sup.name
-                              .split(" ")
-                              .map((n) => n[0])
-                              .join("")}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-semibold">{sup.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {total} tasks assigned
-                          </p>
+                      {/* This is the individual Card for the supervisor */}
+                      <Card className="p-4 flex flex-col justify-between border shadow-sm h-full cursor-pointer">
+                        {/* Card Header Content */}
+                        <div className="flex items-center gap-3 mb-3">
+                          <Avatar className="w-10 h-10">
+                            <AvatarFallback>{initials}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="font-semibold">{sup.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {total} {total === 1 ? 'task' : 'tasks'} assigned
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                      <div className="space-y-1 mt-auto">
-                        <div className="flex justify-between text-xs text-muted-foreground">
-                          <span>Completion</span>
-                          <span className="font-medium">{completion}%</span>
+                        {/* Card Footer Content */}
+                        <div className="space-y-1 mt-auto">
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Completion</span>
+                            <span className="font-medium">{completion}%</span>
+                          </div>
+                          <Progress value={completion} className="h-2" />
+                          <div className="flex justify-between items-center text-xs pt-1">
+                            <Badge variant="outline" className="text-orange-600 border-orange-300">
+                              Pending: {pending}
+                            </Badge>
+                            <Badge variant="default" className="bg-green-600 text-white">
+                              Completed: {completed}
+                            </Badge>
+                          </div>
                         </div>
-                        <Progress value={completion} className="h-2" />
-                        <div className="flex justify-between items-center text-xs pt-1">
-                          <Badge
-                            variant="outline"
-                            className="text-orange-600 border-orange-300"
-                          >
-                            Pending: {pending}
-                          </Badge>
-                          <Badge
-                            variant="default"
-                            className="bg-green-600 text-white"
-                          >
-                            Completed: {completed}
-                          </Badge>
-                        </div>
-                      </div>
-                    </Card>
-                  );
+                      </Card> {/* <<< Closing tag for the individual supervisor Card */}
+                    </Link> // <<< Closing tag for the Link
+                  ); // End return for map
                 })}
-              </CardContent>
-            </Card>
+              </CardContent> {/* <<< Closing tag for CardContent */}
+            </Card> {/* <<< Closing tag for the outer Card wrapping Supervisor Progress */}
 
             {/* Stock Management */}
             <Card>
@@ -321,44 +301,25 @@ const TasksAndStock = () => {
                   </TableHeader>
                   <TableBody>
                     {inventoryItems.map((item) => {
-                      const { status, colorClass, icon: Icon } = getStockStatus(
-                        item.stock,
-                        item.threshold
-                      );
-                      const stockPct =
-                        item.threshold > 0
-                          ? Math.min(
-                              100,
-                              (item.stock / (item.threshold * 2)) * 100
-                            )
-                          : item.stock > 0
-                          ? 100
-                          : 0;
+                      const { status, colorClass, icon: Icon } = getStockStatus(item.stock, item.threshold);
+                      const stockPct = item.threshold > 0 ? Math.min(100, (item.stock / (item.threshold * 2)) * 100) : item.stock > 0 ? 100 : 0;
+                      const lastUpdatedFormatted = item.last_updated ? format(new Date(item.last_updated), "yyyy-MM-dd") : "N/A";
 
                       return (
                         <TableRow key={item.id} className={cn(colorClass)}>
-                          <TableCell>
-                            {Icon && <Icon className="w-5 h-5" />}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {item.item}
-                          </TableCell>
+                          <TableCell>{Icon && <Icon className="w-5 h-5" />}</TableCell>
+                          <TableCell className="font-medium">{item.item}</TableCell>
                           <TableCell>{item.category}</TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <Progress
-                                value={stockPct}
-                                className="h-2 flex-1 bg-muted"
-                              />
+                              <Progress value={stockPct} className="h-2 flex-1 bg-muted" />
                               <span className="text-sm font-semibold w-16 text-right">
                                 {item.stock} {item.unit}
                               </span>
                             </div>
                           </TableCell>
-                          <TableCell>
-                            {item.threshold} {item.unit}
-                          </TableCell>
-                          <TableCell>{item.lastUpdated}</TableCell>
+                          <TableCell>{item.threshold} {item.unit}</TableCell>
+                          <TableCell>{lastUpdatedFormatted}</TableCell>
                           <TableCell className="text-right">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -369,7 +330,9 @@ const TasksAndStock = () => {
                               <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                 <DropdownMenuItem>Edit</DropdownMenuItem>
-                                <DropdownMenuItem>Remove</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleRemoveInventoryItem(item.id)} className="text-red-600">
+                                  Remove
+                                </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>
@@ -407,10 +370,7 @@ const TasksAndStock = () => {
                       className="mt-2"
                     />
                     <DialogFooter>
-                      <Button
-                        variant="outline"
-                        onClick={() => setIsAddTaskOpen(false)}
-                      >
+                      <Button variant="outline" onClick={() => setIsAddTaskOpen(false)}>
                         Cancel
                       </Button>
                       <Button onClick={handleAddTask}>Add Task</Button>
@@ -431,12 +391,7 @@ const TasksAndStock = () => {
                         )
                       }
                     />
-                    <span
-                      className={cn(
-                        "text-sm",
-                        task.completed && "line-through text-muted-foreground"
-                      )}
-                    >
+                    <span className={cn("text-sm", task.completed && "line-through text-muted-foreground")}>
                       {task.title}
                     </span>
                   </div>
