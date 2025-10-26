@@ -6,7 +6,7 @@ import {
   Settings,
   LogOut,
   Sprout,
-  ListTodo, // Icon for Tasks & Stock
+  ListTodo,// Icon for Tasks & Stock
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
@@ -28,6 +28,7 @@ const menuItems = [
   { title: "Field Monitoring", url: "/field-monitoring", icon: Activity },
   { title: "Tasks & Stock", url: "/tasks-stock", icon: ListTodo },
   { title: "System Settings", url: "/settings", icon: Settings },
+
 ];
 
 export function AppSidebar() {

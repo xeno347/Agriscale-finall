@@ -10,18 +10,33 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Supervisor } from "@/pages/Supervisors";
+// UPDATED: Import the correct type from the API types file
+import type { Supervisor } from "@/types/api";
 
 interface SupervisorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (supervisor: Supervisor) => void;
+  // This prop now expects the form data
+  onSave: (
+    data: Omit<Supervisor, "id"> & {
+      name: string;
+      email: string;
+      phone: string;
+      assigned_plots: string[];
+    }
+  ) => void;
   supervisor: Supervisor | null;
 }
 
 const availablePlots = [
-  "Plot A", "Plot B", "Plot C", "Plot D", 
-  "Plot E", "Plot F", "Plot G", "Plot H"
+  "Plot A",
+  "Plot B",
+  "Plot C",
+  "Plot D",
+  "Plot E",
+  "Plot F",
+  "Plot G",
+  "Plot H",
 ];
 
 export const SupervisorDialog = ({
@@ -34,7 +49,7 @@ export const SupervisorDialog = ({
     name: "",
     email: "",
     phone: "",
-    assignedPlots: [] as string[],
+    assigned_plots: [] as string[], // UPDATED: to snake_case
   });
 
   useEffect(() => {
@@ -43,32 +58,32 @@ export const SupervisorDialog = ({
         name: supervisor.name,
         email: supervisor.email,
         phone: supervisor.phone,
-        assignedPlots: supervisor.assignedPlots,
+        assigned_plots: supervisor.assigned_plots, // UPDATED: to snake_case
       });
     } else {
+      // Reset for "Add New"
       setFormData({
         name: "",
         email: "",
         phone: "",
-        assignedPlots: [],
+        assigned_plots: [],
       });
     }
-  }, [supervisor]);
+  }, [supervisor, open]); // Added 'open' to reset form when re-opened
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({
-      id: supervisor?.id || "",
-      ...formData,
-    });
+    // onSave passes the raw form data up to the parent
+    onSave(formData);
   };
 
   const togglePlot = (plot: string) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      assignedPlots: prev.assignedPlots.includes(plot)
-        ? prev.assignedPlots.filter(p => p !== plot)
-        : [...prev.assignedPlots, plot],
+      // UPDATED: to snake_case
+      assigned_plots: prev.assigned_plots.includes(plot)
+        ? prev.assigned_plots.filter((p) => p !== plot)
+        : [...prev.assigned_plots, plot],
     }));
   };
 
@@ -91,7 +106,9 @@ export const SupervisorDialog = ({
               <Input
                 id="name"
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
                 required
               />
             </div>
@@ -102,7 +119,9 @@ export const SupervisorDialog = ({
                 id="email"
                 type="email"
                 value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, email: e.target.value })
+                }
                 required
               />
             </div>
@@ -113,7 +132,9 @@ export const SupervisorDialog = ({
                 id="phone"
                 type="tel"
                 value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, phone: e.target.value })
+                }
                 required
               />
             </div>
@@ -126,7 +147,8 @@ export const SupervisorDialog = ({
                 <div key={plot} className="flex items-center space-x-2">
                   <Checkbox
                     id={plot}
-                    checked={formData.assignedPlots.includes(plot)}
+                    // UPDATED: to snake_case
+                    checked={formData.assigned_plots.includes(plot)}
                     onCheckedChange={() => togglePlot(plot)}
                   />
                   <label
@@ -141,7 +163,11 @@ export const SupervisorDialog = ({
           </div>
 
           <div className="flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
               Cancel
             </Button>
             <Button type="submit">

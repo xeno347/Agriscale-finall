@@ -12,6 +12,7 @@ import Supervisors from "./pages/Supervisors.tsx";
 import Settings from "./pages/Settings.tsx"; // <-- FIX: Corrected typo "pagesimg" to "pages"
 import TasksAndStock from "./pages/TasksAndStock.tsx"; // <-- IMPORTED
 import NotFound from "./pages/NotFound.tsx";
+import SupervisorTaskDetails from "./pages/SupervisorTaskDetails";
 // Analytics and Inventory have been removed
 
 const queryClient = new QueryClient();
@@ -29,7 +30,10 @@ const App = () => (
             <Route path="/supervisors" element={<Supervisors />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/tasks-stock" element={<TasksAndStock />} /> {/* <-- ADDED */}
-
+            <Route
+      path="supervisors/:supervisorId/tasks"
+      element={<SupervisorTaskDetails />}
+    />
             {/* CATCH-ALL "*" ROUTE MUST BE LAST */}
             <Route path="*" element={<NotFound />} />
           </Routes>
