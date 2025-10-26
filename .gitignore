@@ -1,24 +1,49 @@
-# Logs
-logs
+# ----------------------------------------------------
+# Combined .gitignore for AgriScale Monorepo (FE/BE)
+# ----------------------------------------------------
+
+# --- 1. Dependencies and Environment Directories ---
+/node_modules
+/agriscale_backend/venv/  # Python Virtual Environment
+.pnp
+.pnp.js
+
+# --- 2. Build and Distribution Outputs ---
+/dist                   # JavaScript/TypeScript build output
+/dist-ssr
+/build                  # React/Frontend build output
+/out                    # Next.js/Vercel build outputs (just in case)
+
+# --- 3. Logs, Temp Files, and Debug ---
+logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
+npm-debug.log* # npm logs
+yarn-debug.log* # yarn logs
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+coverage/               # Test coverage reports
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
+# --- 4. Operating System and Editor Files ---
+.DS_Store               # macOS files
+.idea/                  # IntelliJ/PyCharm project files
+.vscode/* # VS Code configuration directory
+!.vscode/extensions.json # KEEP this specific file for team settings
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# --- 5. Local Environment and Credentials ---
+.env                    # Generic environment file
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem                   # Private key files
+
+# --- 6. Python/FastAPI Specific ---
+__pycache__/
+*.pyc
+.pytest_cache
