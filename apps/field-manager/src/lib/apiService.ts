@@ -101,3 +101,8 @@ export const createPlot = async (plotData: PlotCreate): Promise<Plot> => { // <-
   const response = await api.post<Plot>("/plots/", plotData);
   return response.data;
 };
+
+export const getSupervisorPhotoUrl = async (fileKey: string): Promise<string> => {
+    const response = await api.get<string>(`/s3/get-photo-url?file_key=${fileKey}`);
+    return response.data;
+};

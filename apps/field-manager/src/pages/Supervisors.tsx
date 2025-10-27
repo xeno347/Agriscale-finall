@@ -2,18 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, User, MapPin, Trash2, Edit, AlertTriangle } from "lucide-react";
 import { SupervisorDialog } from "@/components/SupervisorDialog";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 // API and Type Imports
 import {
@@ -21,6 +16,7 @@ import {
   createSupervisor,
   updateSupervisor,
   deleteSupervisor,
+  getSupervisorPhotoUrl,
 } from "@/lib/apiService";
 import type {
   Supervisor,
@@ -28,6 +24,50 @@ import type {
   SupervisorUpdate,
 } from "@/types/api";
 
+// --- New Component: Handles fetching and displaying the secure image ---
+interface SecureAvatarProps {
+    supervisor: Supervisor;
+    initials: string;
+}
+
+const SecureSupervisorAvatar: React.FC<SecureAvatarProps> = ({ supervisor, initials }) => {
+    const [secureUrl, setSecureUrl] = useState<string | null>(null);
+    
+    // Get the photo URL from the supervisor object (type cast is necessary)
+    const photoStaticUrl = (supervisor as any).photo_url;
+    
+    // Logic to extract fileKey from the static URL saved in the database
+    // Assumes the URL format: https://bucket.s3.region.amazonaws.com/KEY
+    const fileKey = photoStaticUrl 
+        ? photoStaticUrl.split('.com/')[1] // Extracts the path (KEY) after the S3 domain
+        : null;
+
+    useEffect(() => {
+        // Fetch the secure URL only if a photo URL exists and we haven't fetched the secure URL yet
+        if (fileKey && !secureUrl) {
+            getSupervisorPhotoUrl(fileKey)
+                .then(url => setSecureUrl(url))
+                .catch(err => {
+                    console.error("Failed to fetch secure URL:", err);
+                    setSecureUrl(null); 
+                });
+        }
+    }, [fileKey, secureUrl]); 
+
+    return (
+        <> 
+            {/* CRITICAL: Display AvatarImage or AvatarFallback */}
+            {secureUrl ? (
+                <AvatarImage src={secureUrl} alt={supervisor.name} />
+            ) : (
+                <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                    {initials}
+                </AvatarFallback>
+            )}
+        </>
+    );
+}
+// ----------------------------------------------------------------------
 const Supervisors = () => {
   // --- API State ---
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
@@ -43,8 +83,6 @@ const Supervisors = () => {
   // --- Data Fetching ---
   const loadSupervisors = useCallback(async () => {
     try {
-      // Don't set loading to true on refetch, only on initial load
-      // setIsLoading(true);
       setError(null);
       const data = await getSupervisors();
       setSupervisors(data);
@@ -63,34 +101,22 @@ const Supervisors = () => {
 
   // --- API Handlers ---
   const handleSave = async (
-    // This data comes from the dialog's form
-    formData: Omit<Supervisor, "id" | "email" | "phone"> & {
-      name: string;
-      email: string;
-      phone: string;
-      assigned_plots: string[];
-    }
+    formData: SupervisorCreate | SupervisorUpdate,
+    supervisorId?: string
   ) => {
-    const supervisorData: SupervisorCreate = {
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      assigned_plots: formData.assigned_plots,
-      // field_manager_id can be added if needed
-    };
-
     try {
-      if (editingSupervisor) {
+      if (supervisorId) {
         // UPDATE logic
-        await updateSupervisor(editingSupervisor.id, supervisorData);
+        await updateSupervisor(supervisorId, formData);
         toast.success("Supervisor updated successfully!");
       } else {
         // CREATE logic
-        await createSupervisor(supervisorData);
+        await createSupervisor(formData as SupervisorCreate);
         toast.success("Supervisor created successfully!");
       }
       loadSupervisors(); // Refetch the list
-      handleDialogClose(); // Close the dialog
+      setDialogOpen(false); // Close the dialog
+      setEditingSupervisor(null);
     } catch (err) {
       console.error("Failed to save supervisor:", err);
       toast.error("Failed to save supervisor.");
@@ -127,9 +153,10 @@ const Supervisors = () => {
     setEditingSupervisor(null);
   };
 
-  // --- Render Loading State ---
+  // --- Render Loading/Error States (same as before) ---
   if (isLoading) {
-    return (
+    // ... (Loading state rendering)
+     return (
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <Skeleton className="h-10 w-64" />
@@ -144,8 +171,8 @@ const Supervisors = () => {
     );
   }
 
-  // --- Render Error State ---
   if (error) {
+    // ... (Error state rendering)
     return (
       <div className="p-6 space-y-6 text-center text-red-600">
         <AlertTriangle className="mx-auto h-12 w-12" />
@@ -157,39 +184,85 @@ const Supervisors = () => {
 
   // --- Render Main Content ---
   return (
+
     <div className="p-6 space-y-6">
+
       <div className="flex items-center justify-between">
+
         <div>
+
           <h1 className="text-3xl font-bold tracking-tight">Supervisors</h1>
+
           <p className="text-muted-foreground mt-1">
+
             Manage supervisors and assign plots for monitoring
+
           </p>
+
         </div>
+
         <Button onClick={handleAddNew}>
+
           <Plus className="mr-2 h-4 w-4" />
+
           Add Supervisor
+
         </Button>
+
       </div>
 
+      
+
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+
         {supervisors.map((supervisor) => {
+
           const initials = supervisor.name
+
             .split(" ")
+
             .map((n) => n[0])
+
             .join("")
+
             .substring(0, 2)
+
             .toUpperCase();
 
+            
+
+          // Get the photo URL if it exists (assuming it's named photo_url in the DB response)
+
+          const photoUrl = (supervisor as any).photo_url;
+
           return (
-            <Card key={supervisor.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-full bg-primary/10 flex items-center justify-center h-10 w-10">
-                      <span className="font-semibold text-primary">
-                        {initials}
-                      </span>
-                    </div>
+
+    <Card key={supervisor.id}>
+
+      <CardHeader>
+
+        <div className="flex items-start justify-between">
+
+          <div className="flex items-center gap-3">
+
+            
+
+            {/* --- FIX: Use a div to define a fixed, structured space for the Avatar --- */}
+
+            <div className="flex-shrink-0 w-10 h-10"> 
+
+                {/* Avatar wrapper provides sizing and overflow control */}
+
+                <Avatar className="w-full h-full"> 
+
+                    <SecureSupervisorAvatar supervisor={supervisor} initials={initials} />
+
+                </Avatar>
+
+            </div>
+
+            {/* --- END FIX --- */}
+                    
                     <div>
                       <CardTitle className="text-lg">
                         {supervisor.name}
@@ -225,7 +298,6 @@ const Supervisors = () => {
                     <MapPin className="h-4 w-4" />
                     Assigned Plots
                   </div>
-                  {/* UPDATED: from assignedPlots to assigned_plots */}
                   {supervisor.assigned_plots.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {supervisor.assigned_plots.map((plot) => (
@@ -246,7 +318,6 @@ const Supervisors = () => {
         })}
       </div>
 
-      {/* This dialog now correctly passes the API handler */}
       <SupervisorDialog
         open={dialogOpen}
         onOpenChange={handleDialogClose}

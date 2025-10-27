@@ -48,6 +48,7 @@ export interface Supervisor {
   phone: string;
   assigned_plots: string[];
   field_manager_id?: string | null;
+  photo_url?: string | null;
 }
 
 export interface SupervisorCreate {
@@ -56,6 +57,7 @@ export interface SupervisorCreate {
   phone: string;
   assigned_plots: string[];
   field_manager_id?: string | null;
+  photo_url?: string | null;
 }
 
 // Based on schemas.SupervisorUpdate
@@ -64,6 +66,7 @@ export interface SupervisorUpdate {
   email?: string | null;
   phone?: string | null;
   assigned_plots?: string[] | null;
+  photo_url?: string | null;
 }
 
 // src/types/api.ts
