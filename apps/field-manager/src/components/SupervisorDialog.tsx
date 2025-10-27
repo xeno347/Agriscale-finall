@@ -1,3 +1,4 @@
+// apps/field-manager/src/components/SupervisorDialog.tsx
 import { useState, useEffect } from "react";
 import {
   Dialog,
@@ -12,12 +13,14 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Loader2, Camera } from "lucide-react";
-import axios from "axios"; // CRITICAL: Import axios for S3 upload
+import axios from "axios";
 import type { Supervisor, SupervisorCreate, SupervisorUpdate } from "@/types/api";
 
-// --- S3 Configuration and API Calls ---
-const API_BASE_URL = "http://localhost:8000";
+// <<< CRITICAL FIX: Import S3 configuration and Base URL from the centralized file >>>
+import { AWS_REGION, S3_BUCKET_NAME, FASTAPI_BASE_URL } from "@/lib/baseurl"; 
 
+// --- S3 Configuration and API Calls ---
+// The centralized FASTAPI_BASE_URL is now used below
 interface UploadResponse {
     upload_url: string;
     file_key: string;
@@ -26,23 +29,18 @@ interface UploadResponse {
 
 const generateUploadUrl = async (fileName: string, fileType: string): Promise<UploadResponse> => {
     const response = await axios.post<UploadResponse>(
-        `${API_BASE_URL}/s3/generate-upload-url`,
+        // FIXED: Using centralized FASTAPI_BASE_URL
+        `${FASTAPI_BASE_URL}/s3/generate-upload-url`, 
         { file_name: fileName, file_type: fileType }
     );
-    // Note: The response is adjusted here to provide the direct URL and fields expected for a POST upload
     return response.data;
 };
-
-// --- Dummy Config (Adjust to match your S3 region and bucket) ---
-const AWS_REGION = 'us-east-1'; // Use your actual AWS region
-const S3_BUCKET_NAME = 'your-agriscale-photo-bucket-name'; // Use your actual bucket name
-// ------------------------------------
+// --- END CRITICAL FIX SECTION ---
 
 
 interface SupervisorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  // This prop now expects the form data including the photo URL
   onSave: (
     data: SupervisorCreate | SupervisorUpdate,
     supervisorId?: string
@@ -67,7 +65,7 @@ export const SupervisorDialog = ({
     phone: "",
     assigned_plots: [],
     photo_url: null, // New field for the S3 URL
-  } as SupervisorCreate); // Start with SupervisorCreate defaults
+  } as SupervisorCreate);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -107,7 +105,7 @@ export const SupervisorDialog = ({
       if (selectedFile) {
         toast.info("Uploading photo to S3...");
         
-        // A. Get the presigned POST data from FastAPI
+        // A. Get the presigned URL and key from FastAPI
         const { upload_url, fields, file_key } = await generateUploadUrl(
           selectedFile.name,
           selectedFile.type
@@ -115,23 +113,20 @@ export const SupervisorDialog = ({
         
         // B. Prepare FormData for direct S3 upload
         const s3FormData = new FormData();
-        // Add all required policy fields first
         Object.entries(fields).forEach(([key, value]) => {
             s3FormData.append(key, value);
         });
-        // Add the file last (S3 expects the file to be appended with key 'file')
         s3FormData.append('file', selectedFile); 
 
         // C. Upload file directly to S3 URL
         await axios.post(upload_url, s3FormData, {
             headers: {
-                // Ensure proper content type for S3 form upload
                 'Content-Type': 'multipart/form-data', 
             },
         });
         
         // D. Construct the final public URL to save in DynamoDB
-        // Standard S3 public URL format using the file_key returned by our backend
+        // FIXED: Uses the centralized constants for robustness
         finalPhotoUrl = `https://${S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${file_key}`; 
         
         toast.success("Photo uploaded successfully!");
@@ -141,13 +136,12 @@ export const SupervisorDialog = ({
       // 2. Finalize Form Data for DynamoDB Submission
       const finalData: SupervisorCreate | SupervisorUpdate = {
           ...formData,
-          photo_url: finalPhotoUrl, // Include the new or existing URL
+          photo_url: finalPhotoUrl,
       };
 
       // 3. Submit to FastAPI Supervisor Endpoint
       onSave(finalData, supervisor?.id);
       
-      // onSave handles closing the dialog, we just clear the file state
       setSelectedFile(null);
 
     } catch (error: any) {
@@ -160,7 +154,6 @@ export const SupervisorDialog = ({
   };
 
   const togglePlot = (plot: string) => {
-    // Cast formData to access assigned_plots safely
     const currentPlots = (formData as SupervisorCreate).assigned_plots || [];
 
     setFormData(prev => ({

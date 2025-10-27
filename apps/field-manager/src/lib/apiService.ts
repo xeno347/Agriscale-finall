@@ -1,18 +1,29 @@
-// src/lib/apiService.ts
+// apps/field-manager/src/lib/apiService.ts
 import axios from "axios";
-import { Task, TaskCreate, TaskUpdate, InventoryItem, Supervisor, SupervisorCreate, // <-- ADD
-  SupervisorUpdate,Plot,         // <-- ADD THIS
-  PlotCreate,} from "@/types/api";
+import { 
+  Task, 
+  TaskCreate, 
+  TaskUpdate, 
+  InventoryItem, 
+  Supervisor, 
+  SupervisorCreate, 
+  SupervisorUpdate,
+  Plot, 
+  PlotCreate 
+} from "@/types/api";
+
+// CRITICAL FIX: Import base URL constants
+import { FASTAPI_BASE_URL } from "./baseurl"; 
 
 // Create an 'instance' of axios with the base URL of your FastAPI backend
 const api = axios.create({
-  baseURL: "http://localhost:8000", // Your FastAPI server URL
+  baseURL: FASTAPI_BASE_URL, // <<< FIXED: Uses the imported constant
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// --- Task Functions (based on your tasks.py) ---
+// --- Task Functions ---
 
 /** Fetches all tasks */
 export const getTasks = async (): Promise<Task[]> => {
@@ -41,8 +52,7 @@ export const deleteTask = async (taskId: string): Promise<void> => {
   await api.delete(`/tasks/${taskId}`);
 };
 
-// --- Inventory Functions (assuming routes from your main.py) ---
-// (We assume your inventory.py has a prefix of '/inventory')
+// --- Inventory Functions ---
 
 /** Fetches all inventory items */
 export const getInventoryItems = async (): Promise<InventoryItem[]> => {
@@ -55,7 +65,7 @@ export const deleteInventoryItem = async (itemId: string): Promise<void> => {
   await api.delete(`/inventory/${itemId}`);
 };
 
-// Add other functions for supervisors, etc. as needed
+// --- Supervisor Functions ---
 
 export const getSupervisors = async (): Promise<Supervisor[]> => {
   const response = await api.get<Supervisor[]>("/supervisors/");
@@ -90,18 +100,21 @@ export const deleteSupervisor = async (id: string): Promise<void> => {
   await api.delete(`/supervisors/${id}`);
 };
 
+// --- Plot Functions ---
+
 /** Fetches all plots */
-export const getPlots = async (): Promise<Plot[]> => { // <-- Make sure 'export' is here
+export const getPlots = async (): Promise<Plot[]> => { 
   const response = await api.get<Plot[]>("/plots/");
   return response.data;
 };
 
 /** Creates a new plot */
-export const createPlot = async (plotData: PlotCreate): Promise<Plot> => { // <-- Make sure 'export' is here
+export const createPlot = async (plotData: PlotCreate): Promise<Plot> => { 
   const response = await api.post<Plot>("/plots/", plotData);
   return response.data;
 };
 
+/** Fetches a secure, temporary URL for viewing a private S3 image. */
 export const getSupervisorPhotoUrl = async (fileKey: string): Promise<string> => {
     const response = await api.get<string>(`/s3/get-photo-url?file_key=${fileKey}`);
     return response.data;
