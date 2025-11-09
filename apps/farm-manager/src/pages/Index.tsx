@@ -1,9 +1,10 @@
 import { PageLayout } from "@/components/dashboard/PageLayout";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { RegionalCard } from "@/components/dashboard/RegionalCard";
-import { ActivityItem } from "@/components/dashboard/ActivityItem";
+import { TaskTimeline } from "@/components/dashboard/TaskTimeline"; // <-- 1. IMPORT new component
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, MapPin, TrendingUp, Wallet, CheckCircle, AlertTriangle, UserPlus, Target } from "lucide-react";
+import { Users, MapPin, TrendingUp, Wallet } from "lucide-react";
+// ActivityItem and its icons are no longer needed
 
 const Index = () => {
   return (
@@ -18,7 +19,7 @@ const Index = () => {
             </p>
           </div>
 
-          {/* Stats Grid */}
+          {/* Stats Grid (Remains the same) */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <StatCard
               title="Total Field Managers"
@@ -46,13 +47,20 @@ const Index = () => {
             />
           </div>
 
+          {/* 2. UPDATED LAYOUT: Timeline is now lg:col-span-2 (main) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Regional Performance */}
+            
+            {/* Main Column: Daily Task Timeline */}
             <div className="lg:col-span-2">
+              <TaskTimeline />
+            </div>
+
+            {/* Side Column: Regional Performance */}
+            <div>
               <Card className="border-border">
                 <CardHeader>
                   <CardTitle className="text-xl font-semibold">
-                    Regional Performance Overview
+                    Regional Performance
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -87,43 +95,6 @@ const Index = () => {
                     acres={350}
                     yieldPercentage={70}
                     alerts={7}
-                  />
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Recent Activities */}
-            <div>
-              <Card className="border-border">
-                <CardHeader>
-                  <CardTitle className="text-xl font-semibold">
-                    Recent Activities
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="divide-y divide-border">
-                  <ActivityItem
-                    icon={CheckCircle}
-                    title="North Zone wheat harvest completed"
-                    time="2 hours ago"
-                    variant="success"
-                  />
-                  <ActivityItem
-                    icon={AlertTriangle}
-                    title="East Zone requires immediate attention"
-                    time="4 hours ago"
-                    variant="warning"
-                  />
-                  <ActivityItem
-                    icon={UserPlus}
-                    title="New Field Manager assigned to Central Zone"
-                    time="1 day ago"
-                    variant="info"
-                  />
-                  <ActivityItem
-                    icon={Target}
-                    title="South Zone exceeded yield targets"
-                    time="2 days ago"
-                    variant="success"
                   />
                 </CardContent>
               </Card>

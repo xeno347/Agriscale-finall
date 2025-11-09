@@ -1,4 +1,3 @@
-// src/pages/FieldMonitoring.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -178,7 +177,6 @@ const FieldMonitoring = () => {
       </div>
     );
   }
-
   // --- Main Render ---
   return (
     <div className="min-h-screen bg-background p-6">

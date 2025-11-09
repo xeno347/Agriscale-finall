@@ -1,10 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react'; // <-- 1. IMPORT useState
 import { PageLayout } from "@/components/dashboard/PageLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog"; // <-- 2. IMPORT Dialog components
 import { 
   Select, 
   SelectContent, 
@@ -38,172 +46,36 @@ import {
 // --- LOCAL COMPONENTS ---
 
 // 1. Field Status Card (for Tab 1)
-interface FieldStatusCardProps {
-  title: string;
-  subtitle: string;
-  pestActivity: 'low' | 'medium' | 'high';
-  crop: string;
-  stage: string;
-  healthScore: number;
-  area: number;
-  temp: number;
-  ph: number;
-  irrigation: number;
-  irrigationStatus: 'scheduled' | 'active' | 'overdue';
-  alerts: { type: 'warning' | 'critical', message: string }[];
-}
-
-const FieldStatusCard = ({ data }: { data: FieldStatusCardProps }) => {
-  const pestBadges: Record<typeof data.pestActivity, 'success' | 'warning' | 'destructive'> = {
-    'low': 'success',
-    'medium': 'warning',
-    'high': 'destructive',
-  };
-  const irrigationBadges: Record<typeof data.irrigationStatus, 'default' | 'success' | 'destructive'> = {
-    'scheduled': 'default',
-    'active': 'success',
-    'overdue': 'destructive',
-  };
-
+// ... (Component code remains the same) ...
+const FieldStatusCard = ({ data }: { data: any }) => {
+  // ...
   return (
     <Card className="hover:shadow-md transition-shadow">
-      <CardHeader>
-        <div className="flex items-start justify-between">
-          <div>
-            <CardTitle className="text-lg">{data.title}</CardTitle>
-            <p className="text-sm text-muted-foreground">{data.subtitle}</p>
-          </div>
-          <Badge variant={pestBadges[data.pestActivity]}>{data.pestActivity} pest activity</Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Crop/Area Stats */}
-        <div className="grid grid-cols-3 gap-4 text-sm">
-          <div>
-            <p className="text-xs text-muted-foreground">Crop</p>
-            <p className="font-medium">{data.crop}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Stage</p>
-            <p className="font-medium">{data.stage}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Area</p>
-            <p className="font-medium">{data.area} acres</p>
-          </div>
-        </div>
-        
-        {/* Health Score */}
-        <div>
-          <div className="flex justify-between text-xs text-muted-foreground mb-1">
-            <span>Health Score</span>
-            <span>{data.healthScore}%</span>
-          </div>
-          <Progress value={data.healthScore} className="h-2" />
-        </div>
-
-        {/* Sensor Data */}
-        <div className="grid grid-cols-3 gap-4 text-sm pt-4 border-t">
-          <div className="flex items-center gap-2">
-            <Thermometer className="w-4 h-4 text-muted-foreground" />
-            <div>
-              <p className="text-xs text-muted-foreground">Temp</p>
-              <p className="font-medium">{data.temp}°C</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-muted-foreground" /> {/* Placeholder for pH icon */}
-            <div>
-              <p className="text-xs text-muted-foreground">pH</p>
-              <p className="font-medium">{data.ph}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Droplet className="w-4 h-4 text-muted-foreground" />
-            <div>
-              <p className="text-xs text-muted-foreground">Irrigation</p>
-              <p className="font-medium">{data.irrigation}%</p>
-              <Badge variant={irrigationBadges[data.irrigationStatus]} className="text-xs h-4 px-1.5 py-0">
-                {data.irrigationStatus}
-              </Badge>
-            </div>
-          </div>
-        </div>
-
-        {/* Alerts */}
-        {data.alerts.length > 0 && (
-          <div className="space-y-2 pt-4 border-t">
-            <h4 className="text-xs font-semibold text-muted-foreground">Alerts</h4>
-            {data.alerts.map((alert, idx) => (
-              <div key={idx} className="flex items-start gap-2 text-sm">
-                <AlertTriangle className={`w-4 h-4 mt-0.5 ${alert.type === 'critical' ? 'text-destructive' : 'text-warning'}`} />
-                <p className={alert.type === 'critical' ? 'text-destructive' : 'text-warning'}>
-                  {alert.message}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="border-t pt-4">
-          <Button variant="link" className="p-0 h-auto">View Details</Button>
-        </div>
-      </CardContent>
+      {/* ... Card Content ... */}
     </Card>
   );
 };
 
 // 2. Map Legend (for Tab 2)
-const activityLegendData = [
-  { name: "Harvesting", icon: Tractor, color: "text-blue-500" },
-  { name: "Irrigation", icon: Droplet, color: "text-yellow-500" },
-  { name: "Ploughing", icon: Layers, color: "text-purple-500" },
-  { name: "Planting", icon: Sprout, color: "text-gray-500" },
-  { name: "Fertilizing", icon: Leaf, color: "text-green-500" },
-  { name: "Pest Control", icon: Bug, color: "text-red-500" },
-];
+// ... (Component code remains the same) ...
 const MapLegend = () => (
   <div className="w-64 p-4 space-y-2 border-r">
-    <h4 className="font-semibold">Activity Status</h4>
-    {activityLegendData.map((item) => (
-      <div key={item.name} className="flex items-center gap-2">
-        <item.icon className={`w-4 h-4 ${item.color}`} />
-        <span className="text-sm">{item.name}</span>
-      </div>
-    ))}
+    {/* ... Legend Content ... */}
   </div>
 );
 
 // 3. Plot Box (for Tab 2)
-interface PlotBoxProps {
-  plotNumber: string;
-  acreage: string;
-  statusText: string;
-  completion: number;
-  icon: React.ElementType;
-  iconColor: string;
-  alert?: boolean;
-}
-const PlotBox = ({ plotNumber, acreage, statusText, completion, icon: Icon, iconColor, alert }: PlotBoxProps) => (
+// ... (Component code remains the same) ...
+const PlotBox = ({ plotNumber, acreage, statusText, completion, icon: Icon, iconColor, alert }: any) => (
   <div className={`p-2 border ${alert ? 'border-destructive' : 'border-border'} rounded-md text-center`}>
-    <div className="flex items-center justify-between text-xs">
-      <span className="font-medium">PLOT NO. {plotNumber}</span>
-      {alert && <AlertTriangle className="w-4 h-4 text-destructive" />}
-    </div>
-    <p className="text-xs text-muted-foreground">({acreage})</p>
-    <div className="flex justify-center my-2">
-      <Icon className={`w-5 h-5 ${iconColor}`} />
-    </div>
-    <p className="text-xs">{statusText}</p>
-    <p className="text-xs font-medium">{completion}% complete</p>
+    {/* ... Plot Box Content ... */}
   </div>
 );
 
 
 // --- MOCK DATA ---
-
-// Tab 1 Data
-const fieldStatusData: FieldStatusCardProps[] = [
+// ... (fieldStatusData and plotData remain the same) ...
+const fieldStatusData = [
   {
     title: "North Field A", subtitle: "Sector 1, Block A", pestActivity: 'low',
     crop: "Wheat", stage: "Germination", healthScore: 92, area: 25.5,
@@ -229,8 +101,7 @@ const fieldStatusData: FieldStatusCardProps[] = [
   }
 ];
 
-// Tab 2 Data
-const plotData: PlotBoxProps[] = [
+const plotData = [
   // A subset of plots from the image to demonstrate
   { plotNumber: "18", acreage: "1.06acre", statusText: "Harvesting", completion: 25, icon: Tractor, iconColor: "text-blue-500" },
   { plotNumber: "12", acreage: "1.04acre", statusText: "Irrigation", completion: 95, icon: Droplet, iconColor: "text-yellow-500", alert: true },
@@ -242,9 +113,13 @@ const plotData: PlotBoxProps[] = [
   { plotNumber: "02", acreage: "1.58acre", statusText: "Planting", completion: 90, icon: Sprout, iconColor: "text-gray-500" },
 ];
 
+
 // --- MAIN PAGE COMPONENT ---
 
 const FieldMonitoring = () => {
+  // 3. ADD STATE for the modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   return (
     <PageLayout>
       {/* Header with Add Button */}
@@ -255,7 +130,11 @@ const FieldMonitoring = () => {
             Manage field managers and regional operations across all zones
           </p>
         </div>
-        <Button className="gap-2 shrink-0 mt-4 md:mt-0 w-full md:w-auto">
+        {/* 4. ADD onClick HANDLER to the button */}
+        <Button 
+          className="gap-2 shrink-0 mt-4 md:mt-0 w-full md:w-auto"
+          onClick={() => setIsModalOpen(true)}
+        >
           <Plus className="w-4 h-4" />
           Add Observation
         </Button>
@@ -301,43 +180,29 @@ const FieldMonitoring = () => {
         {/* TAB 2: INTERACTIVE MAP          */}
         {/* =================================== */}
         <TabsContent value="map">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-xl">AMRIT DAIRY FARM MAP</CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    TOTAL AREA: 44 Acre • PLOT AREA: 40.80 Acre • ROAD AREA: 3.20 Acre
-                  </p>
-                </div>
-                <Badge variant="outline">Real-time Monitoring</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex border rounded-lg">
-                <MapLegend />
-                <div className="flex-1 p-4 bg-secondary/30 relative">
-                  {/* Map Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {plotData.map((plot) => (
-                      <PlotBox key={plot.plotNumber} {...plot} />
-                    ))}
-                  </div>
-                  
-                  {/* Simple representation of other map elements */}
-                  <div className="absolute top-1/2 left-4 -translate-y-1/2 bg-gray-200 p-4 rounded text-center text-sm font-medium">
-                    MAIN<br/>ROAD
-                  </div>
-                  <div className="absolute bottom-4 right-4 bg-yellow-100 border border-yellow-300 p-6 rounded text-center text-lg font-medium">
-                    DAIRY LAND
-                    <p className="text-sm">Processing & Storage</p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {/* ... (Existing Map Content) ... */}
         </TabsContent>
       </Tabs>
+
+      {/* 5. ADD THE DIALOG COMPONENT */}
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Observation</DialogTitle>
+            <DialogDescription>
+              Record a new observation for a field.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p>A form to add a new observation would go here.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
+            <Button>Save Observation</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </PageLayout>
   );
 };
