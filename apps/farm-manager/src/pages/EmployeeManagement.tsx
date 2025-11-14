@@ -1,25 +1,30 @@
 import React, { useState } from "react";
 import { PageLayout } from "@/components/dashboard/PageLayout";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
-import { 
-  Tabs, 
-  TabsContent, 
-  TabsList, 
-  TabsTrigger 
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@/components/ui/tabs";
-import { 
+import {
   Table,
   TableBody,
   TableCell,
@@ -27,201 +32,144 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { 
-  Plus, 
-  Download, 
-  Users, 
-  CheckCircle, 
-  Briefcase, 
-  IndianRupee, 
+import {
+  Plus,
+  Download,
+  Users,
+  CheckCircle,
+  Briefcase,
+  IndianRupee,
   Search,
-  Mail,
-  Phone,
-  MapPin,
-  Check,
-  XCircle,
+  Calendar,
+  Home,
+  ShieldAlert,
   Clock,
   LineChart,
-  Calendar,      // <-- ADDED
-  Home,          // <-- ADDED
-  ShieldAlert    // <-- ADDED
 } from "lucide-react";
-import { PerformanceCard } from "@/components/dashboard/PerformanceCard";
-import type { PerformanceData } from "@/components/dashboard/PerformanceCard";
 import { AddEmployeeDialog } from "@/components/dashboard/AddEmployeeDialog";
+import { Progress } from "@/components/ui/progress";
 
-// --- MOCK DATA ---
-
-// UPDATED Employee Type
-type Employee = {
-  id: string;
-  empId: string; // <-- ADDED
-  initials: string;
-  name: string;
-  role: string;
-  roleType: 'permanent' | 'agronomist' | 'seasonal' | 'operator' | 'contractor';
-  status: 'active' | 'inactive';
-  performance: number;
-  tasksDone: number;
-  attendance: number;
-  salary: string;
-  salaryPeriod: 'mo' | 'day' | 'hr';
-  joinDate: string; // <-- ADDED
-  address: string; // <-- ADDED
-  emergencyContact: string; // <-- ADDED
-  assignedStaff: string[]; // <-- ADDED
-};
-
-// UPDATED Mock Data
-const employeesData: Employee[] = [
+// ==========================
+// MOCK DATA
+// ==========================
+const employeesData = [
   {
     id: "1",
-    empId: "FM001",
     initials: "RK",
     name: "Rajesh Kumar",
+    empId: "FM001",
     role: "permanent",
-    roleType: 'permanent',
-    status: 'active',
+    roleType: "permanent",
+    status: "active",
     performance: 4.5,
     tasksDone: 156,
     attendance: 96,
-    salary: "₹25K",
-    salaryPeriod: 'mo',
-    joinDate: "15-03-2022",
+    salary: "₹25K/mo",
+    joinDate: "15 Mar 2022",
     address: "North Zone, Sector 1, AgriScale Quarters",
     emergencyContact: "+91 99887 76655 (Spouse)",
-    assignedStaff: ["Suresh", "Rina", "Mohan"],
   },
   {
     id: "2",
-    empId: "FM002",
     initials: "PS",
     name: "Priya Sharma",
+    empId: "FM002",
     role: "agronomist",
-    roleType: 'agronomist',
-    status: 'active',
+    roleType: "agronomist",
+    status: "active",
     performance: 4.8,
     tasksDone: 89,
     attendance: 98,
-    salary: "₹45K",
-    salaryPeriod: 'mo',
-    joinDate: "20-07-2021",
+    salary: "₹45K/mo",
+    joinDate: "20 Jul 2021",
     address: "South Zone, Block 5, Near Depot",
     emergencyContact: "+91 99776 65544 (Father)",
-    assignedStaff: ["Anil", "Sunita"],
   },
   {
     id: "3",
-    empId: "FM003",
     initials: "VS",
     name: "Vijay Singh",
+    empId: "FM003",
     role: "seasonal",
-    roleType: 'seasonal',
-    status: 'active',
+    roleType: "seasonal",
+    status: "active",
     performance: 4.2,
     tasksDone: 45,
     attendance: 88,
-    salary: "₹600",
-    salaryPeriod: 'day',
-    joinDate: "01-09-2025",
+    salary: "₹600/day",
+    joinDate: "01 Sep 2025",
     address: "Seasonal Worker Camp, B-Wing",
     emergencyContact: "+91 99665 54433 (Self)",
-    assignedStaff: [],
-  },
-  {
-    id: "4",
-    empId: "FM004",
-    initials: "AP",
-    name: "Amit Patel",
-    role: "operator",
-    roleType: 'operator',
-    status: 'active',
-    performance: 4.6,
-    tasksDone: 178,
-    attendance: 92,
-    salary: "₹35K",
-    salaryPeriod: 'mo',
-    joinDate: "10-01-2023",
-    address: "West Zone, Tractor Yard, Unit 2",
-    emergencyContact: "+91 99554 43322 (Brother)",
-    assignedStaff: ["Harpreet"],
-  },
-  {
-    id: "5",
-    empId: "FM005",
-    initials: "SD",
-    name: "Sunita Devi",
-    role: "contractor",
-    roleType: 'contractor',
-    status: 'active',
-    performance: 4.4,
-    tasksDone: 67,
-    attendance: 92,
-    salary: "₹15K",
-    salaryPeriod: 'mo',
-    joinDate: "05-05-2024",
-    address: "Contractor Office, East Zone",
-    emergencyContact: "+91 99443 32211 (Manager)",
-    assignedStaff: [],
   },
 ];
 
-// ... (attendanceData and performanceData remain the same) ...
 const attendanceData = [
-  { id: "1", initials: "RK", name: "Rajesh Kumar", clockIn: "07:45 AM", clockOut: "05:30 PM", location: "North Zone - Plot A1", hours: "9.75h", status: 'present' },
-  { id: "2", initials: "PS", name: "Priya Sharma", clockIn: "08:00 AM", clockOut: "06:00 PM", location: "Field Office", hours: "10h", status: 'present' },
-  { id: "3", initials: "VS", name: "Vijay Singh", clockIn: "08:00 AM", clockOut: "02:00 PM", location: "North Zone - Plot B2", hours: "8h", status: 'present' },
-];
-const performanceData = [
   {
     id: "1",
-    initials: "RK",
     name: "Rajesh Kumar",
-    tasksCompleted: 156,
-    rating: 4.5,
-    metrics: [
-      { label: "Harvest Yield", value: 95, isProgress: true },
-      { label: "Completion Time", value: 85, isProgress: true },
-      { label: "Quality Score", value: 92, isProgress: true },
-      { label: "Reliability", value: 96, isProgress: true },
-    ],
-    tasksDone: 156
+    initials: "RK",
+    clockIn: "07:45 AM",
+    clockOut: "05:30 PM",
+    location: "Plot A1 - North Zone",
+    hours: "9h 45m",
+    status: "Present",
   },
   {
     id: "2",
-    initials: "PS",
     name: "Priya Sharma",
-    tasksCompleted: 89,
-    rating: 4.8,
-    metrics: [
-      { label: "Harvest Yield", value: 98, isProgress: true },
-      { label: "Completion Time", value: 90, isProgress: true },
-      { label: "Quality Score", value: 96, isProgress: true },
-      { label: "Reliability", value: 98, isProgress: true },
-    ],
-    tasksDone: 89
+    initials: "PS",
+    clockIn: "08:00 AM",
+    clockOut: "06:00 PM",
+    location: "Field Office",
+    hours: "10h",
+    status: "Present",
   },
   {
     id: "3",
-    initials: "VS",
     name: "Vijay Singh",
-    tasksCompleted: 45,
-    rating: 4.2,
-    metrics: [
-      { label: "Harvest Yield", value: 88, isProgress: true },
-      { label: "Completion Time", value: 78, isProgress: true },
-      { label: "Quality Score", value: 85, isProgress: true },
-      { label: "Reliability", value: 88, isProgress: true },
-    ],
-    tasksDone: 45
+    initials: "VS",
+    clockIn: "08:30 AM",
+    clockOut: "01:30 PM",
+    location: "Plot B2 - South Zone",
+    hours: "5h",
+    status: "Half Day",
   },
 ];
 
+const performanceData = [
+  {
+    id: "1",
+    name: "Rajesh Kumar",
+    tasksCompleted: 156,
+    quality: 92,
+    efficiency: 88,
+    reliability: 96,
+    rating: 4.5,
+  },
+  {
+    id: "2",
+    name: "Priya Sharma",
+    tasksCompleted: 89,
+    quality: 96,
+    efficiency: 90,
+    reliability: 98,
+    rating: 4.8,
+  },
+  {
+    id: "3",
+    name: "Vijay Singh",
+    tasksCompleted: 45,
+    quality: 85,
+    efficiency: 80,
+    reliability: 88,
+    rating: 4.2,
+  },
+];
 
-// --- REUSABLE COMPONENTS ---
-
-// Stat Card for top sections
-const StatCard = ({ title, value, icon: Icon, valueClass = "" }: { title: string, value: string, icon: React.ElementType, valueClass?: string }) => (
+// ==========================
+// COMPONENTS
+// ==========================
+const StatCard = ({ title, value, icon: Icon }: any) => (
   <Card>
     <CardContent className="p-4 flex items-center gap-4">
       <div className="p-3 bg-secondary rounded-lg">
@@ -229,119 +177,55 @@ const StatCard = ({ title, value, icon: Icon, valueClass = "" }: { title: string
       </div>
       <div>
         <p className="text-sm text-muted-foreground">{title}</p>
-        <p className={`text-2xl font-bold ${valueClass}`}>{value}</p>
+        <p className="text-2xl font-bold">{value}</p>
       </div>
     </CardContent>
   </Card>
 );
 
-// UPDATED Employee Card
-const EmployeeCard = ({ employee }: { employee: Employee }) => {
-  const roleStyles = {
-    permanent: 'text-blue-600',
-    agronomist: 'text-orange-600',
-    seasonal: 'text-green-600',
-    operator: 'text-purple-600',
-    contractor: 'text-teal-600',
-  };
-
-  return (
-    <Card className="hover:shadow-md transition-shadow">
-      <CardHeader>
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <Avatar className="w-10 h-10">
-              <AvatarFallback className="bg-muted text-muted-foreground">
-                {employee.initials}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <CardTitle className="text-lg">{employee.name}</CardTitle>
-              {employee.roleType === 'permanent' ? (
-                <Badge variant="outline" className="text-blue-600 border-blue-200">
-                  {employee.role}
-                </Badge>
-              ) : (
-                <p className={`text-sm font-medium ${roleStyles[employee.roleType]}`}>
-                  {employee.role.charAt(0).toUpperCase() + employee.role.slice(1)}
-                </p>
-              )}
-              {/* ADDED EMP ID */}
-              <p className="text-xs text-muted-foreground mt-1">ID: {employee.empId}</p>
-            </div>
-          </div>
-          <Badge variant={employee.status === 'active' ? 'success' : 'destructive'}>
-            {employee.status}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {/* Stats Grid */}
-        <div className="grid grid-cols-3 gap-y-4 gap-x-2 my-4 text-sm">
+const EmployeeCard = ({ emp }: any) => (
+  <Card>
+    <CardHeader>
+      <div className="flex justify-between items-start">
+        <div className="flex gap-3">
+          <Avatar>
+            <AvatarFallback>{emp.initials}</AvatarFallback>
+          </Avatar>
           <div>
-            <p className="text-xs text-muted-foreground">Performance</p>
-            <p className="font-medium">{employee.performance}/5</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Attendance</p>
-            <p className="font-medium">{employee.attendance}%</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Tasks Done</p>
-            <p className="font-medium">{employee.tasksDone}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Salary</p>
-            <p className="font-medium">{employee.salary}/{employee.salaryPeriod}</p>
+            <CardTitle>{emp.name}</CardTitle>
+            <p className="text-xs text-muted-foreground">ID: {emp.empId}</p>
           </div>
         </div>
+        <Badge variant="outline">{emp.roleType}</Badge>
+      </div>
+    </CardHeader>
+    <CardContent>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <p>Performance: {emp.performance}/5</p>
+        <p>Attendance: {emp.attendance}%</p>
+        <p>Tasks: {emp.tasksDone}</p>
+        <p>Salary: {emp.salary}</p>
+      </div>
+      <div className="border-t mt-3 pt-3 text-xs text-muted-foreground">
+        <p>Joined: {emp.joinDate}</p>
+        <p>{emp.address}</p>
+        <p>Emergency: {emp.emergencyContact}</p>
+      </div>
+    </CardContent>
+  </Card>
+);
 
-        {/* NEW: Personal Details */}
-        <div className="space-y-2 border-t pt-4">
-          <h4 className="text-xs font-semibold text-muted-foreground">Personal Details</h4>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Calendar className="w-3 h-3" />
-            <span>Joined: {employee.joinDate}</span>
-          </div>
-          <div className="flex items-start gap-2 text-sm text-muted-foreground">
-            <Home className="w-3 h-3 mt-0.5" />
-            <span className="truncate">{employee.address}</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <ShieldAlert className="w-3 h-3" />
-            <span>Emergency: {employee.emergencyContact}</span>
-          </div>
-        </div>
-
-        {/* NEW: Assigned Staff */}
-        {employee.assignedStaff.length > 0 && (
-          <div className="border-t pt-4 mt-4">
-            <p className="text-xs text-muted-foreground mb-2">Assigned Staff ({employee.assignedStaff.length})</p>
-            <div className="flex flex-wrap gap-2">
-              {employee.assignedStaff.map((name, idx) => (
-                <Badge key={idx} variant="secondary" className="font-normal">
-                  {name}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-};
-
-
-// --- MAIN COMPONENT ---
-
+// ==========================
+// MAIN PAGE
+// ==========================
 const EmployeeManagement = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
     <PageLayout>
-      <PageHeader 
+      <PageHeader
         title="Employee Management"
-        description="Manage field managers and regional operations across all zones"
+        description="Manage staff, attendance, and performance across all farm zones"
       />
 
       <Tabs defaultValue="profiles">
@@ -351,11 +235,8 @@ const EmployeeManagement = () => {
           <TabsTrigger value="performance">Performance Tracking</TabsTrigger>
         </TabsList>
 
-        {/* =================================== */}
-        {/* TAB 1: PROFILES (with updated card) */}
-        {/* =================================== */}
+        {/* PROFILES */}
         <TabsContent value="profiles">
-          {/* Stat Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCard title="Total Employees" value="232" icon={Users} />
             <StatCard title="Active" value="228" icon={CheckCircle} />
@@ -363,79 +244,106 @@ const EmployeeManagement = () => {
             <StatCard title="Monthly Payroll" value="₹1.05 L" icon={IndianRupee} />
           </div>
 
-          {/* Filter/Action Bar */}
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
-            <div className="relative w-full md:w-auto">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Search employees..." className="pl-9 w-full md:w-64" />
-            </div>
-            <div className="flex items-center gap-4 w-full md:w-auto">
-              <Select>
-                <SelectTrigger className="w-full md:w-48">
-                  <SelectValue placeholder="All Roles" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Roles</SelectItem>
-                  <SelectItem value="permanent">Permanent</SelectItem>
-                  <SelectItem value="agronomist">Agronomist</SelectItem>
-                  <SelectItem value="seasonal">Seasonal</SelectItem>
-                  <SelectItem value="operator">Operator</SelectItem>
-                  <SelectItem value="contractor">Contractor</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button className="gap-2 w-full md:w-auto" onClick={() => setIsModalOpen(true)}>
-                <Plus className="w-4 h-4" />
-                Add Employee
-              </Button>
-              <Button variant="outline" className="gap-2 w-full md:w-auto">
-                <Download className="w-4 h-4" />
-                Export
-              </Button>
-            </div>
+          <div className="flex justify-between mb-6">
+            <Input placeholder="Search employees..." className="w-64" />
+            <Button onClick={() => setIsModalOpen(true)} className="gap-2">
+              <Plus className="w-4 h-4" />
+              Add Employee
+            </Button>
           </div>
 
-          {/* Employee Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {employeesData.map((employee) => (
-              <EmployeeCard key={employee.id} employee={employee} />
+            {employeesData.map((e) => (
+              <EmployeeCard key={e.id} emp={e} />
             ))}
           </div>
         </TabsContent>
 
-        {/* =================================== */}
-        {/* TAB 2: ATTENDANCE              */}
-        {/* =================================== */}
+        {/* ATTENDANCE */}
         <TabsContent value="attendance">
           <Card>
             <CardHeader>
-              <CardTitle>Attendance & Timesheets</CardTitle>
+              <CardTitle>Attendance Records</CardTitle>
             </CardHeader>
             <CardContent>
-              {/* ... (Attendance Table content) ... */}
-              <p>Attendance tracking and timesheet management content goes here.</p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Clock In</TableHead>
+                    <TableHead>Clock Out</TableHead>
+                    <TableHead>Hours</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {attendanceData.map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell>{a.name}</TableCell>
+                      <TableCell>{a.clockIn}</TableCell>
+                      <TableCell>{a.clockOut}</TableCell>
+                      <TableCell>{a.hours}</TableCell>
+                      <TableCell>{a.location}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            a.status === "Present"
+                              ? "success"
+                              : a.status === "Half Day"
+                              ? "secondary"
+                              : "destructive"
+                          }
+                        >
+                          {a.status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* =================================== */}
-        {/* TAB 3: PERFORMANCE              */}
-        {/* =================================== */}
+        {/* PERFORMANCE */}
         <TabsContent value="performance">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <StatCard title="Avg Performance" value="4.6 / 5" icon={LineChart} />
+            <StatCard title="Top Performer" value="Priya Sharma" icon={CheckCircle} />
+            <StatCard title="Total Tasks" value="290+" icon={Briefcase} />
+          </div>
+
           <Card>
             <CardHeader>
-              <CardTitle>Performance Tracking</CardTitle>
+              <CardTitle>Employee Performance</CardTitle>
             </CardHeader>
             <CardContent>
-              {/* ... (Performance Tracking content) ... */}
-              <p>Performance review and tracking content goes here.</p>
+              {performanceData.map((p) => (
+                <div key={p.id} className="border-b py-4 last:border-0">
+                  <h4 className="font-semibold">{p.name}</h4>
+                  <div className="mt-2 grid grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Quality</p>
+                      <Progress value={p.quality} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Efficiency</p>
+                      <Progress value={p.efficiency} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Reliability</p>
+                      <Progress value={p.reliability} />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-      
-      {/* DIALOG COMPONENT */}
-      <AddEmployeeDialog open={isModalOpen} onOpenChange={setIsModalOpen} />
 
+      <AddEmployeeDialog open={isModalOpen} onOpenChange={setIsModalOpen} />
     </PageLayout>
   );
 };

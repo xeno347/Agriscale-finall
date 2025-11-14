@@ -1,18 +1,11 @@
-import React, { useState } from 'react'; // <-- 1. IMPORT useState
-import { PageLayout } from "@/components/dashboard/PageLayout";
-import { PageHeader } from "@/components/dashboard/PageHeader";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogDescription,
-  DialogFooter
-} from "@/components/ui/dialog"; // <-- 2. IMPORT Dialog components
-import { 
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   Table,
   TableBody,
   TableCell,
@@ -20,168 +13,216 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from "@/components/ui/select";
-import { 
-  Tabs, 
-  TabsContent, 
-  TabsList, 
-  TabsTrigger 
-} from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Plus, CalendarDays, Download } from "lucide-react";
+
 import {
-  Users,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  UserMinus,
-  Plus,
-  Download,
-  Info,
-  CalendarDays,
-  Filter
-} from "lucide-react";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
-// --- LOCAL COMPONENTS ---
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 
-// 1. Stat Card (for top row)
-// ... (Component code remains the same) ...
-const StatCard = ({ title, value, subtitle, icon: Icon, iconColorClass = "text-muted-foreground" }: any) => (
-  <Card>
-    <CardContent className="p-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="text-2xl font-bold">{value}</p>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
-        </div>
-        <div className="p-2 bg-secondary rounded-lg">
-          <Icon className={`w-5 h-5 ${iconColorClass}`} />
-        </div>
-      </div>
-    </CardContent>
-  </Card>
-);
-
-
-// --- MOCK DATA ---
-// ... (statData and attendanceData remain the same) ...
-const statData = [
-  { title: "Total Field Managers", value: "4", subtitle: "managers", icon: Users, iconColorClass: "text-blue-600" },
-  { title: "Present", value: "1", subtitle: "", icon: CheckCircle2, iconColorClass: "text-green-600" },
-  { title: "Late", value: "1", subtitle: "", icon: Clock, iconColorClass: "text-yellow-600" },
-  { title: "Absent", value: "1", subtitle: "", icon: XCircle, iconColorClass: "text-destructive" },
-  { title: "Half Day", value: "1", subtitle: "", icon: UserMinus, iconColorClass: "text-purple-600" },
-];
-
-const attendanceData = [
-  { id: "FM001", name: "Rajesh Kumar", role: "Field Manager", status: "Present", checkIn: "08:00", checkOut: "17:00", location: "Field A - North Block", hours: "9 h", notes: "-" },
-  { id: "FM002", name: "Priya Sharma", role: "Field Manager", status: "Late", checkIn: "08:15", checkOut: "17:00", location: "Field B - South Block", hours: "8.75h", notes: "-" },
-  { id: "FM003", name: "Arjun Patel", role: "Field Manager", status: "Absent", checkIn: "-", checkOut: "-", location: "-", hours: "0 h", notes: "-" },
-  { id: "FM004", name: "Sunita Verma", role: "Field Manager", status: "Halfday", checkIn: "08:00", checkOut: "13:00", location: "Field C - East Block", hours: "5h", notes: "Medical appointment" },
-];
-
-
-// --- MAIN PAGE COMPONENT ---
-
-const AttendanceManagement = () => {
-  // 3. ADD STATE for the modal
+export default function AttendanceManagement() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  // Dummy Data
+  const attendanceData = [
+    {
+      id: "FM001",
+      name: "Rajesh Kumar",
+      status: "Present",
+      checkIn: "08:00",
+      checkOut: "17:00",
+      location: "Field A – North Block",
+      hours: "9 hrs",
+    },
+    {
+      id: "FM002",
+      name: "Priya Sharma",
+      status: "Late",
+      checkIn: "09:30",
+      checkOut: "17:00",
+      location: "Packing Section",
+      hours: "7.5 hrs",
+    },
+    {
+      id: "FM003",
+      name: "Arjun Patel",
+      status: "Absent",
+      checkIn: "-",
+      checkOut: "-",
+      location: "-",
+      hours: "-",
+    },
+  ];
+
   return (
-    <PageLayout>
-      <PageHeader 
-        title="Attendance Management"
-        description="Manage field managers and regional operations across all zones"
-      />
-      
-      {/* Info Banner */}
-      <Card className="bg-blue-50 border-blue-200 dark:bg-blue-950 dark:border-blue-800 mb-6">
-        {/* ... (Banner Content) ... */}
-      </Card>
+    <div className="p-6">
+      <h1 className="text-3xl font-bold mb-6">Attendance Management</h1>
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-        {statData.map((stat) => <StatCard key={stat.title} {...stat} />)}
-      </div>
-
+      {/* TABS - Only Daily Attendance */}
       <Tabs defaultValue="daily">
-        <div className="flex flex-col md:flex-row items-center justify-between mb-4">
+        <div className="flex flex-col md:flex-row justify-between mb-4">
           <TabsList>
             <TabsTrigger value="daily" className="gap-2">
-              <CalendarDays className="w-4 h-4" /> Daily Attendance
+              <CalendarDays className="w-4 h-4" />
+              Daily Attendance
             </TabsTrigger>
-            <TabsTrigger value="weekly">Weekly Report</TabsTrigger>
-            <TabsTrigger value="monthly">Monthly Report</TabsTrigger>
           </TabsList>
-          <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
-            <Select>
-              {/* ... (Select Content) ... */}
-            </Select>
-            {/* 4. ADD onClick HANDLER to the button */}
-            <Button 
-              className="gap-2 w-full md:w-auto"
-              onClick={() => setIsModalOpen(true)}
-            >
+
+          <div className="flex gap-2 mt-2 md:mt-0">
+            <Button onClick={() => setIsModalOpen(true)} className="gap-2">
               <Plus className="w-4 h-4" />
               Mark Attendance
             </Button>
-            <Button variant="outline" className="gap-2 w-full md:w-auto">
+
+            <Button variant="outline" className="gap-2">
               <Download className="w-4 h-4" />
               Export
             </Button>
           </div>
         </div>
 
-        {/* =================================== */}
-        {/* TAB 1: DAILY ATTENDANCE         */}
-        {/* =================================== */}
+        {/* DAILY ATTENDANCE TABLE */}
         <TabsContent value="daily">
           <Card>
-            {/* ... (Card Header & Table) ... */}
+            <CardHeader>
+              <CardTitle>Today's Attendance</CardTitle>
+            </CardHeader>
+
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Check-In</TableHead>
+                    <TableHead>Check-Out</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Hours</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {attendanceData.map((emp) => (
+                    <TableRow key={emp.id}>
+                      <TableCell>{emp.id}</TableCell>
+                      <TableCell>{emp.name}</TableCell>
+                      <TableCell>
+                        <Badge>{emp.status}</Badge>
+                      </TableCell>
+                      <TableCell>{emp.checkIn}</TableCell>
+                      <TableCell>{emp.checkOut}</TableCell>
+                      <TableCell>{emp.location}</TableCell>
+                      <TableCell>{emp.hours}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* =================================== */}
-        {/* TAB 2: WEEKLY REPORT            */}
-        {/* =================================== */}
-        <TabsContent value="weekly">
-          {/* ... (Weekly Report Content) ... */}
-        </TabsContent>
-
-        {/* =================================== */}
-        {/* TAB 3: MONTHLY REPORT           */}
-        {/* =================================== */}
-        <TabsContent value="monthly">
-          {/* ... (Monthly Report Content) ... */}
         </TabsContent>
       </Tabs>
 
-      {/* 5. ADD THE DIALOG COMPONENT */}
+      {/* MARK ATTENDANCE MODAL */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Mark Attendance</DialogTitle>
-            <DialogDescription>
-              Manually mark attendance for an employee.
-            </DialogDescription>
+            <DialogDescription>Fill in the attendance details.</DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <p>A form to manually mark attendance would go here.</p>
+
+          {/* FORM START */}
+          <div className="space-y-4 py-2">
+
+            {/* Select Employee */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Employee</label>
+              <Select>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Employee" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FM001">Rajesh Kumar</SelectItem>
+                  <SelectItem value="FM002">Priya Sharma</SelectItem>
+                  <SelectItem value="FM003">Arjun Patel</SelectItem>
+                  <SelectItem value="FM004">Sunita Verma</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Status */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Status</label>
+              <Select>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Present">Present</SelectItem>
+                  <SelectItem value="Late">Late</SelectItem>
+                  <SelectItem value="Absent">Absent</SelectItem>
+                  <SelectItem value="Halfday">Half Day</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Check-in */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Check-in Time</label>
+              <input type="time" className="w-full border rounded-md p-2" />
+            </div>
+
+            {/* Check-out */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Check-out Time</label>
+              <input type="time" className="w-full border rounded-md p-2" />
+            </div>
+
+            {/* Location */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Location</label>
+              <input
+                type="text"
+                placeholder="Enter location"
+                className="w-full border rounded-md p-2"
+              />
+            </div>
+
+            {/* Notes */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Notes (optional)</label>
+              <textarea
+                className="w-full border rounded-md p-2"
+                placeholder="Add notes..."
+              />
+            </div>
+
           </div>
+          {/* FORM END */}
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setIsModalOpen(false)}>
+              Cancel
+            </Button>
             <Button>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-    </PageLayout>
+    </div>
   );
-};
-
-export default AttendanceManagement;
+}

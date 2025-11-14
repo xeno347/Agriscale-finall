@@ -1,238 +1,278 @@
 import React, { useState } from "react";
-import { PageLayout } from "@/components/dashboard/PageLayout";
+import { motion } from "framer-motion";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { PageLayout } from "@/components/dashboard/PageLayout";
 import {
   Tabs,
-  TabsContent,
   TabsList,
   TabsTrigger,
+  TabsContent,
 } from "@/components/ui/tabs";
 import {
-  Wand2,
-  Sparkles,
-  ChevronRight,
+  Table,
+  TableHeader,
+  TableHead,
+  TableRow,
+  TableBody,
+  TableCell,
+} from "@/components/ui/table";
+import {
   LayoutDashboard,
   ListChecks,
   BarChart3,
-  Plus,
   Ticket,
-  HelpCircle,
-  Send,
-  Clock,
-  CheckCheck,
+  Plus,
+  CheckCircle,
   AlertTriangle,
-  Tractor,
-  Bug,
-  FlaskConical,
+  Clock,
 } from "lucide-react";
-
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+  SelectItem,
+} from "@/components/ui/select";
 import { CreateTaskDialog } from "@/components/dashboard/CreateTaskDialog";
 import { AiSuggestionsDialog } from "@/components/dashboard/AiSuggestionsDialog";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 
-// === SMALL UTILITY COMPONENTS ===
-
-const AiAssistantBanner = ({
-  onViewSuggestions,
-}: {
-  onViewSuggestions: () => void;
-}) => (
-  <Card className="bg-blue-50 border-blue-200 dark:bg-blue-950 dark:border-blue-800 mb-6">
-    <CardContent className="p-6 flex flex-col md:flex-row items-center justify-between gap-4">
-      <div className="flex items-center gap-4">
-        <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-lg">
-          <Wand2 className="w-6 h-6 text-blue-600" />
-        </div>
-        <div>
-          <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
-            AgriScale AI Assistant
-          </h3>
-          <p className="text-sm text-blue-700 dark:text-blue-300">
-            4 intelligent task suggestions available • Avg. confidence: 85%
-          </p>
-        </div>
-      </div>
-      <div className="flex gap-2 w-full md:w-auto">
-        <Button variant="outline" className="gap-2 w-1/2 md:w-auto">
-          <Sparkles className="w-4 h-4" /> Generate More
-        </Button>
-        <Button className="gap-2 w-1/2 md:w-auto" onClick={onViewSuggestions}>
-          View Suggestions <ChevronRight className="w-4 h-4" />
-        </Button>
-      </div>
-    </CardContent>
-  </Card>
-);
-
-interface TaskStatCardProps {
+// ----------------------------
+// ✅ Type Definitions
+// ----------------------------
+interface Task {
+  id: string;
   title: string;
-  value: string | number;
-  icon: React.ElementType;
-  iconColorClass?: string;
+  assignedTo: string;
+  status: string;
 }
-const TaskStatCard = ({
-  title,
-  value,
-  icon: Icon,
-  iconColorClass,
-}: TaskStatCardProps) => (
-  <Card>
-    <CardContent className="p-4 flex items-center gap-4">
-      <div className="p-2 rounded-lg bg-secondary">
-        <Icon className={`w-5 h-5 ${iconColorClass || "text-muted-foreground"}`} />
+
+interface Token {
+  id: string;
+  subject: string;
+  submittedBy: string;
+  status: string;
+  assignedTo?: string;
+}
+
+interface Query {
+  id: string;
+  subject: string;
+  priority: string;
+  status: string;
+  assignedTo?: string;
+}
+
+// ----------------------------
+// ✅ Stats Cards
+// ----------------------------
+const StatCard = ({ title, value, icon: Icon, color }: any) => (
+  <Card className="border border-gray-200 shadow-sm">
+    <CardContent className="flex items-center gap-4 p-5">
+      <div className={`p-2 rounded-md bg-gray-50`}>
+        <Icon className={`w-6 h-6 ${color}`} />
       </div>
       <div>
-        <p className="text-sm text-muted-foreground">{title}</p>
-        <p className="text-2xl font-bold">{value}</p>
+        <p className="text-sm text-gray-500">{title}</p>
+        <h3 className="text-2xl font-semibold">{value}</h3>
       </div>
     </CardContent>
   </Card>
 );
 
-// === MOCK DATA ===
-
-const tokenStats = [
-  { title: "Open Queries", value: "2", icon: Ticket, iconColorClass: "text-yellow-600" },
-  { title: "Resolved Today", value: "5", icon: CheckCheck, iconColorClass: "text-green-600" },
-  { title: "Avg. Resolution", value: "4.2h", icon: Clock, iconColorClass: "text-blue-600" },
-  { title: "Pending on You", value: "1", icon: AlertTriangle, iconColorClass: "text-destructive" },
+// ----------------------------
+// ✅ Mock Data
+// ----------------------------
+const taskStats = [
+  { title: "Active Tasks", value: 24, icon: ListChecks, color: "text-green-600" },
+  { title: "Completed Tasks", value: 56, icon: CheckCircle, color: "text-blue-600" },
+  { title: "Overdue Tasks", value: 3, icon: AlertTriangle, color: "text-red-600" },
+  { title: "Avg Completion", value: "5.2h", icon: Clock, color: "text-yellow-600" },
 ];
 
-const tokenData = [
-  { id: "TKN-001", task: "TSK-1023", subject: "Irrigation pump is broken", submittedBy: "Rajesh Kumar", date: "2025-11-09", status: "Open" },
-  { id: "TKN-002", task: "TSK-1024", subject: "Incorrect pesticide type delivered", submittedBy: "Priya Sharma", date: "2025-11-08", status: "Resolved" },
-  { id: "TKN-003", task: "-", subject: "Payroll question", submittedBy: "Amit Patel", date: "2025-11-08", status: "Open (Pending on Manager)" },
+const taskData: Task[] = [
+  { id: "TSK-101", title: "Soil Check - Plot A", assignedTo: "Rajesh", status: "In Progress" },
+  { id: "TSK-102", title: "Fertilizer Distribution", assignedTo: "Priya", status: "Pending" },
+  { id: "TSK-103", title: "Weed Control - Plot B", assignedTo: "Amit", status: "Completed" },
+  { id: "TSK-104", title: "Irrigation Maintenance", assignedTo: "Neha", status: "In Progress" },
 ];
 
-// === MAIN PAGE ===
+const tokenData: Token[] = [
+  { id: "TKN-001", subject: "Pump Broken", submittedBy: "Rajesh Kumar", status: "Open" },
+  { id: "TKN-002", subject: "Fertilizer Issue", submittedBy: "Priya Sharma", status: "Resolved" },
+  { id: "TKN-003", subject: "Equipment Delay", submittedBy: "Suresh Verma", status: "Pending" },
+];
 
-const TaskManagement = () => {
+const queryData: Query[] = [
+  { id: "QRY-201", subject: "Delay in pesticide", priority: "High", status: "Open" },
+  { id: "QRY-202", subject: "Fertilizer shortage", priority: "Medium", status: "In Progress" },
+  { id: "QRY-203", subject: "Harvest clarification", priority: "Low", status: "Resolved" },
+];
+
+// ----------------------------
+// ✅ Analytics Data
+// ----------------------------
+const taskAnalytics = [
+  { name: "Pending", count: 8 },
+  { name: "In Progress", count: 10 },
+  { name: "Completed", count: 6 },
+];
+
+const queryAnalytics = [
+  { name: "High", value: 3 },
+  { name: "Medium", value: 4 },
+  { name: "Low", value: 2 },
+];
+
+const COLORS = ["#22c55e", "#facc15", "#60a5fa"];
+const availableResolvers = ["Rajesh Kumar", "Priya Sharma", "Amit Patel", "Neha Reddy"];
+
+// ----------------------------
+// ✅ Component
+// ----------------------------
+export default function TaskManagement() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [tokens, setTokens] = useState<Token[]>(tokenData);
+  const [queries, setQueries] = useState<Query[]>(queryData);
+
+  const handleAssign = (id: string, resolver: string, type: "token" | "query") => {
+    if (type === "token") {
+      setTokens((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, assignedTo: resolver } : t))
+      );
+    } else {
+      setQueries((prev) =>
+        prev.map((q) => (q.id === id ? { ...q, assignedTo: resolver } : q))
+      );
+    }
+  };
 
   return (
     <PageLayout>
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-foreground mb-2">
-            Task Management
-          </h1>
-          <p className="text-muted-foreground">
-            Manage field managers and regional operations across all zones
-          </p>
+          <h1 className="text-3xl font-semibold text-gray-900">Task Management</h1>
+          <p className="text-gray-500">Oversee farm operations, tokens, and queries efficiently.</p>
         </div>
         <Button
-          className="gap-2 shrink-0 mt-4 md:mt-0 w-full md:w-auto"
           onClick={() => setIsTaskModalOpen(true)}
+          className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
         >
-          <Plus className="w-4 h-4" />
-          Add New Task
+          <Plus className="w-4 h-4" /> Add Task
         </Button>
       </div>
 
+      {/* Tabs */}
       <Tabs defaultValue="dashboard">
-        <TabsList className="mb-6">
-          <TabsTrigger value="dashboard" className="gap-2">
-            <LayoutDashboard className="w-4 h-4" /> Dashboard
+        <TabsList className="bg-transparent border-b border-gray-200 mb-6 flex flex-wrap gap-2">
+          <TabsTrigger value="dashboard" className="data-[state=active]:border-b-2 data-[state=active]:border-green-600 rounded-none">
+            <LayoutDashboard className="w-4 h-4 mr-2" /> Dashboard
           </TabsTrigger>
-          <TabsTrigger value="tasks" className="gap-2">
-            <ListChecks className="w-4 h-4" /> Tasks
+          <TabsTrigger value="tasks" className="data-[state=active]:border-b-2 data-[state=active]:border-green-600 rounded-none">
+            <ListChecks className="w-4 h-4 mr-2" /> Tasks
           </TabsTrigger>
-          <TabsTrigger value="analytics" className="gap-2">
-            <BarChart3 className="w-4 h-4" /> Analytics
+          <TabsTrigger value="analytics" className="data-[state=active]:border-b-2 data-[state=active]:border-green-600 rounded-none">
+            <BarChart3 className="w-4 h-4 mr-2" /> Analytics
           </TabsTrigger>
-          <TabsTrigger value="token-management" className="gap-2">
-            <Ticket className="w-4 h-4" /> Token Management
-          </TabsTrigger>
-          <TabsTrigger value="raise-query" className="gap-2">
-            <HelpCircle className="w-4 h-4" /> Raise Query
+          <TabsTrigger value="token-management" className="data-[state=active]:border-b-2 data-[state=active]:border-green-600 rounded-none">
+            <Ticket className="w-4 h-4 mr-2" /> Token Management
           </TabsTrigger>
         </TabsList>
 
-        {/* === Dashboard Tab === */}
+        {/* DASHBOARD */}
         <TabsContent value="dashboard">
-          <AiAssistantBanner onViewSuggestions={() => setIsAiModalOpen(true)} />
-        </TabsContent>
-
-        {/* === Tasks Tab === */}
-        <TabsContent value="tasks">
-          <p>Tasks view coming soon...</p>
-        </TabsContent>
-
-        {/* === Analytics Tab === */}
-        <TabsContent value="analytics">
-          <p>Analytics coming soon...</p>
-        </TabsContent>
-
-        {/* === Token Management === */}
-        <TabsContent value="token-management" className="space-y-6">
-          <h2 className="text-2xl font-semibold">Query & Token Management</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {tokenStats.map((stat) => (
-              <TaskStatCard key={stat.title} {...stat} />
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+          >
+            {taskStats.map((s) => (
+              <StatCard key={s.title} {...s} />
             ))}
-          </div>
+          </motion.div>
 
           <Card>
             <CardHeader>
-              <CardTitle>Open Queries</CardTitle>
+              <CardTitle>Recent Tasks</CardTitle>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Token ID</TableHead>
-                    <TableHead>Related Task</TableHead>
-                    <TableHead>Subject</TableHead>
-                    <TableHead>Submitted By</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Task</TableHead>
+                    <TableHead>Assigned To</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tokenData.map((token) => (
-                    <TableRow key={token.id}>
-                      <TableCell className="font-medium">{token.id}</TableCell>
-                      <TableCell>{token.task}</TableCell>
-                      <TableCell>{token.subject}</TableCell>
-                      <TableCell>{token.submittedBy}</TableCell>
-                      <TableCell>{token.date}</TableCell>
+                  {taskData.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell>{t.id}</TableCell>
+                      <TableCell>{t.title}</TableCell>
+                      <TableCell>{t.assignedTo}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{t.status}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* TASKS */}
+        <TabsContent value="tasks">
+          <Card>
+            <CardHeader>
+              <CardTitle>Active Tasks</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {taskData.map((task) => (
+                    <TableRow key={task.id}>
+                      <TableCell>{task.id}</TableCell>
+                      <TableCell>{task.title}</TableCell>
+                      <TableCell>{task.assignedTo}</TableCell>
                       <TableCell>
                         <Badge
-                          variant={
-                            token.status.toLowerCase().includes("open")
-                              ? "secondary"
-                              : "default"
+                          className={
+                            task.status === "Completed"
+                              ? "bg-green-600 text-white"
+                              : "bg-yellow-100 text-yellow-800"
                           }
                         >
-                          {token.status}
+                          {task.status}
                         </Badge>
                       </TableCell>
                     </TableRow>
@@ -243,87 +283,200 @@ const TaskManagement = () => {
           </Card>
         </TabsContent>
 
-        {/* === Raise Query Tab === */}
-        <TabsContent value="raise-query">
-          <Card className="max-w-3xl mx-auto">
-            <CardHeader>
-              <CardTitle>Raise a New Query</CardTitle>
-              <CardDescription>
-                Describe your issue, and it will be sent to the operations team.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="query-subject">Subject</Label>
-                <Input
-                  id="query-subject"
-                  placeholder="e.g., Broken equipment, Task clarification..."
-                />
-              </div>
+        {/* ANALYTICS */}
+        <TabsContent value="analytics">
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="grid grid-cols-1 md:grid-cols-2 gap-8"
+          >
+            <Card>
+              <CardHeader>
+                <CardTitle>Tasks by Status</CardTitle>
+              </CardHeader>
+              <CardContent className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={taskAnalytics}>
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#22c55e" radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="query-task">Related Task (Optional)</Label>
-                  <Select>
-                    <SelectTrigger id="query-task">
-                      <SelectValue placeholder="Select a task" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="tsk-1023">
-                        TSK-1023: Wheat Field Irrigation
-                      </SelectItem>
-                      <SelectItem value="tsk-1024">
-                        TSK-1024: Pest Control Application
-                      </SelectItem>
-                      <SelectItem value="tsk-1025">
-                        TSK-1025: Soil Testing
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Query Priority Distribution</CardTitle>
+              </CardHeader>
+              <CardContent className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={queryAnalytics}
+                      dataKey="value"
+                      nameKey="name"
+                      outerRadius={100}
+                      label
+                    >
+                      {queryAnalytics.map((entry, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </TabsContent>
 
-                <div className="space-y-2">
-                  <Label htmlFor="query-priority">Priority</Label>
-                  <Select defaultValue="medium">
-                    <SelectTrigger id="query-priority">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="urgent">Urgent</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+        {/* TOKEN + QUERY MANAGEMENT */}
+        <TabsContent value="token-management">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="space-y-6"
+          >
+            <h2 className="text-2xl font-semibold text-gray-900">Token & Query Management</h2>
 
-              <div className="space-y-2">
-                <Label htmlFor="query-description">Describe your query</Label>
-                <Textarea
-                  id="query-description"
-                  placeholder="Please provide all relevant details..."
-                  rows={6}
-                />
-              </div>
+            {/* TOKEN TABLE */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Active Tokens</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Subject</TableHead>
+                      <TableHead>Submitted By</TableHead>
+                      <TableHead>Assigned To</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {tokens.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell>{t.id}</TableCell>
+                        <TableCell>{t.subject}</TableCell>
+                        <TableCell>{t.submittedBy}</TableCell>
+                        <TableCell>
+                          {t.assignedTo ? (
+                            <Badge>{t.assignedTo}</Badge>
+                          ) : (
+                            <Select onValueChange={(val) => handleAssign(t.id, val, "token")}>
+                              <SelectTrigger className="w-[140px]">
+                                <SelectValue placeholder="Assign" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableResolvers.map((p) => (
+                                  <SelectItem key={p} value={p}>
+                                    {p}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={
+                              t.status === "Resolved"
+                                ? "bg-green-600 text-white"
+                                : "bg-yellow-100 text-yellow-800"
+                            }
+                          >
+                            {t.status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
 
-              <Button className="w-full gap-2">
-                <Send className="w-4 h-4" />
-                Submit Query
-              </Button>
-            </CardContent>
-          </Card>
+            {/* QUERY TABLE */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Query Management</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Subject</TableHead>
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Assigned To</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {queries.map((q) => (
+                      <TableRow key={q.id}>
+                        <TableCell>{q.id}</TableCell>
+                        <TableCell>{q.subject}</TableCell>
+                        <TableCell>
+                          <Badge
+                            className={`${
+                              q.priority === "High"
+                                ? "bg-red-100 text-red-700"
+                                : q.priority === "Medium"
+                                ? "bg-yellow-100 text-yellow-700"
+                                : "bg-green-100 text-green-700"
+                            }`}
+                          >
+                            {q.priority}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {q.assignedTo ? (
+                            <Badge>{q.assignedTo}</Badge>
+                          ) : (
+                            <Select onValueChange={(val) => handleAssign(q.id, val, "query")}>
+                              <SelectTrigger className="w-[140px]">
+                                <SelectValue placeholder="Assign" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableResolvers.map((p) => (
+                                  <SelectItem key={p} value={p}>
+                                    {p}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={
+                              q.status === "Resolved"
+                                ? "bg-green-600 text-white"
+                                : "bg-yellow-100 text-yellow-800"
+                            }
+                          >
+                            {q.status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </motion.div>
         </TabsContent>
       </Tabs>
 
-      {/* === Dialogs === */}
-      <CreateTaskDialog
-        open={isTaskModalOpen}
-        onOpenChange={setIsTaskModalOpen}
-      />
+      {/* Modals */}
+      <CreateTaskDialog open={isTaskModalOpen} onOpenChange={setIsTaskModalOpen} />
       <AiSuggestionsDialog open={isAiModalOpen} onOpenChange={setIsAiModalOpen} />
     </PageLayout>
   );
-};
-
-export default TaskManagement;
+}

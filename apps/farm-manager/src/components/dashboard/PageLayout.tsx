@@ -1,12 +1,19 @@
-import { ReactNode } from "react";
+import React from "react";
 
 interface PageLayoutProps {
-  children: ReactNode;
+  children: React.ReactNode;
+  title?: string;
 }
 
-export const PageLayout = ({ children }: PageLayoutProps) => {
+export const PageLayout = ({ children, title }: PageLayoutProps) => {
   return (
-    <div className="p-8 max-w-7xl">
+    <div className="flex flex-col flex-1 p-6">
+      {title && (
+        <h1 className="text-2xl font-semibold mb-6">
+          {title}
+        </h1>
+      )}
+
       {children}
     </div>
   );

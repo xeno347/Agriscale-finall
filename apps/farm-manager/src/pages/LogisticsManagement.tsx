@@ -1,21 +1,23 @@
-import React, { useState } from 'react'; // <-- 1. IMPORT useState
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
 import { PageLayout } from "@/components/dashboard/PageLayout";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Progress } from "@/components/ui/progress";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
   DialogDescription,
-  DialogFooter
-} from "@/components/ui/dialog"; // <-- 2. IMPORT Dialog components
-import { 
+  DialogFooter,
+} from "@/components/ui/dialog";
+
+import {
   Table,
   TableBody,
   TableCell,
@@ -23,195 +25,756 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { 
-  Tabs, 
-  TabsContent, 
-  TabsList, 
-  TabsTrigger 
-} from "@/components/ui/tabs";
+
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Edit, Trash2, MapPin } from "lucide-react";
+
 import {
-  Truck,
-  MapPin,
-  Calendar,
-  Fuel,
-  TrendingUp,
-  User,
-  Settings,
-  Clock,
-  CheckCircle,
-  TruckIcon,
-  Tractor,
-  PackageCheck,
-  Package,
-  IndianRupee,
-  Search,
-  Plus,
-  ArrowRight,
-  Save,
-  Timer,
-  Wallet
-} from "lucide-react";
+  MapContainer,
+  TileLayer,
+  Polyline,
+  Marker,
+  Popup,
+  useMap,
+} from "react-leaflet";
 
-// --- LOCAL COMPONENTS ---
+import L from "leaflet";
 
-// 1. Reusable Stat Card
-// ... (Component code remains the same) ...
-const StatCard = ({ title, value, icon: Icon, iconColorClass = "text-muted-foreground", bgColorClass = "bg-secondary" }: any) => (
-  <Card>
-    <CardContent className="p-4 flex items-center gap-4">
-      <div className={`p-3 rounded-lg ${bgColorClass}`}>
-        <Icon className={`w-5 h-5 ${iconColorClass}`} />
-      </div>
-      <div>
-        <p className="text-sm text-muted-foreground">{title}</p>
-        <p className="text-2xl font-bold">{value}</p>
-      </div>
-    </CardContent>
-  </Card>
-);
+// Fix leaflet icons
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
 
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
 
-// 2. Vehicle Card (for Fleet Management tab)
-// ... (Component code remains the same) ...
-const VehicleCard = ({ name, plate, icon: Icon, status, driver, mileage, fuel, route, nextMaintenance }: any) => (
-  <Card className="hover:shadow-md transition-shadow">
-    {/* ... Card Content ... */}
-  </Card>
-);
+/* ---------- Types ---------- */
+type DeliveryStatus = "scheduled" | "in-transit" | "delivered";
 
-// 3. Optimization Card (for Route Optimization tab)
-// ... (Component code remains the same) ...
-const OptimizationCard = (props: any) => (
-  <Card>
-    {/* ... Card Content ... */}
-  </Card>
-);
+type Delivery = {
+  id: string;
+  product: string;
+  qty: string;
+  driver: string;
+  schedule: string;
+  value: string;
+  status: DeliveryStatus;
+  route: [number, number][];
+  notes?: string;
+};
 
-
-// --- MOCK DATA ---
-// ... (fleetStats, vehicleData, deliveryStats, deliveryData, optimizationStats, optimizationData) ...
-const fleetStats = [
-  { title: "Total Fleet", value: "4", icon: TruckIcon },
-  { title: "Active Vehicles", value: "3", icon: CheckCircle, iconColorClass: "text-success" },
-  { title: "Avg Fuel Level", value: "63%", icon: Fuel, iconColorClass: "text-yellow-600" },
-  { title: "In Maintenance", value: "1", icon: Settings, iconColorClass: "text-warning" },
+/* ---------- Mock Data ---------- */
+const initialDeliveries: Delivery[] = [
+  {
+    id: "d-1",
+    product: "Wheat Grain",
+    qty: "5,000 kg",
+    driver: "Ramesh Kumar",
+    schedule: "2025-11-07T06:00",
+    value: "₹1.75 L",
+    status: "in-transit",
+    route: [
+      [28.7041, 77.1025],
+      [28.882, 76.1],
+      [29.0, 76.5],
+    ],
+    notes: "Keep temperature stable.",
+  },
+  {
+    id: "d-2",
+    product: "Fertilizer (Urea)",
+    qty: "2,000 kg",
+    driver: "Vijay Sharma",
+    schedule: "2025-11-07T09:00",
+    value: "₹48K",
+    status: "scheduled",
+    route: [
+      [28.7041, 77.1025],
+      [28.6, 77.0],
+    ],
+    notes: "",
+  },
+  {
+    id: "d-3",
+    product: "Fresh Vegetables",
+    qty: "800 kg",
+    driver: "Ravi Yadav",
+    schedule: "2025-11-07T04:00",
+    value: "₹32K",
+    status: "delivered",
+    route: [
+      [28.7041, 77.1025],
+      [28.7, 77.12],
+    ],
+    notes: "",
+  },
 ];
 
-const vehicleData = [
-  { name: "Transport Truck 1", plate: "HR-01-AB-1234", icon: Truck, status: "active", driver: "Ramesh Kumar", mileage: 45000, fuel: 75, route: ["En route to Delhi Market", "Farm → Delhi Mandi"], nextMaintenance: "15/11/2024" },
-  { name: "Tractor Unit 3", plate: "PB-12-CD-5678", icon: Tractor, status: "active", driver: "Sukhdev Singh", mileage: 32000, fuel: 60, route: ["North Zone - Plot A", "North Zone Field Operation"], nextMaintenance: "20/11/2024" },
-  { name: "Pickup Truck 2", plate: "UP-32-EF-9012", icon: Truck, status: "active", driver: "Vijay Sharma", mileage: 28000, fuel: 85, route: ["Supply Depot", "Supply Runs"], nextMaintenance: "25/11/2024" },
-  { name: "Harvester Transport", plate: "RJ-14-GH-3456", icon: Truck, status: "maintenance", driver: "Amit Patel", mileage: 52000, fuel: 30, route: ["Service Center"], nextMaintenance: "5/11/2024" },
-];
+function centerForRoute(route: [number, number][]) {
+  const lat = route.reduce((s, p) => s + p[0], 0) / route.length;
+  const lng = route.reduce((s, p) => s + p[1], 0) / route.length;
+  return [lat, lng] as [number, number];
+}
 
-const deliveryStats = [
-  { title: "Total Deliveries", value: "4", icon: Package },
-  { title: "In Transit", value: "1", icon: Truck, iconColorClass: "text-blue-600" },
-  { title: "Delivered Today", value: "1", icon: PackageCheck, iconColorClass: "text-success" },
-  { title: "Est. Value", value: "₹3.80 L", icon: IndianRupee, iconColorClass: "text-green-600" },
-];
+function FlyToRoute({ latlng }: { latlng: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (latlng) map.flyTo(latlng, 10, { duration: 0.8 });
+  }, [latlng]);
+  return null;
+}
 
-const deliveryData = [
-  { id: 1, type: "outbound", product: "Wheat Grain", qty: "5,000 kg", route: "North Zone Storage → Delhi Azadpur Mandi", driver: "Ramesh Kumar", schedule: "7/11/2024 06:00 AM", value: "₹1.75 L", status: "in-transit" },
-  { id: 2, type: "inbound", product: "Fertilizer (Urea)", qty: "2,000 kg", route: "IFFCO Depot, Panipat → Farm Storage", driver: "Vijay Sharma", schedule: "7/11/2024 09:00 AM", value: "₹48K", status: "scheduled" },
-  { id: 3, type: "outbound", product: "Fresh Vegetables", qty: "800 kg", route: "South Zone - Plot B2 → Local Sabzi Mandi", driver: "Vijay Sharma", schedule: "7/11/2024 04:00 AM", value: "₹32K", status: "delivered" },
-  { id: 4, type: "inbound", product: "Seeds (Cotton)", qty: "500 kg", route: "Seed Corporation, Ludhiana → West Zone Storage", driver: "Sukhdev Singh", schedule: "8/11/2024 10:00 AM", value: "₹1.25 L", status: "scheduled" },
-];
+/* --------------------------------------------------
+   FIXED FUNCTION — ALWAYS RETURNS [number,number][]
+---------------------------------------------------- */
+function parseRouteText(text: string): [number, number][] {
+  return text
+    .split(/[\n;]+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(",");
+      if (parts.length !== 2) return null;
 
-const optimizationStats = [
-  { title: "Total Savings", value: "₹3K", icon: Wallet, iconColorClass: "text-green-600", bgColorClass: "bg-green-100" },
-  { title: "Fuel Saved", value: "15.5 L", icon: Fuel, iconColorClass: "text-blue-600", bgColorClass: "bg-blue-100" },
-  { title: "Time Saved", value: "65 min", icon: Timer, iconColorClass: "text-yellow-600", bgColorClass: "bg-yellow-100" },
-];
+      const lat = Number(parts[0].trim());
+      const lng = Number(parts[1].trim());
 
-const optimizationData = [
-  { name: "Transport Truck 1", efficiency: "22% more efficient", currentRoute: "Farm → NH-1 → Delhi (via Panipat)", currentDist: "185 km", optimRoute: "Farm → Bypass Road → Delhi (direct)", optimDist: "145 km", distSaved: "40 km", fuelSaved: "12 L", timeSaved: "45 min", costSaved: "₹2K" },
-  { name: "Tractor Unit 3", efficiency: "21% more efficient", currentRoute: "Plot A1 → A2 → A3 → B1 → Storage", currentDist: "28 km", optimRoute: "Plot A1 → B1 → A2 → A3 → Storage", optimDist: "22 km", distSaved: "6 km", fuelSaved: "3.5 L", timeSaved: "20 min", costSaved: "₹700" },
-];
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
+      return [lat, lng] as [number, number];
+    })
+    .filter((x): x is [number, number] => Array.isArray(x));
+}
 
-// --- MAIN PAGE COMPONENT ---
+function routeToText(route: [number, number][]) {
+  return route.map((r) => `${r[0]}, ${r[1]}`).join("\n");
+}
 
-const LogisticsManagement = () => {
-  // 3. ADD STATE for the modal
-  const [isModalOpen, setIsModalOpen] = useState(false);
+/* ---------- Component ---------- */
+export default function LogisticsManagement() {
+  const [deliveries, setDeliveries] = useState(initialDeliveries);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(
+    null
+  );
 
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isOptimizeDialogOpen, setIsOptimizeDialogOpen] = useState(false);
+
+  const [editingDelivery, setEditingDelivery] = useState<Delivery | null>(null);
+
+  const [form, setForm] = useState({
+    product: "",
+    qty: "",
+    driver: "",
+    schedule: "",
+    value: "",
+    status: "scheduled" as DeliveryStatus,
+    routeText: "",
+    notes: "",
+  });
+
+  const selectedDelivery =
+    deliveries.find((d) => d.id === selectedDeliveryId) || null;
+
+  const mapCenter: [number, number] = useMemo(() => {
+    if (selectedDelivery) return centerForRoute(selectedDelivery.route);
+    return centerForRoute(deliveries[0].route);
+  }, [selectedDelivery]);
+
+  /* ---------- CRUD ---------- */
+  function handleOpenAdd() {
+    setForm({
+      product: "",
+      qty: "",
+      driver: "",
+      schedule: "",
+      value: "",
+      status: "scheduled",
+      routeText: "",
+      notes: "",
+    });
+    setIsAddDialogOpen(true);
+  }
+
+  function handleAddDelivery() {
+    const newDelivery: Delivery = {
+      id: `d-${Date.now()}`,
+      product: form.product,
+      qty: form.qty,
+      driver: form.driver,
+      schedule: form.schedule,
+      value: form.value,
+      status: form.status,
+      route: parseRouteText(form.routeText),
+      notes: form.notes,
+    };
+    setDeliveries([newDelivery, ...deliveries]);
+    setIsAddDialogOpen(false);
+  }
+
+  function handleOpenEdit(d: Delivery) {
+    setEditingDelivery(d);
+    setForm({
+      product: d.product,
+      qty: d.qty,
+      driver: d.driver,
+      schedule: d.schedule,
+      value: d.value,
+      status: d.status,
+      routeText: routeToText(d.route),
+      notes: d.notes || "",
+    });
+    setIsEditDialogOpen(true);
+  }
+
+  function handleSaveEdit() {
+    if (!editingDelivery) return;
+
+    setDeliveries((prev) =>
+      prev.map((p) =>
+        p.id === editingDelivery.id
+          ? {
+              ...p,
+              product: form.product,
+              qty: form.qty,
+              driver: form.driver,
+              schedule: form.schedule,
+              value: form.value,
+              status: form.status,
+              route: parseRouteText(form.routeText),
+              notes: form.notes,
+            }
+          : p
+      )
+    );
+
+    setIsEditDialogOpen(false);
+    setEditingDelivery(null);
+  }
+
+  function handleDelete(id: string) {
+    if (confirm("Delete this delivery?")) {
+      setDeliveries((prev) => prev.filter((d) => d.id !== id));
+    }
+  }
+
+  function openOptimizerFor(id: string) {
+    setSelectedDeliveryId(id);
+    setIsOptimizeDialogOpen(true);
+  }
+
+  function handleOptimizeRoute(id: string) {
+    setDeliveries((prev) =>
+      prev.map((d) =>
+        d.id === id ? { ...d, route: [...d.route].reverse() } : d
+      )
+    );
+    setIsOptimizeDialogOpen(false);
+  }
+
+  /* ---------- UI ---------- */
   return (
     <PageLayout>
-      <PageHeader 
+      <PageHeader
         title="Logistics Management"
-        description="Manage field managers and regional operations across all zones"
+        description="Fleet, deliveries and live tracking"
       />
-      
+
+      {/* ALL TABS */}
       <Tabs defaultValue="fleet-management">
         <TabsList className="mb-4">
           <TabsTrigger value="fleet-management">Fleet Management</TabsTrigger>
-          <TabsTrigger value="delivery-scheduling">Delivery Scheduling</TabsTrigger>
-          <TabsTrigger value="route-optimization">Route Optimization</TabsTrigger>
+          <TabsTrigger value="delivery-scheduling">
+            Delivery Scheduling
+          </TabsTrigger>
+          <TabsTrigger value="route-optimization">
+            Route Optimization
+          </TabsTrigger>
         </TabsList>
 
-        {/* =================================== */}
-        {/* TAB 1: FLEET MANAGEMENT         */}
-        {/* =================================== */}
+        {/* ======================================================
+            FLEET MANAGEMENT TAB
+        ======================================================= */}
         <TabsContent value="fleet-management" className="space-y-6">
-          {/* ... (Existing Fleet Content) ... */}
-        </TabsContent>
-
-        {/* =================================== */}
-        {/* TAB 2: DELIVERY SCHEDULING      */}
-        {/* =================================== */}
-        <TabsContent value="delivery-scheduling" className="space-y-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="relative w-full md:w-auto">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Search deliveries..." className="pl-9 w-full md:w-64" />
-            </div>
-            {/* 4. ADD onClick HANDLER to the button */}
-            <Button 
-              className="gap-2 w-full md:w-auto"
-              onClick={() => setIsModalOpen(true)}
-            >
-              <Plus className="w-4 h-4" />
-              Schedule Delivery
-            </Button>
-          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {deliveryStats.map((stat) => <StatCard key={stat.title} {...stat} />)}
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Total Fleet</div>
+                <div className="text-2xl font-bold">4</div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">
+                  Active Vehicles
+                </div>
+                <div className="text-2xl font-bold">3</div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">
+                  Avg Fuel Level
+                </div>
+                <div className="text-2xl font-bold">63%</div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">
+                  In Maintenance
+                </div>
+                <div className="text-2xl font-bold">1</div>
+              </CardContent>
+            </Card>
           </div>
+
           <Card>
-            {/* ... (Existing Delivery Table) ... */}
+            <CardHeader>
+              <CardTitle>Fleet Overview</CardTitle>
+            </CardHeader>
+
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Vehicle</TableHead>
+                    <TableHead>Driver</TableHead>
+                    <TableHead>Plate</TableHead>
+                    <TableHead>Fuel</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {[
+                    {
+                      name: "Truck A",
+                      driver: "Ramesh Kumar",
+                      plate: "DL 01 AB 1234",
+                      fuel: 78,
+                      status: "active",
+                    },
+                    {
+                      name: "Truck B",
+                      driver: "Vijay Sharma",
+                      plate: "HR 26 XY 9876",
+                      fuel: 55,
+                      status: "active",
+                    },
+                    {
+                      name: "Van C",
+                      driver: "Suresh Mehta",
+                      plate: "UP 14 GH 4432",
+                      fuel: 38,
+                      status: "inactive",
+                    },
+                    {
+                      name: "Mini Loader D",
+                      driver: "Ravi Yadav",
+                      plate: "PB 10 KL 1111",
+                      fuel: 82,
+                      status: "active",
+                    },
+                  ].map((v) => (
+                    <TableRow key={v.plate}>
+                      <TableCell>{v.name}</TableCell>
+                      <TableCell>{v.driver}</TableCell>
+                      <TableCell>{v.plate}</TableCell>
+                      <TableCell>{v.fuel}%</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            v.status === "active" ? "success" : "destructive"
+                          }
+                        >
+                          {v.status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
           </Card>
         </TabsContent>
 
-        {/* =================================== */}
-        {/* TAB 3: ROUTE OPTIMIZATION       */}
-        {/* =================================== */}
+        {/* ======================================================
+            DELIVERY SCHEDULING TAB
+        ======================================================= */}
+        <TabsContent value="delivery-scheduling" className="space-y-6">
+          <div className="flex items-center justify-between gap-4">
+            <Input placeholder="Search deliveries..." className="max-w-xs" />
+            <Button onClick={handleOpenAdd} className="gap-2">
+              <Plus className="w-4 h-4" /> Add Delivery
+            </Button>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Scheduled Deliveries</CardTitle>
+            </CardHeader>
+
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Product</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead>Driver</TableHead>
+                    <TableHead>Schedule</TableHead>
+                    <TableHead>Value</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {deliveries.map((d) => (
+                    <TableRow key={d.id}>
+                      <TableCell>{d.id}</TableCell>
+                      <TableCell>{d.product}</TableCell>
+                      <TableCell>{d.qty}</TableCell>
+                      <TableCell>{d.driver}</TableCell>
+                      <TableCell>
+                        {new Date(d.schedule).toLocaleString()}
+                      </TableCell>
+                      <TableCell>{d.value}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            d.status === "delivered"
+                              ? "secondary"
+                              : d.status === "in-transit"
+                              ? "success"
+                              : "outline"
+                          }
+                        >
+                          {d.status}
+                        </Badge>
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleOpenEdit(d)}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => openOptimizerFor(d.id)}
+                          >
+                            <MapPin className="w-4 h-4" />
+                          </Button>
+
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleDelete(d.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ======================================================
+            ROUTE OPTIMIZATION TAB
+        ======================================================= */}
         <TabsContent value="route-optimization" className="space-y-6">
-          {/* ... (Existing Optimization Content) ... */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Route Optimization — Map View</CardTitle>
+            </CardHeader>
+
+            <CardContent className="p-0">
+              <div style={{ height: 420, width: "100%" }}>
+                <MapContainer
+                  center={mapCenter}
+                  zoom={9}
+                  style={{ height: "100%", width: "100%" }}
+                >
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+                  {deliveries.map((d) => (
+                    <React.Fragment key={d.id}>
+                      <Polyline positions={d.route} />
+                      {d.route.map((pt, idx) => (
+                        <Marker key={idx} position={pt}>
+                          <Popup>
+                            <strong>{d.product}</strong>
+                            <div>{d.driver}</div>
+                            <div>{d.id}</div>
+                          </Popup>
+                        </Marker>
+                      ))}
+                    </React.Fragment>
+                  ))}
+
+                  <FlyToRoute
+                    latlng={
+                      selectedDelivery
+                        ? centerForRoute(selectedDelivery.route)
+                        : null
+                    }
+                  />
+                </MapContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Controls */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Selected Delivery</CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                <select
+                  className="w-full border p-2 rounded"
+                  value={selectedDeliveryId ?? ""}
+                  onChange={(e) =>
+                    setSelectedDeliveryId(e.target.value || null)
+                  }
+                >
+                  <option value="">— Select —</option>
+                  {deliveries.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.id} — {d.product}
+                    </option>
+                  ))}
+                </select>
+
+                <Button
+                  className="w-full mt-3"
+                  onClick={() => {
+                    if (!selectedDeliveryId)
+                      return alert("Select a delivery first");
+                    openOptimizerFor(selectedDeliveryId);
+                  }}
+                >
+                  Optimize Route
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Route Info</CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                {selectedDelivery ? (
+                  <>
+                    <p>
+                      <strong>{selectedDelivery.product}</strong>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedDelivery.driver}
+                    </p>
+                    <Textarea
+                      readOnly
+                      rows={6}
+                      value={routeToText(selectedDelivery.route)}
+                    />
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Select a delivery to view details.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Quick Actions</CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                <Button className="w-full" onClick={handleOpenAdd}>
+                  Create Delivery
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
 
-      {/* 5. ADD THE DIALOG COMPONENT */}
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+      {/* ======================================================
+          ADD DELIVERY MODAL
+      ======================================================= */}
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Schedule New Delivery</DialogTitle>
-            <DialogDescription>
-              Fill out the details to schedule a new inbound or outbound delivery.
-            </DialogDescription>
+            <DialogTitle>Create Delivery</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <p>A form to schedule a delivery would go here.</p>
+
+          <div className="space-y-3 py-2">
+            <Input
+              placeholder="Product"
+              value={form.product}
+              onChange={(e) => setForm({ ...form, product: e.target.value })}
+            />
+            <Input
+              placeholder="Quantity"
+              value={form.qty}
+              onChange={(e) => setForm({ ...form, qty: e.target.value })}
+            />
+            <Input
+              placeholder="Driver"
+              value={form.driver}
+              onChange={(e) => setForm({ ...form, driver: e.target.value })}
+            />
+            <Input
+              placeholder="Schedule"
+              value={form.schedule}
+              onChange={(e) => setForm({ ...form, schedule: e.target.value })}
+            />
+            <Input
+              placeholder="Value"
+              value={form.value}
+              onChange={(e) => setForm({ ...form, value: e.target.value })}
+            />
+
+            <Textarea
+              rows={4}
+              placeholder="lat,lng"
+              value={form.routeText}
+              onChange={(e) => setForm({ ...form, routeText: e.target.value })}
+            />
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-            <Button>Schedule</Button>
+            <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddDelivery}>Create</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
+      {/* ======================================================
+          EDIT DELIVERY MODAL
+      ======================================================= */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Delivery</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <Input
+              placeholder="Product"
+              value={form.product}
+              onChange={(e) => setForm({ ...form, product: e.target.value })}
+            />
+            <Input
+              placeholder="Quantity"
+              value={form.qty}
+              onChange={(e) => setForm({ ...form, qty: e.target.value })}
+            />
+            <Input
+              placeholder="Driver"
+              value={form.driver}
+              onChange={(e) => setForm({ ...form, driver: e.target.value })}
+            />
+            <Input
+              placeholder="Schedule"
+              value={form.schedule}
+              onChange={(e) => setForm({ ...form, schedule: e.target.value })}
+            />
+            <Input
+              placeholder="Value"
+              value={form.value}
+              onChange={(e) => setForm({ ...form, value: e.target.value })}
+            />
+
+            <Textarea
+              rows={4}
+              value={form.routeText}
+              onChange={(e) => setForm({ ...form, routeText: e.target.value })}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsEditDialogOpen(false);
+                setEditingDelivery(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ======================================================
+          OPTIMIZE ROUTE MODAL
+      ======================================================= */}
+      <Dialog
+        open={isOptimizeDialogOpen}
+        onOpenChange={setIsOptimizeDialogOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Optimize Route</DialogTitle>
+            <DialogDescription>
+              Reverse route (demo optimization)
+            </DialogDescription>
+          </DialogHeader>
+
+          <p>
+            Delivery:{" "}
+            <strong>
+              {selectedDelivery?.id} — {selectedDelivery?.product}
+            </strong>
+          </p>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsOptimizeDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              onClick={() =>
+                selectedDeliveryId
+                  ? handleOptimizeRoute(selectedDeliveryId)
+                  : alert("Select a delivery")
+              }
+            >
+              Optimize
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
-};
-
-export default LogisticsManagement;
+}

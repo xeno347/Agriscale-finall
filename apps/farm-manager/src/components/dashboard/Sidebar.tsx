@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { 
   Home, Activity, ListChecks, Users, Leaf, TrendingUp, Star, 
-  Package, Truck, Calendar, Brain, MessageSquare, Clock, 
+  Package, Truck, Brain, MessageSquare, Clock, 
   LogOut, ChevronLeft, User
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,7 +19,6 @@ const menuItems = [
   { icon: Star, label: "Performance Review", path: "/performance-review" },
   { icon: Package, label: "Inventory Management", path: "/inventory" },
   { icon: Truck, label: "Logistics Management", path: "/logistics" },
-  { icon: Calendar, label: "Resource Planning", path: "/resource-planning" },
   { icon: Brain, label: "AI Analysis", path: "/ai-analysis" },
   { icon: MessageSquare, label: "Communications", path: "/communications" },
   { icon: Clock, label: "Attendance Management", path: "/attendance" },
