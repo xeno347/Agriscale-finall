@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Filter } from 'lucide-react';
+import { Plus, Search, Filter, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Lead } from '@/types/farm';
@@ -8,6 +8,7 @@ import LeadsTable from '@/components/leads/LeadsTable';
 import AddLeadModal, { AddLeadFormData } from '@/components/leads/AddLeadModal';
 import VerificationModal from '@/components/leads/VerificationModal';
 import KYCModal from '@/components/leads/KYCModal';
+import LandMappingModal from '@/components/leads/LandMappingModal';
 import { useToast } from '@/hooks/use-toast';
 
 const Leads = () => {
@@ -17,6 +18,9 @@ const Leads = () => {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [kycModalOpen, setKycModalOpen] = useState(false);
+  const [landMappingOpen, setLandMappingOpen] = useState(false);
+  const [landMappingComplete, setLandMappingComplete] = useState(false);
+  const [mappedCoordinates, setMappedCoordinates] = useState<{ lat: number; lng: number }[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const { toast } = useToast();
 
@@ -39,16 +43,29 @@ const Leads = () => {
     }
   };
 
+  const handleLandMappingComplete = (coordinates: { lat: number; lng: number }[]) => {
+    setMappedCoordinates(coordinates);
+    setLandMappingComplete(true);
+    toast({
+      title: 'Land Mapping Complete',
+      description: `Farm boundary mapped with ${coordinates.length} points. You can now add a lead.`,
+    });
+  };
+
   const handleAddLead = async (data: AddLeadFormData) => {
     try {
       const newLead = await leadsApi.create({
         ...data,
         status: 'contacted',
+        landCoordinates: mappedCoordinates,
       });
       setLeads(prev => [newLead, ...prev]);
+      // Reset mapping state after adding lead
+      setLandMappingComplete(false);
+      setMappedCoordinates([]);
       toast({
         title: 'Success',
-        description: 'Lead added successfully',
+        description: 'Lead added successfully with land mapping',
       });
     } catch (error) {
       toast({
@@ -153,10 +170,25 @@ const Leads = () => {
           <h1 className="text-3xl font-display font-bold">Leads</h1>
           <p className="text-muted-foreground mt-1">Manage farmer onboarding pipeline</p>
         </div>
-        <Button onClick={() => setAddModalOpen(true)} className="gap-2">
-          <Plus className="w-4 h-4" />
-          Add Lead
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button 
+            onClick={() => setLandMappingOpen(true)} 
+            variant={landMappingComplete ? "secondary" : "default"}
+            className="gap-2"
+          >
+            <MapPin className="w-4 h-4" />
+            {landMappingComplete ? 'Mapping Done ✓' : 'Add Land Mapping'}
+          </Button>
+          <Button 
+            onClick={() => setAddModalOpen(true)} 
+            disabled={!landMappingComplete}
+            variant={landMappingComplete ? "default" : "outline"}
+            className="gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add Lead
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -221,6 +253,12 @@ const Leads = () => {
         onClose={() => setKycModalOpen(false)}
         lead={selectedLead}
         onSubmit={handleKYCSubmit}
+      />
+
+      <LandMappingModal
+        open={landMappingOpen}
+        onClose={() => setLandMappingOpen(false)}
+        onComplete={handleLandMappingComplete}
       />
     </div>
   );
