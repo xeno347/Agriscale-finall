@@ -12,6 +12,7 @@ export interface Lead {
   state: string;
   estimatedLandArea?: number;
   location?: { lat: number; lng: number };
+  landCoordinates?: { lat: number; lng: number }[];
   waterAvailable: boolean;
   notes?: string;
   status: LeadStatus;
