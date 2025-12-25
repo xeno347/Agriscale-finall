@@ -2,6 +2,7 @@ export type LeadStatus = 'contacted' | 'verified' | 'registered' | 'rejected';
 
 export interface Lead {
   id: string;
+  farmerId?: string;
   fullName: string;
   phoneNumber: string;
   alternatePhone?: string;
@@ -13,11 +14,14 @@ export interface Lead {
   estimatedLandArea?: number;
   location?: { lat: number; lng: number };
   landCoordinates?: { lat: number; lng: number }[];
-  waterAvailable: boolean;
+  waterAvailable?: boolean;
   notes?: string;
+  farmingOption?: string;
   status: LeadStatus;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+  kycData?: any;
+  agreementData?: any;
 }
 
 export interface KYCDetails {
@@ -59,4 +63,40 @@ export interface Farmer {
   landMapping?: LandMapping;
   agreements: Agreement[];
   createdAt: Date;
+}
+
+export type HarvestPlanStatus = 'planned' | 'in-progress' | 'completed' | 'cancelled';
+export type HarvestOrderStatus = 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled';
+
+export interface HarvestPlan {
+  id: string;
+  farmerId: string;
+  farmerName: string;
+  cropType: string;
+  planningDate: Date | string;
+  expectedHarvestDate: Date | string;
+  estimatedYield: number;
+  yieldUnit: 'kg' | 'tonnes' | 'quintals';
+  notes?: string;
+  status: HarvestPlanStatus;
+  createdAt: Date | string;
+  updatedAt?: Date | string;
+}
+
+export interface HarvestOrder {
+  id: string;
+  farmerId: string;
+  farmerName: string;
+  cropType: string;
+  quantity: number;
+  quantityUnit: 'kg' | 'tonnes' | 'quintals';
+  orderDate: Date | string;
+  expectedDeliveryDate: Date | string;
+  buyerName?: string;
+  price?: number;
+  totalAmount?: number;
+  notes?: string;
+  status: HarvestOrderStatus;
+  createdAt: Date | string;
+  updatedAt?: Date | string;
 }

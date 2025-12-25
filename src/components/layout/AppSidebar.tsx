@@ -1,4 +1,4 @@
-import { Users, UserCheck, Wheat, LayoutDashboard } from 'lucide-react';
+import { Users, UserCheck, Wheat, LayoutDashboard, Sprout, Package } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
@@ -44,7 +44,7 @@ interface AppSidebarProps {
 
 const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
   return (
-    <aside className="w-64 h-screen bg-sidebar flex flex-col border-r border-sidebar-border">
+    <aside className="w-64 sticky top-0 h-screen bg-sidebar flex flex-col border-r border-sidebar-border overflow-y-auto">
       {/* Logo */}
       <div className="p-6 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
@@ -75,6 +75,22 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           to="/farmers"
           icon={UserCheck}
           label="Farmers"
+        />
+
+        <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
+          Harvest Management
+        </p>
+
+        <NavItem
+          to="/harvest-planning"
+          icon={Sprout}
+          label="Harvest Planning"
+        />
+
+        <NavItem
+          to="/harvest-orders"
+          icon={Package}
+          label="Harvest Orders"
         />
       </nav>
 

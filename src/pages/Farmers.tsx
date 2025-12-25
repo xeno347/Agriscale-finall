@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Farmer } from '@/types/farm';
 import { farmersApi } from '@/services/mockData';
+import getBaseUrl from '@/lib/config';
 import FarmerCard from '@/components/farmers/FarmerCard';
 import { useToast } from '@/hooks/use-toast';
 
@@ -19,9 +20,54 @@ const Farmers = () => {
 
   const loadFarmers = async () => {
     try {
-      const data = await farmersApi.getAll();
-      setFarmers(data);
+      const base = getBaseUrl();
+      const resp = await fetch(`${base.replace(/\/$/, '')}/farmer_managment/get_farmers`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+
+      const result = await resp.json();
+
+      const transformed: Farmer[] = (result.farmers || []).map((item: any) => {
+        const fd = item.farmer_data || {};
+        const kyc = item.kyc_data || null;
+
+        return {
+          id: item.farmer_id,
+          fullName: fd.full_name || 'Unknown',
+          phoneNumber: fd.phone_number || 'N/A',
+          alternatePhone: fd.alternate_phone_number ?? null,
+          village: fd.village || 'N/A',
+          taluka: fd.taluka ?? null,
+          district: fd.district || 'N/A',
+          state: fd.state || 'N/A',
+          profileImageUrl: undefined,
+          kyc: kyc
+            ? {
+                aadhaarNumber: kyc.adhar_number,
+                panNumber: kyc.pan_numnber ?? null,
+                address: kyc.permanent_address,
+                bankName: '',
+                accountNumber: kyc.accound_number,
+                ifscCode: kyc.IFSC_code,
+                verified: true,
+              }
+            : undefined,
+          landMapping: fd.estimated_land_area != null
+            ? { totalArea: fd.estimated_land_area, coordinates: fd.land_coordinates || [], soilType: undefined }
+            : undefined,
+          agreements: item.agreement_data && Array.isArray(item.agreement_data)
+            ? item.agreement_data
+            : [],
+          createdAt: item.created_at ? new Date(item.created_at) : new Date(),
+        } as Farmer;
+      });
+
+      setFarmers(transformed);
     } catch (error) {
+      console.error('Failed to load farmers:', error);
       toast({
         title: 'Error',
         description: 'Failed to load farmers',

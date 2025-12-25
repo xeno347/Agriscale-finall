@@ -25,7 +25,10 @@ const statusConfig: Record<LeadStatus, { label: string; className: string }> = {
 };
 
 const StatusBadge = ({ status }: StatusBadgeProps) => {
-  const config = statusConfig[status];
+  const config = statusConfig[status] || {
+    label: String(status) || 'Unknown',
+    className: 'bg-gray-100 text-gray-800 border-gray-200',
+  };
 
   return (
     <span

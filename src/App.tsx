@@ -7,6 +7,8 @@ import AppLayout from "./components/layout/AppLayout";
 import Index from "./pages/Index";
 import Leads from "./pages/Leads";
 import Farmers from "./pages/Farmers";
+import HarvestPlanning from "./pages/HarvestPlanning";
+import HarvestOrders from "./pages/HarvestOrders";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +34,22 @@ const App = () => (
             element={
               <AppLayout>
                 <Farmers />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/harvest-planning"
+            element={
+              <AppLayout>
+                <HarvestPlanning />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/harvest-orders"
+            element={
+              <AppLayout>
+                <HarvestOrders />
               </AppLayout>
             }
           />

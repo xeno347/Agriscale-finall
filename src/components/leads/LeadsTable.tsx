@@ -39,6 +39,7 @@ const LeadsTable = ({ leads, onProceed }: LeadsTableProps) => {
           <TableRow className="bg-secondary/50 hover:bg-secondary/50">
             <TableHead className="font-semibold">Farmer Name</TableHead>
             <TableHead className="font-semibold">Contact</TableHead>
+            <TableHead className="font-semibold">Farming Option</TableHead>
             <TableHead className="font-semibold">Location</TableHead>
             <TableHead className="font-semibold">Status</TableHead>
             <TableHead className="font-semibold text-right">Action</TableHead>
@@ -62,6 +63,11 @@ const LeadsTable = ({ leads, onProceed }: LeadsTableProps) => {
                 {lead.alternatePhone && (
                   <p className="text-xs text-muted-foreground">{lead.alternatePhone}</p>
                 )}
+              </TableCell>
+              <TableCell>
+                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-sm font-medium bg-blue-100 text-blue-800">
+                  {lead.farmingOption || 'N/A'}
+                </span>
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">

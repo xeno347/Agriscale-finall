@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,7 +6,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, ArrowRight, ArrowLeft, MapPin, Undo2, Trash2, Check, Info } from 'lucide-react';
+import { Loader2, ArrowRight, ArrowLeft, MapPin, Check, Info, Navigation } from 'lucide-react';
+import { MapContainer, TileLayer, FeatureGroup } from 'react-leaflet';
+import { EditControl } from 'react-leaflet-draw';
+import 'leaflet/dist/leaflet.css';
+import 'leaflet-draw/dist/leaflet.draw.css';
 
 interface AddLeadModalProps {
   open: boolean;
@@ -19,6 +23,7 @@ export interface AddLeadFormData {
   phoneNumber: string;
   alternatePhone?: string;
   leadSource: string;
+  farmingOption?: string;
   village: string;
   taluka?: string;
   district: string;
@@ -29,21 +34,20 @@ export interface AddLeadFormData {
   landCoordinates?: { lat: number; lng: number }[];
 }
 
-interface Point {
-  x: number;
-  y: number;
-  lat: number;
-  lng: number;
-}
-
 const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'info' | 'mapping'>('info');
+  const [skipMapping, setSkipMapping] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 22.5726, lng: 78.9629 });
+  const featureGroupRef = useRef(null);
+  
   const [formData, setFormData] = useState<AddLeadFormData>({
     fullName: '',
     phoneNumber: '',
     alternatePhone: '',
     leadSource: '',
+    farmingOption: '',
     village: '',
     taluka: '',
     district: '',
@@ -54,124 +58,38 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
     landCoordinates: [],
   });
 
-  // Land mapping state
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [points, setPoints] = useState<Point[]>([]);
-  const [isComplete, setIsComplete] = useState(false);
-  const [hoveredPoint, setHoveredPoint] = useState<number | null>(null);
-
-  const mapCenter = { lat: 22.5726, lng: 78.9629 };
-  
-  const pixelToLatLng = (x: number, y: number, canvas: HTMLCanvasElement) => {
-    const scale = 0.0001;
-    return {
-      lat: mapCenter.lat + (canvas.height / 2 - y) * scale,
-      lng: mapCenter.lng + (x - canvas.width / 2) * scale,
-    };
+  const getUserLocation = async () => {
+    setLocationLoading(true);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        });
+      });
+      setMapCenter({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      });
+    } catch (error) {
+      console.error('Error getting location:', error);
+      alert('Unable to get your location. Using default location.');
+    } finally {
+      setLocationLoading(false);
+    }
   };
-
-  const drawMap = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    gradient.addColorStop(0, '#2d5016');
-    gradient.addColorStop(0.3, '#3d6b1f');
-    gradient.addColorStop(0.5, '#4a7c23');
-    gradient.addColorStop(0.7, '#3d6b1f');
-    gradient.addColorStop(1, '#2d5016');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    for (let i = 0; i < 500; i++) {
-      const x = Math.random() * canvas.width;
-      const y = Math.random() * canvas.height;
-      const size = Math.random() * 3 + 1;
-      const alpha = Math.random() * 0.3;
-      ctx.fillStyle = `rgba(${Math.random() > 0.5 ? '255,255,255' : '0,0,0'}, ${alpha})`;
-      ctx.fillRect(x, y, size, size);
-    }
-
-    ctx.strokeStyle = 'rgba(34, 139, 34, 0.3)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < canvas.width; i += 40) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, canvas.height);
-      ctx.stroke();
-    }
-    for (let i = 0; i < canvas.height; i += 40) {
-      ctx.beginPath();
-      ctx.moveTo(0, i);
-      ctx.lineTo(canvas.width, i);
-      ctx.stroke();
-    }
-
-    if (points.length > 0) {
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      points.forEach((point, index) => {
-        if (index > 0) {
-          ctx.lineTo(point.x, point.y);
-        }
-      });
-
-      if (isComplete && points.length >= 3) {
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(34, 197, 94, 0.3)';
-        ctx.fill();
-      }
-
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      points.forEach((point, index) => {
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, hoveredPoint === index ? 10 : 8, 0, Math.PI * 2);
-        ctx.fillStyle = index === 0 ? '#f59e0b' : '#22c55e';
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${index + 1}`, point.x, point.y + 4);
-      });
-    }
-
-    if (!isComplete) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(10, canvas.height - 40, 300, 30);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '12px sans-serif';
-      ctx.textAlign = 'left';
-      const instruction = points.length === 0 
-        ? 'Click to place first point' 
-        : points.length < 3 
-          ? `Place ${3 - points.length} more point(s) minimum`
-          : 'Click first point (orange) to close boundary';
-      ctx.fillText(instruction, 20, canvas.height - 20);
-    }
-  }, [points, isComplete, hoveredPoint]);
 
   useEffect(() => {
     if (open) {
       setStep('info');
-      setPoints([]);
-      setIsComplete(false);
+      setSkipMapping(false);
       setFormData({
         fullName: '',
         phoneNumber: '',
         alternatePhone: '',
         leadSource: '',
+        farmingOption: '',
         village: '',
         taluka: '',
         district: '',
@@ -185,73 +103,29 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   }, [open]);
 
   useEffect(() => {
-    if (step === 'mapping') {
-      setTimeout(() => drawMap(), 50);
+    if (step === 'mapping' && !skipMapping) {
+      getUserLocation();
     }
-  }, [step, drawMap]);
+  }, [step, skipMapping]);
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isComplete) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (points.length >= 3) {
-      const firstPoint = points[0];
-      const distance = Math.sqrt((x - firstPoint.x) ** 2 + (y - firstPoint.y) ** 2);
-      if (distance < 15) {
-        setIsComplete(true);
-        return;
-      }
-    }
-
-    const coords = pixelToLatLng(x, y, canvas);
-    setPoints(prev => [...prev, { x, y, ...coords }]);
+  const handleCanvasClick = () => {
+    // No longer needed with leaflet
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isComplete) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (points.length >= 3) {
-      const firstPoint = points[0];
-      const distance = Math.sqrt((x - firstPoint.x) ** 2 + (y - firstPoint.y) ** 2);
-      setHoveredPoint(distance < 15 ? 0 : null);
-    }
+  const handleMouseMove = () => {
+    // No longer needed with leaflet
   };
 
   const handleUndo = () => {
-    if (isComplete) {
-      setIsComplete(false);
-    } else {
-      setPoints(prev => prev.slice(0, -1));
-    }
+    // Handled by leaflet draw
   };
 
   const handleClear = () => {
-    setPoints([]);
-    setIsComplete(false);
+    // Handled by leaflet draw
   };
 
   const calculateArea = () => {
-    if (points.length < 3) return 0;
-    let area = 0;
-    for (let i = 0; i < points.length; i++) {
-      const j = (i + 1) % points.length;
-      area += points[i].x * points[j].y;
-      area -= points[j].x * points[i].y;
-    }
-    return Math.abs(area / 2 / 1000).toFixed(2);
+    return '0';
   };
 
   const isInfoValid = () => {
@@ -266,19 +140,58 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   };
 
   const handleSubmit = async () => {
-    if (!isComplete) return;
-    
-    setLoading(true);
-    try {
-      await onSubmit({
-        ...formData,
-        landCoordinates: points.map(p => ({ lat: p.lat, lng: p.lng })),
-      });
-      onClose();
-    } finally {
-      setLoading(false);
+    if (skipMapping) {
+      // Skip mapping and submit directly
+      setLoading(true);
+      try {
+        await onSubmit({
+          ...formData,
+          landCoordinates: [],
+        });
+        onClose();
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Extract coordinates from leaflet draw
+      if (featureGroupRef.current) {
+        const coordinates = extractCoordinates();
+        setLoading(true);
+        try {
+          await onSubmit({
+            ...formData,
+            landCoordinates: coordinates,
+          });
+          onClose();
+        } finally {
+          setLoading(false);
+        }
+      }
     }
   };
+
+  const extractCoordinates = () => {
+    // Extract drawn polygon coordinates from leaflet
+    const coordinates: { lat: number; lng: number }[] = [];
+    if (featureGroupRef.current) {
+      const layers = (featureGroupRef.current as any).getLayers?.();
+      if (layers) {
+        layers.forEach((layer: any) => {
+          if (layer.getLatLngs) {
+            const latlngs = layer.getLatLngs();
+            if (Array.isArray(latlngs)) {
+              latlngs.forEach((latlng: any) => {
+                coordinates.push({ lat: latlng.lat, lng: latlng.lng });
+              });
+            }
+          }
+        });
+      }
+    }
+    return coordinates;
+  };
+
+  if (!open) return null;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -359,6 +272,22 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                     <SelectItem value="Digital Campaign">Digital Campaign</SelectItem>
                     <SelectItem value="Village Meeting">Village Meeting</SelectItem>
                     <SelectItem value="Walk-in">Walk-in</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="farmingOption">Farming Option</Label>
+                <Select
+                  value={formData.farmingOption || ''}
+                  onValueChange={value => setFormData(prev => ({ ...prev, farmingOption: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select farming option" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Contract Farming">Contract Farming</SelectItem>
+                    <SelectItem value="Lease Farming">Lease Farming</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -465,98 +394,99 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
           </form>
         ) : (
           <div className="space-y-4">
-            {/* Info Banner */}
-            <div className="flex items-start gap-3 p-3 bg-info/10 rounded-lg border border-info/20">
-              <Info className="w-5 h-5 text-info mt-0.5 shrink-0" />
-              <p className="text-sm text-muted-foreground">
-                Click on the map to place boundary points. Place at least 3 points, then click the first point (orange) to close the boundary.
-              </p>
-            </div>
-
-            {/* Toolbar */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleUndo}
-                  disabled={points.length === 0}
-                  className="gap-1"
-                >
-                  <Undo2 className="w-4 h-4" />
-                  Undo
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleClear}
-                  disabled={points.length === 0}
-                  className="gap-1"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Clear
-                </Button>
-              </div>
-              
-              <div className="flex items-center gap-4 text-sm">
-                <span className="text-muted-foreground">
-                  Points: <span className="font-semibold text-foreground">{points.length}</span>
-                </span>
-                {isComplete && (
-                  <span className="text-muted-foreground">
-                    Est. Area: <span className="font-semibold text-primary">{calculateArea()} acres</span>
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Map Canvas */}
-            <div className="relative border-2 border-border rounded-lg overflow-hidden">
-              <canvas
-                ref={canvasRef}
-                width={700}
-                height={400}
-                onClick={handleCanvasClick}
-                onMouseMove={handleMouseMove}
-                className="w-full"
-                style={{ cursor: isComplete ? 'default' : 'crosshair' }}
-              />
-              
-              {isComplete && (
-                <div className="absolute top-4 right-4 bg-success text-success-foreground px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-2">
-                  <Check className="w-4 h-4" />
-                  Boundary Complete
+            {!skipMapping ? (
+              <>
+                {/* Info Banner */}
+                <div className="flex items-start gap-3 p-3 bg-info/10 rounded-lg border border-info/20">
+                  <Info className="w-5 h-5 text-info mt-0.5 shrink-0" />
+                  <p className="text-sm text-muted-foreground">
+                    Use the drawing tools on the map to mark your land boundary. You can draw polygons, rectangles, or circles.
+                  </p>
                 </div>
-              )}
 
-              <div className="absolute bottom-4 right-4 bg-background/90 backdrop-blur-sm p-3 rounded-lg text-xs space-y-1">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-amber-500" />
-                  <span>Start Point</span>
+                {/* Location Button */}
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={getUserLocation}
+                    disabled={locationLoading}
+                    className="gap-2 flex-1"
+                  >
+                    {locationLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Navigation className="w-4 h-4" />
+                    )}
+                    {locationLoading ? 'Getting Location...' : 'Use My Location'}
+                  </Button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-green-500" />
-                  <span>Boundary Point</span>
+
+                {/* Map */}
+                <div className="relative border-2 border-border rounded-lg overflow-hidden h-96">
+                  <MapContainer
+                    center={[mapCenter.lat, mapCenter.lng]}
+                    zoom={18}
+                    style={{ height: '100%', width: '100%' }}
+                  >
+                    {/* Satellite View Tile */}
+                    <TileLayer
+                      url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                      attribution='&copy; Esri'
+                    />
+                    
+                    {/* Drawing Tools */}
+                    <FeatureGroup ref={featureGroupRef}>
+                      <EditControl
+                        position="topleft"
+                        onEdited={() => {}}
+                        onCreated={() => {}}
+                        onDeleted={() => {}}
+                        draw={{
+                          rectangle: true,
+                          polygon: true,
+                          circle: true,
+                          polyline: false,
+                          marker: false,
+                          circlemarker: false,
+                        }}
+                      />
+                    </FeatureGroup>
+                  </MapContainer>
                 </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <MapPin className="w-12 h-12 text-muted-foreground mb-3" />
+                <p className="font-medium">Land Mapping Skipped</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  You can add land details later
+                </p>
               </div>
-            </div>
+            )}
 
             {/* Actions */}
-            <div className="flex justify-between gap-3 pt-2 border-t">
+            <div className="flex justify-between gap-3 pt-4 border-t">
               <Button type="button" variant="outline" onClick={() => setStep('info')} className="gap-2">
                 <ArrowLeft className="w-4 h-4" />
                 Back
               </Button>
               <div className="flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setSkipMapping(true)}
+                  disabled={skipMapping}
+                >
+                  {skipMapping ? 'Mapping Skipped' : 'Skip Mapping'}
+                </Button>
                 <Button type="button" variant="outline" onClick={onClose}>
                   Cancel
                 </Button>
                 <Button
                   type="button"
                   onClick={handleSubmit}
-                  disabled={!isComplete || loading}
+                  disabled={loading}
                   className="gap-2"
                 >
                   {loading && <Loader2 className="w-4 h-4 animate-spin" />}
