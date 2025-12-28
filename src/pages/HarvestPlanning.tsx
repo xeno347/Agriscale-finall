@@ -30,7 +30,7 @@ const HarvestPlanning = () => {
   const loadPlans = async () => {
     try {
       const base = getBaseUrl();
-      const resp = await fetch(`${base.replace(/\/$/, '')}/harvest/get_plans`, {
+      const resp = await fetch(`${base.replace(/\/$/, '')}/Harvest_management/get_plans`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -40,19 +40,26 @@ const HarvestPlanning = () => {
       const result = await resp.json();
       console.log('Raw API response:', result);
 
-      const transformed: HarvestPlan[] = (result.plans || []).map((item: any) => ({
-        id: item.id || item.plan_id,
-        farmerId: item.farmer_id,
-        farmerName: item.farmer_name || 'Unknown',
-        cropType: item.crop_type || 'N/A',
-        planningDate: item.planning_date,
-        expectedHarvestDate: item.expected_harvest_date,
-        estimatedYield: item.estimated_yield,
-        yieldUnit: item.yield_unit || 'kg',
-        notes: item.notes,
-        status: item.status || 'planned',
-        createdAt: item.created_at,
-        updatedAt: item.updated_at,
+      // Transform the API response to an array of plans
+      const plansObj = result?.data?.plan || {};
+      const transformed: HarvestPlan[] = Object.entries(plansObj).map(([planId, planData]: [string, any]) => ({
+        id: planId,
+        planningDate: planData.harvest_deadline,
+        expectedHarvestDate: planData.harvest_deadline,
+        status: 'planned',
+        // Optionally aggregate farm names, area, etc.
+        farmerName: planData.feild_manager_team?.[0]?.feild_manager_name || 'Unknown',
+        cropType: 'N/A',
+        estimatedYield: undefined,
+        yieldUnit: 'kg',
+        notes: '',
+        createdAt: undefined,
+        updatedAt: undefined,
+        // Optionally add more fields as needed
+        farm: planData.farm,
+        equipments: planData.equipments,
+        feild_manager_team: planData.feild_manager_team,
+        tag: planData.tag,
       }));
 
       setPlans(transformed);
@@ -313,6 +320,34 @@ const HarvestPlanning = () => {
     }
   };
 
+  // Submit new plan to backend
+  const handleCreatePlan = async (plan: any) => {
+    try {
+      const base = getBaseUrl();
+      // Map plan to backend format
+      const payload = {
+        farmer_id: plan.farmerId,
+        farmer_name: plan.farmerName,
+        harvest_deadline: plan.expectedHarvestDate,
+        duration_days: plan.durationDays || 1,
+        priority: plan.priority || 'Normal',
+        equipment: plan.equipment || [],
+        manager_team: plan.managerTeam || '',
+      };
+      const resp = await fetch(`${base.replace(/\/$/, '')}/Harvest_management/save_farm_planer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+      toast({ title: 'Plan created', description: 'Plan saved to backend.' });
+      // Optionally reload plans from backend
+      await loadPlans();
+    } catch (error) {
+      toast({ title: 'Error', description: `Failed to save plan: ${error instanceof Error ? error.message : 'Unknown error'}`, variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="p-8">
       {/* Header */}
@@ -388,7 +423,7 @@ const HarvestPlanning = () => {
         dateIso={activeDate ?? new Date().toISOString().slice(0,10)}
         farmers={farmers}
         onClose={() => setWizardOpen(false)}
-        onCreatePlan={(plan) => { setPlans(prev => [plan, ...prev]); toast({ title: 'Plan created' }); }}
+        onCreatePlan={handleCreatePlan}
       />
     </div>
   );

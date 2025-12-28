@@ -11,6 +11,13 @@ import HarvestPlanning from "./pages/HarvestPlanning";
 import HarvestOrders from "./pages/HarvestOrders";
 import NotFound from "./pages/NotFound";
 
+import Inventory from "./pages/Inventory";
+
+
+import CultivationMaster from "./pages/CultivationMaster";
+import CultivationPlan from "./pages/CultivationPlan";
+import CreateCultivationPlan from "./pages/CreateCultivationPlan";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -53,6 +60,38 @@ const App = () => (
               </AppLayout>
             }
           />
+          <Route
+            path="/inventory"
+            element={
+              <AppLayout>
+                <Inventory />
+              </AppLayout>
+            }
+          />
+            <Route
+              path="/cultivation-master/*"
+              element={
+                <AppLayout>
+                  <CultivationMaster />
+                </AppLayout>
+              }
+            />
+            <Route
+              path="/cultivation-plan"
+              element={
+                <AppLayout>
+                  <CultivationPlan />
+                </AppLayout>
+              }
+            />
+            <Route
+              path="/cultivation-plan/create"
+              element={
+                <AppLayout>
+                  <CreateCultivationPlan />
+                </AppLayout>
+              }
+            />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

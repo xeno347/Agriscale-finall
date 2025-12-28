@@ -1,7 +1,8 @@
 export type LeadStatus = 'contacted' | 'verified' | 'registered' | 'rejected';
 
 export interface Lead {
-  id: string;
+  id: string; // Local or backend id
+  backendId?: string; // Always set for backend leads
   farmerId?: string;
   fullName: string;
   phoneNumber: string;

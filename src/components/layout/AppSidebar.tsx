@@ -1,4 +1,5 @@
 import { Users, UserCheck, Wheat, LayoutDashboard, Sprout, Package } from 'lucide-react';
+import { Box } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
@@ -80,8 +81,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
           Harvest Management
         </p>
-
-        <NavItem
+ <NavItem
           to="/harvest-planning"
           icon={Sprout}
           label="Harvest Planning"
@@ -92,6 +92,32 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           icon={Package}
           label="Harvest Orders"
         />
+        <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
+          Management
+        </p>
+        <NavItem
+          to="/inventory"
+          icon={Box}
+          label="Inventory"
+        />
+
+          {/* Operation Group */}
+          <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
+            Operation
+          </p>
+
+          <NavItem
+            to="/cultivation-master"
+            icon={Sprout}
+            label="Cultivation Master"
+          />
+          <NavItem
+            to="/cultivation-plan"
+            icon={Package}
+            label="Cultivation Plan"
+          />
+
+       
       </nav>
 
       {/* Footer */}

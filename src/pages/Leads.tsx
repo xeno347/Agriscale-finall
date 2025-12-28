@@ -42,9 +42,9 @@ const Leads = () => {
       const transformedLeads: Lead[] = (result.leads || []).map((item: any) => {
         // Defensive checks for farmer_data
         const farmer = item.farmer_data || {};
-        
         return {
-          id: item.lead_id,
+          id: String(item.lead_id),
+          backendId: String(item.lead_id),
           farmerId: item.farmer_id,
           fullName: farmer.full_name || 'N/A',
           phoneNumber: farmer.phone_number || 'N/A',
@@ -166,10 +166,11 @@ const Leads = () => {
     if (!selectedLead) return;
     try {
       const base = getBaseUrl();
+      const leadId = selectedLead.backendId || selectedLead.id;
       const resp = await fetch(`${base.replace(/\/$/, '')}/farmer_managment/verify_lead`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: selectedLead.id }),
+        body: JSON.stringify({ lead_id: leadId }),
       });
 
       if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
@@ -201,10 +202,11 @@ const Leads = () => {
     if (!selectedLead) return;
     try {
       const base = getBaseUrl();
+      const leadId = selectedLead.backendId || selectedLead.id;
       const resp = await fetch(`${base.replace(/\/$/, '')}/farmer_managment/reject_lead`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: selectedLead.id }),
+        body: JSON.stringify({ lead_id: leadId }),
       });
 
       if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
@@ -245,8 +247,9 @@ const Leads = () => {
       const base = getBaseUrl();
 
       // Build payload matching RegisterFarmerRequest (including lead_id)
+      const leadId = selectedLead.backendId || selectedLead.id;
       const payload = {
-        lead_id: String(selectedLead.id),
+        lead_id: String(leadId),
         adhar_number: kycData.aadhaarNumber,
         pan_numnber: kycData.panNumber,
         permanent_address: kycData.address,
