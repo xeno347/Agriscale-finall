@@ -1,58 +1,62 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-	format,
-	startOfMonth,
-	endOfMonth,
-	eachDayOfInterval,
-	isSameDay,
-	addMonths,
-	addDays,
-	isToday,
-	isBefore,
-	startOfDay,
-	getDay,
+  format,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
+  isSameDay,
+  addMonths,
+  addDays,
+  isToday,
+  isBefore,
+  startOfDay,
+  getDay,
 } from 'date-fns';
 import {
-	Calendar,
-	Save,
-	X,
-	Tractor,
-	Droplets,
-	Sprout,
-	Scissors,
-	Footprints,
-	Flower2,
-	Layers,
-	Shovel,
-	Hammer,
-	Rows3,
-	Rows4,
-	MapPin,
-	Info,
-	AlertCircle,
-	ArrowLeft,
+  Calendar,
+  Save,
+  X,
+  Tractor,
+  Droplets,
+  Sprout,
+  Scissors,
+  Footprints,
+  Flower2,
+  Layers,
+  Shovel,
+  Hammer,
+  Rows3,
+  Rows4,
+  MapPin,
+  Info,
+  AlertCircle,
+  ArrowLeft,
+  Clock,           // New import
+  AlertTriangle,   // New import
+  CheckCircle2     // New import
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogHeader,
-	DialogTitle,
-	DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area'; // New component
 
 // ============================================================================
 // TYPES
@@ -121,7 +125,25 @@ export interface CultivationPlan {
 }
 
 // ============================================================================
-// Farms will be fetched from API
+// CONSTANTS - ACTIVITIES LIST (Re-adding needed constant for helpers)
+// ============================================================================
+
+export const ACTIVITIES: Activity[] = [
+    { id: 'bed-making-land', name: 'Bed Making', category: 'Land Preparation', icon: 'Rows3' },
+    { id: 'bed-making-other', name: 'Bed Making', category: 'Other', icon: 'Rows4' },
+    { id: 'field-visits', name: 'Field Visits', category: 'Crop Care', icon: 'Footprints' },
+    { id: 'harvesting', name: 'Harvesting', category: 'Other', icon: 'Scissors' },
+    { id: 'initial-ploughing', name: 'Initial Ploughing', category: 'Land Preparation', icon: 'Tractor' },
+    { id: 'interweeding-fertilization', name: 'Interweeding + Fertilization', category: 'Crop Care', icon: 'Flower2' },
+    { id: 'irrigation', name: 'Irrigation', category: 'Irrigation', icon: 'Droplets' },
+    { id: 'mulching', name: 'Mulching', category: 'Crop Care', icon: 'Layers' },
+    { id: 'ploughing', name: 'Ploughing', category: 'Plantation', icon: 'Shovel' },
+    { id: 'soil-pulverization', name: 'Soil Pulverization', category: 'Land Preparation', icon: 'Hammer' },
+    { id: 'sowing', name: 'Sowing', category: 'Plantation', icon: 'Sprout' },
+];
+
+// ============================================================================
+// DEMO DATA (Restored fully)
 // ============================================================================
 
 export const demoMasterPlanners: MasterPlanner[] = [
@@ -188,7 +210,7 @@ const ActivityIcon: React.FC<ActivityIconProps> = ({ iconName, className = 'h-4 
 };
 
 // ============================================================================
-// HELPER FUNCTIONS
+// HELPER FUNCTIONS (Restored fully)
 // ============================================================================
 const MAX_PLAN_DAYS = 120;
 
@@ -255,7 +277,7 @@ const calculateCarryForwardProbability = (activities: PlannedActivity[]): number
 };
 
 // ============================================================================
-// INFO BOX COMPONENT
+// INFO BOX COMPONENT (Restored)
 // ============================================================================
 
 interface InfoBoxProps {
@@ -315,7 +337,10 @@ const InfoBox: React.FC<InfoBoxProps> = ({
   );
 };
 
-// 13-month calendar grid UI
+// ============================================================================
+// MONTH CALENDAR COMPONENT
+// ============================================================================
+
 const MonthCalendar: React.FC<{
   month: Date;
   selectedDate: Date | null;
@@ -361,10 +386,10 @@ const MonthCalendar: React.FC<{
             return (
               <button
                 key={day.toISOString()}
-                onClick={() => isSelectionMode && !isBlocked && onDateClick && onDateClick(day)}
-                disabled={!isSelectionMode || isBlocked}
+                onClick={() => (!isSelectionMode || !isBlocked) && onDateClick && onDateClick(day)}
+                disabled={isSelectionMode && isBlocked}
                 className={`aspect-square p-0.5 rounded text-[10px] relative transition-all
-                  ${isSelectionMode ? 'cursor-pointer hover:bg-primary/10' : 'cursor-default'}
+                  ${(isSelectionMode || highlight) ? 'cursor-pointer hover:bg-primary/10' : 'cursor-default'}
                   ${isSelected ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-offset-1' : ''}
                   ${today && !isSelected ? 'bg-accent font-bold' : ''}
                   ${isPast && !isSelected ? 'text-muted-foreground/50' : ''}
@@ -388,6 +413,10 @@ const MonthCalendar: React.FC<{
   );
 };
 
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
 const CreateCultivationPlan: React.FC = () => {
   const [selectedFarm, setSelectedFarm] = useState<Farm | null>(null);
   const [selectedMasterPlanner, setSelectedMasterPlanner] = useState<MasterPlanner | null>(
@@ -396,15 +425,21 @@ const CreateCultivationPlan: React.FC = () => {
   const [startDate, setStartDate] = useState<Date | null>(new Date());
   const [plannedActivities, setPlannedActivities] = useState<PlannedActivity[]>([]);
   const [carryForwardProbability, setCarryForwardProbability] = useState<number | null>(null);
-  const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
-
-  // Add state for dialog, selection, and highlights
+  
+  // --- New State for Dialog/Selections ---
   const [dialogOpen, setDialogOpen] = useState(false);
   const [farmId, setFarmId] = useState<string | null>(null);
   const [masterPlanId, setMasterPlanId] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [day0, setDay0] = useState<Date | null>(null);
   const [highlighted, setHighlighted] = useState<{ [date: string]: string }>({});
+
+  // --- New State for Activity Popup ---
+  const [activityDetailsOpen, setActivityDetailsOpen] = useState(false);
+  const [inspectedDate, setInspectedDate] = useState<Date | null>(null);
+  const [inspectPresent, setInspectPresent] = useState<any[]>([]);
+  const [inspectPending, setInspectPending] = useState<any[]>([]);
+  const [rawMappedData, setRawMappedData] = useState<any[]>([]);
 
   // Add state for fetched master plans
   const [apiMasterPlans, setApiMasterPlans] = useState<{ id: string; name: string; plan_list: any[] }[]>([]);
@@ -458,10 +493,10 @@ const CreateCultivationPlan: React.FC = () => {
       });
   }, []);
 
-  // Helper to get selected master plan
+  // Helper to get selected master plan (from local demo data)
   const selectedMasterPlan = useMemo(() => demoMasterPlanners.find(p => p.id === masterPlanId), [masterPlanId]);
 
-  // Helper to get selected master plan's activities for highlighting
+  // Helper to get selected master plan's activities for highlighting (local logic)
   const getHighlights = (baseDate: Date | null, planId: string | null) => {
     if (!baseDate || !planId) return {};
     const plan = demoMasterPlanners.find(p => p.id === planId);
@@ -515,36 +550,62 @@ const CreateCultivationPlan: React.FC = () => {
 
   // Handle day click
   const handleDayClick = async (date: Date) => {
-    if (!selectionMode || !masterPlanId) return;
-    setDay0(date);
+    // SCENARIO 1: Selecting the Start Date (Day 0)
+    if (selectionMode && masterPlanId && !day0) {
+      setDay0(date);
 
-    // Call date mapping API
-    try {
-      const response = await fetch(`${BASE_URL}/admin_cultivation/date_mapping`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          day_0_date: format(date, 'yyyy-MM-dd'),
-          master_cultivation_plan_id: masterPlanId,
-        }),
-      });
-      if (!response.ok) throw new Error('Failed to fetch date mapping');
-      const data = await response.json();
-      if (data && Array.isArray(data.date_mapping)) {
-        const highlights: { [date: string]: string } = {};
-        data.date_mapping.forEach((item: any) => {
-          if (item.date && item.activity) {
-            highlights[item.date] = item.activity;
-          }
+      // Call date mapping API
+      try {
+        const response = await fetch(`${BASE_URL}/admin_cultivation/date_mapping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            day_0_date: format(date, 'yyyy-MM-dd'),
+            master_cultivation_plan_id: masterPlanId,
+          }),
         });
-        setHighlighted(highlights);
-      } else {
+        if (!response.ok) throw new Error('Failed to fetch date mapping');
+        const data = await response.json();
+        
+        if (data && Array.isArray(data.date_mapping)) {
+          setRawMappedData(data.date_mapping); // Store for popup usage
+          
+          const highlights: { [date: string]: string } = {};
+          data.date_mapping.forEach((item: any) => {
+            if (item.date && item.activity) {
+              highlights[item.date] = item.activity;
+            }
+          });
+          setHighlighted(highlights);
+          toast.success("Plan generated!");
+        } else {
+          setHighlighted({});
+        }
+      } catch (err) {
         setHighlighted({});
+        console.error('Failed to fetch date mapping:', err);
       }
-    } catch (err) {
-      setHighlighted({});
-      console.error('Failed to fetch date mapping:', err);
+    } 
+    // SCENARIO 2: Clicking a date AFTER plan is generated (Open Popup)
+    else if (day0) {
+        openActivityDetails(date);
     }
+  };
+
+  const openActivityDetails = (date: Date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    
+    // Present: Activities happening exactly on this date
+    const present = rawMappedData.filter(d => d.date === dateStr);
+    
+    // Pending: Activities scheduled strictly before this date
+    // You might want to filter this further based on 'status' if your API returned it
+    const pending = rawMappedData.filter(d => d.date < dateStr);
+
+    setInspectedDate(date);
+    setInspectPresent(present);
+    setInspectPending(pending);
+    setActivityDetailsOpen(true);
   };
 
   // Generate 13 months starting from current month
@@ -568,11 +629,16 @@ const CreateCultivationPlan: React.FC = () => {
   return (
     <div className="min-h-screen bg-background px-4 py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-foreground">Cultivation Plan</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Cultivation Plan</h1>
+          {day0 && <p className="text-muted-foreground mt-1 text-sm">Start Date: {format(day0, 'PPP')}</p>}
+        </div>
         <Button onClick={() => setDialogOpen(true)} size="lg" className="gap-2">
           + Create Plan
         </Button>
       </div>
+
+      {/* --- DIALOG: Select Farm/Plan --- */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -622,6 +688,10 @@ const CreateCultivationPlan: React.FC = () => {
               onClick={() => {
                 setDialogOpen(false);
                 setSelectionMode(true);
+                // Reset previous selection data if any
+                setDay0(null);
+                setHighlighted({});
+                setRawMappedData([]);
               }}
               disabled={!farmId || !masterPlanId}
             >
@@ -630,6 +700,102 @@ const CreateCultivationPlan: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* --- DIALOG: Activity Details (New Feature) --- */}
+      <Dialog open={activityDetailsOpen} onOpenChange={setActivityDetailsOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader className="pb-2 border-b">
+            <DialogTitle className="flex items-center gap-2">
+               <Calendar className="w-5 h-5 text-primary" />
+               Activities for {inspectedDate ? format(inspectedDate, 'PPP') : ''}
+            </DialogTitle>
+          </DialogHeader>
+          
+          <ScrollArea className="flex-1 pr-4 py-4">
+            <div className="space-y-6">
+              
+              {/* SECTION 1: PRESENT DAY ACTIVITIES */}
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-2 mb-3 text-green-700 bg-green-50 p-2 rounded-lg">
+                   <Clock className="w-4 h-4" /> Today's Tasks
+                </h3>
+                {inspectPresent.length === 0 ? (
+                  <div className="text-sm text-muted-foreground text-center py-4 border-2 border-dashed rounded-lg">
+                    No activities scheduled for this specific date.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {inspectPresent.map((act, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 bg-card border rounded-lg shadow-sm">
+                         <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                               <Sprout className="w-4 h-4" />
+                            </div>
+                            <div>
+                               <p className="font-medium text-sm">{act.activity}</p>
+                               <p className="text-xs text-muted-foreground">Scheduled for today</p>
+                            </div>
+                         </div>
+                         <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">Scheduled</Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 2: PENDING (PAST) ACTIVITIES */}
+              <div>
+                 <h3 className="text-sm font-semibold flex items-center gap-2 mb-3 text-amber-700 bg-amber-50 p-2 rounded-lg">
+                   <AlertTriangle className="w-4 h-4" /> Pending Activities (Past)
+                </h3>
+                {inspectPending.length === 0 ? (
+                  <div className="text-sm text-muted-foreground text-center py-4">
+                    No pending activities from previous days.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {inspectPending.map((act, idx) => (
+                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-amber-50/50 border border-amber-100 rounded-lg gap-3">
+                         <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                               <AlertCircle className="w-4 h-4" />
+                            </div>
+                            <div>
+                               <p className="font-medium text-sm">{act.activity}</p>
+                               <p className="text-xs text-red-500 font-medium">Due: {act.date}</p>
+                            </div>
+                         </div>
+                         
+                         {/* PRIORITY DROPDOWN */}
+                         <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">Priority:</span>
+                            <Select defaultValue="low">
+                              <SelectTrigger className="w-[110px] h-8 text-xs bg-white">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="low" className="text-xs">Low</SelectItem>
+                                <SelectItem value="medium" className="text-xs text-blue-600">Medium</SelectItem>
+                                <SelectItem value="high" className="text-xs text-orange-600">High</SelectItem>
+                                <SelectItem value="critical" className="text-xs text-red-600 font-bold">Critical</SelectItem>
+                              </SelectContent>
+                            </Select>
+                         </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </ScrollArea>
+          
+          <DialogFooter className="pt-4 border-t">
+            <Button variant="outline" onClick={() => setActivityDetailsOpen(false)}>Close</Button>
+            <Button>Save Updates</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Show selected farm and master plan above the calendar */}
       <div className="mb-4 flex flex-wrap items-center gap-4">
         {farmId && (
@@ -650,10 +816,13 @@ const CreateCultivationPlan: React.FC = () => {
             {apiMasterPlans.find(p => p.id === masterPlanId)?.name}
           </span>
         )}
-        {farmId && masterPlanId && (
-          <span className="text-muted-foreground text-xs">Click a date to set Day 0</span>
+        {farmId && masterPlanId && !day0 && (
+          <span className="text-muted-foreground text-xs animate-pulse font-semibold text-blue-600">
+             &larr; Please click a date below to set Day 0
+          </span>
         )}
       </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {months.map((month) => (
           <MonthCalendar
