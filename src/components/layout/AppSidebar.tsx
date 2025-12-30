@@ -1,4 +1,4 @@
-import { Users, UserCheck, Wheat, LayoutDashboard, Sprout, Package } from 'lucide-react';
+import { Users, UserCheck, Wheat, Sprout, Package, Calendar } from 'lucide-react';
 import { Box } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -78,10 +78,19 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           label="Farmers"
         />
 
+        {/* HARVEST SECTION */}
         <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
           Harvest Management
         </p>
- <NavItem
+
+        {/* New Link Added Here */}
+        <NavItem
+          to="/harvest-calendar"
+          icon={Calendar}
+          label="Harvest Calendar"
+        />
+
+        <NavItem
           to="/harvest-planning"
           icon={Sprout}
           label="Harvest Planning"
@@ -92,6 +101,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           icon={Package}
           label="Harvest Orders"
         />
+        
         <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
           Management
         </p>
@@ -101,22 +111,21 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           label="Inventory"
         />
 
-          {/* Operation Group */}
-          <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
-            Operation
-          </p>
+        {/* Operation Group */}
+        <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
+          Operation
+        </p>
 
-          <NavItem
-            to="/cultivation-master"
-            icon={Sprout}
-            label="Cultivation Master"
-          />
-          <NavItem
-            to="/cultivation-plan"
-            icon={Package}
-            label="Cultivation Plan"
-          />
-
+        <NavItem
+          to="/cultivation-master"
+          icon={Sprout}
+          label="Cultivation Master"
+        />
+        <NavItem
+          to="/cultivation-plan"
+          icon={Package}
+          label="Cultivation Plan"
+        />
        
       </nav>
 
