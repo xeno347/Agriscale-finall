@@ -83,13 +83,6 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           Harvest Management
         </p>
 
-        {/* New Link Added Here */}
-        <NavItem
-          to="/harvest-calendar"
-          icon={Calendar}
-          label="Harvest Calendar"
-        />
-
         <NavItem
           to="/harvest-planning"
           icon={Sprout}
@@ -111,10 +104,17 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           label="Inventory"
         />
 
-        {/* Operation Group */}
+        {/* OPERATION (Cultivation) Group */}
         <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
           Operation
         </p>
+        
+        {/* New Calendar Module */}
+        <NavItem
+          to="/cultivation-calendar"
+          icon={Calendar}
+          label="Cultivation Calendar"
+        />
 
         <NavItem
           to="/cultivation-master"

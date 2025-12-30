@@ -16,8 +16,9 @@ import Inventory from "./pages/Inventory";
 import CultivationMaster from "./pages/CultivationMaster";
 import CultivationPlan from "./pages/CultivationPlan";
 import CreateCultivationPlan from "./pages/CreateCultivationPlan";
-// 1. IMPORT THE NEW PAGE
-import HarvestCalendar from "./pages/HarvestCalendar";
+
+// 1. UPDATED IMPORT: Renamed from HarvestCalendar to CultivationCalendar
+import CultivationCalendar from "./pages/CultivationCalendar";
 
 const queryClient = new QueryClient();
 
@@ -46,12 +47,12 @@ const App = () => (
             }
           />
           
-          {/* 2. ADD THE NEW ROUTE HERE */}
+          {/* 2. UPDATED ROUTE: Changed path and component */}
           <Route
-            path="/harvest-calendar"
+            path="/cultivation-calendar"
             element={
               <AppLayout>
-                <HarvestCalendar />
+                <CultivationCalendar />
               </AppLayout>
             }
           />
