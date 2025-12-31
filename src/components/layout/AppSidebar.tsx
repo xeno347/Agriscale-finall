@@ -109,7 +109,6 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           Operation
         </p>
         
-        {/* New Calendar Module */}
         <NavItem
           to="/cultivation-calendar"
           icon={Calendar}

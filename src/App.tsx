@@ -8,17 +8,15 @@ import Index from "./pages/Index";
 import Leads from "./pages/Leads";
 import Farmers from "./pages/Farmers";
 import HarvestPlanning from "./pages/HarvestPlanning";
-import HarvestOrders from "./pages/HarvestOrders";
 import NotFound from "./pages/NotFound";
-
 import Inventory from "./pages/Inventory";
-
 import CultivationMaster from "./pages/CultivationMaster";
 import CultivationPlan from "./pages/CultivationPlan";
 import CreateCultivationPlan from "./pages/CreateCultivationPlan";
-
-// 1. UPDATED IMPORT: Renamed from HarvestCalendar to CultivationCalendar
 import CultivationCalendar from "./pages/CultivationCalendar";
+
+// Consolidated Harvest Orders Page
+import HarvestOrders from "./pages/HarvestOrders";
 
 const queryClient = new QueryClient();
 
@@ -30,81 +28,24 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
-          <Route
-            path="/leads"
-            element={
-              <AppLayout>
-                <Leads />
-              </AppLayout>
-            }
-          />
-          <Route
-            path="/farmers"
-            element={
-              <AppLayout>
-                <Farmers />
-              </AppLayout>
-            }
-          />
           
-          {/* 2. UPDATED ROUTE: Changed path and component */}
-          <Route
-            path="/cultivation-calendar"
-            element={
-              <AppLayout>
-                <CultivationCalendar />
-              </AppLayout>
-            }
-          />
+          <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
+          <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
+          
+          {/* Operations */}
+          <Route path="/cultivation-calendar" element={<AppLayout><CultivationCalendar /></AppLayout>} />
+          <Route path="/cultivation-master/*" element={<AppLayout><CultivationMaster /></AppLayout>} />
+          <Route path="/cultivation-plan" element={<AppLayout><CultivationPlan /></AppLayout>} />
+          <Route path="/cultivation-plan/create" element={<AppLayout><CreateCultivationPlan /></AppLayout>} />
 
-          <Route
-            path="/harvest-planning"
-            element={
-              <AppLayout>
-                <HarvestPlanning />
-              </AppLayout>
-            }
-          />
-          <Route
-            path="/harvest-orders"
-            element={
-              <AppLayout>
-                <HarvestOrders />
-              </AppLayout>
-            }
-          />
-          <Route
-            path="/inventory"
-            element={
-              <AppLayout>
-                <Inventory />
-              </AppLayout>
-            }
-          />
-            <Route
-              path="/cultivation-master/*"
-              element={
-                <AppLayout>
-                  <CultivationMaster />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/cultivation-plan"
-              element={
-                <AppLayout>
-                  <CultivationPlan />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/cultivation-plan/create"
-              element={
-                <AppLayout>
-                  <CreateCultivationPlan />
-                </AppLayout>
-              }
-            />
+          {/* Harvest Management */}
+          <Route path="/harvest-planning" element={<AppLayout><HarvestPlanning /></AppLayout>} />
+          
+          {/* Single Route for Harvest Orders (Handling list + details internally) */}
+          <Route path="/harvest-orders" element={<AppLayout><HarvestOrders /></AppLayout>} />
+
+          <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
+          
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
