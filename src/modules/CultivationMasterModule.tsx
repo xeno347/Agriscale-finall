@@ -555,6 +555,7 @@ const PlannerList = ({ planners, onDelete }: PlannerListProps) => {
 
 
 import { useEffect } from 'react';
+import { console } from 'inspector';
 
 const CultivationMasterModule = () => {
 	const [planners, setPlanners] = useState<MasterPlanner[]>([]);
@@ -565,6 +566,7 @@ const CultivationMasterModule = () => {
 			setLoading(true);
 			try {
 				const baseUrl = getBaseUrl();
+				console.log('Fetching from baseUrl:', baseUrl);
 				const response = await fetch(`${baseUrl}admin_cultivation/get_master_cultivation_plans`);
 				if (!response.ok) throw new Error('Failed to fetch plans');
 				const data = await response.json();
