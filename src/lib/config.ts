@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 // Central API base URL config for the app
 // Use Vite env `VITE_API_BASE_URL` if provided, otherwise fallback to localhost.
 
@@ -37,3 +39,9 @@ export const MODULE_GROUPS = [
     ]
   }
 ];
+
+const BASE_URL = import.meta.env.VITE_BACKEND_URL;
+
+export const getMasterCultivationPlans = () => {
+  return axios.get(`${BASE_URL}admin_cultivation/get_master_cultivation_plans`);
+};
