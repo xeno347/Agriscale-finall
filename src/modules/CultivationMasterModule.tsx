@@ -12,7 +12,7 @@
 // - shadcn/ui components: Button, Card, Input, Select, Table
 // ============================================================
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Routes, Route } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -552,10 +552,6 @@ const PlannerList = ({ planners, onDelete }: PlannerListProps) => {
 // Use this as the main entry point. Add these routes to your router:
 // <Route path="/cultivation-master/*" element={<CultivationMasterModule />} />
 // ============================================================
-
-
-import { useEffect } from 'react';
-import { console } from 'inspector';
 
 const CultivationMasterModule = () => {
 	const [planners, setPlanners] = useState<MasterPlanner[]>([]);
