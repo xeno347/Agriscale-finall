@@ -1,7 +1,7 @@
 // Central API base URL config for the app
 // Use Vite env `VITE_API_BASE_URL` if provided, otherwise fallback to localhost.
 
-let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? ' https://8ebc13a1ec69.ngrok-free.app';
+let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
 export const getBaseUrl = (): string => baseUrl;
 

@@ -6,9 +6,27 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Send, Plus } from 'lucide-react';
 
 const demoPlans = [
-  { id: 1, name: 'Winter Wheat', land: 10, startDate: '2025-12-15' },
-  { id: 2, name: 'Summer Rice', land: 8, startDate: '2026-01-10' },
-  { id: 3, name: 'Corn Rotation', land: 5, startDate: '2026-02-01' },
+  {
+    id: 1,
+    blockName: 'Block A',
+    totalArea: 10,
+    masterPlanName: 'Winter Wheat Master',
+    status: 'live',
+  },
+  {
+    id: 2,
+    blockName: 'Block B',
+    totalArea: 8,
+    masterPlanName: 'Summer Rice Master',
+    status: 'live',
+  },
+  {
+    id: 3,
+    blockName: 'Block C',
+    totalArea: 5,
+    masterPlanName: 'Corn Rotation Master',
+    status: 'live',
+  },
 ];
 
 export default function CultivationPlanModule() {
@@ -57,23 +75,46 @@ export default function CultivationPlanModule() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
-                <TableHead className="w-20">Plan No</TableHead>
-                <TableHead>Plan Name</TableHead>
-                <TableHead>Land (acres)</TableHead>
-                <TableHead>Start Date</TableHead>
-                <TableHead className="w-40">Actions</TableHead>
+                <TableHead className="w-20">Plan No.</TableHead>
+                <TableHead>Block Name</TableHead>
+                <TableHead>Total Area (acres)</TableHead>
+                <TableHead>Master Plan Name</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-40">Cultivation Calendar</TableHead>
+                <TableHead className="w-40">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {plans.map((plan, idx) => (
                 <TableRow key={plan.id} className="hover:bg-muted transition">
                   <TableCell className="font-semibold text-foreground">{idx + 1}</TableCell>
-                  <TableCell className="font-medium">{plan.name}</TableCell>
-                  <TableCell className="text-foreground font-semibold">{plan.land}</TableCell>
-                  <TableCell className="text-muted-foreground">{plan.startDate}</TableCell>
+                  <TableCell className="font-medium">{plan.blockName}</TableCell>
+                  <TableCell className="text-foreground font-semibold">{plan.totalArea}</TableCell>
+                  <TableCell className="text-foreground">{plan.masterPlanName}</TableCell>
                   <TableCell>
-                    <Button variant="outline" size="sm" className="gap-1">
-                      <Send className="h-4 w-4" /> Send
+                    {/* Live status icon */}
+                    <span title="Live" className="inline-flex items-center gap-1 text-green-600 font-bold">
+                      <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor" className="animate-pulse"><circle cx="10" cy="10" r="7" /></svg>
+                      Live
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    {/* Calendar icon for cultivation calendar */}
+                    <Button variant="ghost" size="icon" title="View Calendar">
+                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="14" height="13" rx="2" />
+                        <line x1="16" y1="2" x2="16" y2="6" />
+                        <line x1="8" y1="2" x2="8" y2="6" />
+                        <line x1="3" y1="10" x2="17" y2="10" />
+                      </svg>
+                    </Button>
+                  </TableCell>
+                  <TableCell className="flex gap-2">
+                    <Button variant="ghost" size="icon" title="Edit">
+                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19.5 2 20l.5-5L16.5 3.5z" /></svg>
+                    </Button>
+                    <Button variant="ghost" size="icon" title="Delete">
+                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m5 0V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
                     </Button>
                   </TableCell>
                 </TableRow>

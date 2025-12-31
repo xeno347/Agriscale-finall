@@ -32,9 +32,10 @@ import {
   Info,
   AlertCircle,
   ArrowLeft,
-  Clock,           // New import
-  AlertTriangle,   // New import
-  CheckCircle2     // New import
+  Clock,
+  AlertTriangle,
+  CheckCircle2,
+  CircleDot,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -306,6 +307,7 @@ const InfoBox: React.FC<InfoBoxProps> = ({
             <p className="font-medium">{format(selectedDate, 'dd MMM yyyy')}</p>
           </div>
         )}
+
         <div className="text-sm">
           <span className="text-muted-foreground">Total Activities:</span>
           <p className="font-medium">{activitiesCount}</p>
@@ -347,8 +349,9 @@ const MonthCalendar: React.FC<{
   onDateClick?: (date: Date) => void;
   isSelectionMode?: boolean;
   highlighted?: { [date: string]: string };
+  highlightCounts?: { [date: string]: number };
   blockedDates?: { [date: string]: boolean };
-}> = ({ month, selectedDate, onDateClick, isSelectionMode, highlighted, blockedDates }) => {
+}> = ({ month, selectedDate, onDateClick, isSelectionMode, highlighted, highlightCounts, blockedDates }) => {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
@@ -382,7 +385,17 @@ const MonthCalendar: React.FC<{
             const isPast = isBefore(day, new Date());
             const today = isToday(day);
             const highlight = highlighted && highlighted[format(day, 'yyyy-MM-dd')];
+            const highlightCount = highlightCounts ? highlightCounts[format(day, 'yyyy-MM-dd')] || 0 : 0;
             const isBlocked = blockedDates && blockedDates[format(day, 'yyyy-MM-dd')];
+            const overlapClass = highlightCount > 5
+              ? 'bg-red-200 border border-red-600 text-red-900'
+              : highlightCount > 2
+              ? 'bg-orange-100 border border-orange-500 text-orange-800'
+              : highlightCount > 1
+              ? 'bg-green-400 border border-green-700 text-green-950'
+              : highlight
+              ? 'bg-green-100 border border-green-500'
+              : '';
             return (
               <button
                 key={day.toISOString()}
@@ -393,7 +406,7 @@ const MonthCalendar: React.FC<{
                   ${isSelected ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-offset-1' : ''}
                   ${today && !isSelected ? 'bg-accent font-bold' : ''}
                   ${isPast && !isSelected ? 'text-muted-foreground/50' : ''}
-                  ${highlight ? 'bg-green-100 border border-green-500' : ''}
+                  ${overlapClass}
                   ${isBlocked ? 'bg-red-100 border border-red-500 text-red-700' : ''}
                 `}
               >
@@ -433,18 +446,20 @@ const CreateCultivationPlan: React.FC = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [day0, setDay0] = useState<Date | null>(null);
   const [highlighted, setHighlighted] = useState<{ [date: string]: string }>({});
+  const [highlightCounts, setHighlightCounts] = useState<{ [date: string]: number }>({});
+  const [savingPlan, setSavingPlan] = useState(false);
 
-  // --- New State for Activity Popup ---
-  const [activityDetailsOpen, setActivityDetailsOpen] = useState(false);
-  const [inspectedDate, setInspectedDate] = useState<Date | null>(null);
-  const [inspectPresent, setInspectPresent] = useState<any[]>([]);
-  const [inspectPending, setInspectPending] = useState<any[]>([]);
+  // --- State for mapped data (no popup) ---
   const [rawMappedData, setRawMappedData] = useState<any[]>([]);
 
   // Add state for fetched master plans
   const [apiMasterPlans, setApiMasterPlans] = useState<{ id: string; name: string; plan_list: any[] }[]>([]);
-  // Add state for fetched farms
-  const [apiFarms, setApiFarms] = useState<{ farm_id: string; area: number; village: string }[]>([]);
+  // Add state for fetched blocks
+  const [apiBlocks, setApiBlocks] = useState<{ block_id: string; block_name: string; total_area: number }[]>([]);
+
+  // Plan metadata state and loading
+  const [planMetaLoading, setPlanMetaLoading] = useState(false);
+  const [planMeta, setPlanMeta] = useState<{ average_work_quantity_per_day: number; total_area: number; day_per_task: number } | null>(null);
 
   const navigate = useNavigate();
 
@@ -472,29 +487,39 @@ const CreateCultivationPlan: React.FC = () => {
         console.error('Failed to fetch master plans:', err);
       });
 
-    // Fetch farms
-    fetch(`${BASE_URL}/farmer_managment/get_farms`)
+    // Fetch blocks
+    fetch(`${BASE_URL}/farmer_managment/get_blocks`)
       .then(res => {
         if (!res.ok) throw new Error('Network response was not ok');
         return res.json();
       })
       .then(data => {
-        if (data && Array.isArray(data.farms)) {
-          const farms = data.farms.map((farm: any) => ({
-            farm_id: farm.farm_id,
-            area: farm.area,
-            village: farm.land_data?.village || '',
-          }));
-          setApiFarms(farms);
+        if (data && Array.isArray(data.blocks)) {
+          setApiBlocks(data.blocks.map((block: any) => ({
+            block_id: block.block_id,
+            block_name: block.block_name,
+            total_area: block.total_area,
+          })));
         }
       })
       .catch(err => {
-        console.error('Failed to fetch farms:', err);
+        console.error('Failed to fetch blocks:', err);
       });
   }, []);
 
-  // Helper to get selected master plan (from local demo data)
-  const selectedMasterPlan = useMemo(() => demoMasterPlanners.find(p => p.id === masterPlanId), [masterPlanId]);
+  // Helper to get selected master plan from API data
+  const selectedApiMasterPlan = useMemo(() => {
+    if (!masterPlanId) return null;
+    return apiMasterPlans.find((p) => p.id === masterPlanId) || null;
+  }, [apiMasterPlans, masterPlanId]);
+
+  // Calculate average work quantity for all activities in the selected API master plan
+  const avgWorkQty = useMemo(() => {
+    if (!selectedApiMasterPlan || !selectedApiMasterPlan.plan_list || !selectedApiMasterPlan.plan_list.length) return null;
+    // Try to find a numeric workQty property in each activity
+    const total = selectedApiMasterPlan.plan_list.reduce((sum: number, act: any) => sum + (Number(act.workQty) || 0), 0);
+    return (total / selectedApiMasterPlan.plan_list.length).toFixed(2);
+  }, [selectedApiMasterPlan]);
 
   // Helper to get selected master plan's activities for highlighting (local logic)
   const getHighlights = (baseDate: Date | null, planId: string | null) => {
@@ -539,6 +564,44 @@ const CreateCultivationPlan: React.FC = () => {
     toast.success('Cultivation plan saved successfully!');
   };
 
+  const handleSaveLivePlan = async () => {
+    if (!farmId || !masterPlanId) {
+      toast.error('Please select a block and master plan first.');
+      return;
+    }
+    if (!rawMappedData.length) {
+      toast.error('Generate the plan mapping before saving.');
+      return;
+    }
+
+    try {
+      setSavingPlan(true);
+      const resp = await fetch(`${BASE_URL}/admin_cultivation/save_plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan_id: masterPlanId,
+          block_id: farmId,
+          date_mapping: rawMappedData,
+        }),
+      });
+      console.log('Save plan response:', rawMappedData);
+      if (!resp.ok) throw new Error('Failed to save plan');
+      const data = await resp.json();
+      if (data && data.status === 'success') {
+        toast.success('Plan saved successfully!');
+        navigate('/cultivation-plan');
+      } else {
+        toast.error('Failed to save plan');
+      }
+    } catch (err) {
+      console.error('Failed to save plan:', err);
+      toast.error('Failed to save plan');
+    } finally {
+      setSavingPlan(false);
+    }
+  };
+
   const handleNavigateBack = () => {
     navigate(-1);
   };
@@ -548,13 +611,10 @@ const CreateCultivationPlan: React.FC = () => {
     [plannedActivities]
   );
 
-  // Handle day click
+  // Handle day click: always remap activities and highlight, no popup
   const handleDayClick = async (date: Date) => {
-    // SCENARIO 1: Selecting the Start Date (Day 0)
-    if (selectionMode && masterPlanId && !day0) {
+    if (selectionMode && masterPlanId) {
       setDay0(date);
-
-      // Call date mapping API
       try {
         const response = await fetch(`${BASE_URL}/admin_cultivation/date_mapping`, {
           method: 'POST',
@@ -562,33 +622,36 @@ const CreateCultivationPlan: React.FC = () => {
           body: JSON.stringify({
             day_0_date: format(date, 'yyyy-MM-dd'),
             master_cultivation_plan_id: masterPlanId,
+            day_per_task: planMeta?.day_per_task ?? 1,
           }),
         });
         if (!response.ok) throw new Error('Failed to fetch date mapping');
         const data = await response.json();
-        
         if (data && Array.isArray(data.date_mapping)) {
-          setRawMappedData(data.date_mapping); // Store for popup usage
-          
+          setRawMappedData(data.date_mapping);
           const highlights: { [date: string]: string } = {};
+          const counts: { [date: string]: number } = {};
           data.date_mapping.forEach((item: any) => {
-            if (item.date && item.activity) {
-              highlights[item.date] = item.activity;
-            }
+            if (!item || !item.date || !item.activity) return;
+            const dates = Array.isArray(item.date) ? item.date : [item.date];
+            dates.forEach((d: string) => {
+              if (!d) return;
+              highlights[d] = highlights[d] || item.activity;
+              counts[d] = (counts[d] || 0) + 1;
+            });
           });
           setHighlighted(highlights);
+          setHighlightCounts(counts);
           toast.success("Plan generated!");
         } else {
           setHighlighted({});
+          setHighlightCounts({});
         }
       } catch (err) {
         setHighlighted({});
+        setHighlightCounts({});
         console.error('Failed to fetch date mapping:', err);
       }
-    } 
-    // SCENARIO 2: Clicking a date AFTER plan is generated (Open Popup)
-    else if (day0) {
-        openActivityDetails(date);
     }
   };
 
@@ -633,9 +696,34 @@ const CreateCultivationPlan: React.FC = () => {
           <h1 className="text-3xl font-bold text-foreground">Cultivation Plan</h1>
           {day0 && <p className="text-muted-foreground mt-1 text-sm">Start Date: {format(day0, 'PPP')}</p>}
         </div>
-        <Button onClick={() => setDialogOpen(true)} size="lg" className="gap-2">
-          + Create Plan
-        </Button>
+        <div className="flex items-center gap-3">
+          {day0 && (
+            <Button
+              size="xl"
+              className="gap-2 px-8 py-3 text-white font-extrabold text-lg bg-gradient-to-r from-green-600 via-emerald-500 to-lime-500 shadow-lg shadow-green-300/40 border-2 border-green-700 ring-4 ring-green-200 focus:ring-green-400 focus:outline-none transition-all duration-200 hover:scale-105 hover:bg-gradient-to-br hover:from-green-700 hover:to-lime-600"
+              onClick={handleSaveLivePlan}
+              disabled={savingPlan}
+            >
+              <CircleDot className="h-6 w-6 animate-pulse text-white drop-shadow" />
+              {savingPlan ? 'Saving…' : 'Live Plan'}
+            </Button>
+          )}
+          <Button onClick={() => setDialogOpen(true)} size="lg" className="gap-2">
+            + Create Plan
+          </Button>
+        </div>
+      </div>
+
+      {/* Carry Forward Probability & Average Work Quantity Side by Side */}
+      <div className="w-full max-w-3xl mx-auto mb-8 flex flex-col sm:flex-row gap-4">
+        <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow p-5 flex items-center justify-between">
+          <span className="text-lg font-medium text-gray-700">Carry Forward Probability:</span>
+          <span className="text-2xl font-bold text-green-700">{carryForwardProbability !== null ? `${carryForwardProbability}%` : '--'}</span>
+        </div>
+        <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow p-5 flex items-center justify-between">
+          <span className="text-lg font-medium text-gray-700">Average Work Quantity:</span>
+          <span className="text-2xl font-bold text-blue-700">{planMetaLoading ? 'Loading...' : (avgWorkQty !== null ? avgWorkQty : '--')}</span>
+        </div>
       </div>
 
       {/* --- DIALOG: Select Farm/Plan --- */}
@@ -647,17 +735,16 @@ const CreateCultivationPlan: React.FC = () => {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Select Farm</label>
+              <label className="text-sm font-medium">Select Block</label>
               <Select value={farmId ?? ''} onValueChange={setFarmId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Choose a farm..." />
+                  <SelectValue placeholder="Choose a block..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {apiFarms.map(farm => (
-                    <SelectItem key={farm.farm_id} value={farm.farm_id}>
-                      <span className="font-medium">{farm.farm_id}</span>
-                      <Badge variant="outline" className="ml-2 text-xs">{farm.area} acres</Badge>
-                      <span className="ml-2 text-xs text-muted-foreground">{farm.village}</span>
+                  {apiBlocks.map(block => (
+                    <SelectItem key={block.block_id} value={block.block_id}>
+                      <span className="font-medium">{block.block_name}</span>
+                      <Badge variant="outline" className="ml-2 text-xs">{block.total_area} acres</Badge>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -685,128 +772,49 @@ const CreateCultivationPlan: React.FC = () => {
               Cancel
             </Button>
             <Button
-              onClick={() => {
-                setDialogOpen(false);
-                setSelectionMode(true);
-                // Reset previous selection data if any
-                setDay0(null);
-                setHighlighted({});
-                setRawMappedData([]);
+              onClick={async () => {
+                if (!farmId || !masterPlanId) return;
+                setPlanMetaLoading(true);
+                setPlanMeta(null);
+                try {
+                  const resp = await fetch(`${BASE_URL}/admin_cultivation/plan_metadata_finder`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ block_id: farmId, master_plan_id: masterPlanId })
+                  });
+                  if (!resp.ok) throw new Error('Failed to fetch plan metadata');
+                  const data = await resp.json();
+                  setPlanMeta(data);
+                  setDialogOpen(false);
+                  setSelectionMode(true);
+                  // Reset previous selection data if any
+                  setDay0(null);
+                  setHighlighted({});
+                  setHighlightCounts({});
+                  setRawMappedData([]);
+                } catch (err) {
+                  toast.error('Failed to load plan metadata');
+                } finally {
+                  setPlanMetaLoading(false);
+                }
               }}
-              disabled={!farmId || !masterPlanId}
+              disabled={!farmId || !masterPlanId || planMetaLoading}
             >
-              Continue to Calendar
+              {planMetaLoading ? 'Loading...' : 'Continue to Calendar'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* --- DIALOG: Activity Details (New Feature) --- */}
-      <Dialog open={activityDetailsOpen} onOpenChange={setActivityDetailsOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
-          <DialogHeader className="pb-2 border-b">
-            <DialogTitle className="flex items-center gap-2">
-               <Calendar className="w-5 h-5 text-primary" />
-               Activities for {inspectedDate ? format(inspectedDate, 'PPP') : ''}
-            </DialogTitle>
-          </DialogHeader>
-          
-          <ScrollArea className="flex-1 pr-4 py-4">
-            <div className="space-y-6">
-              
-              {/* SECTION 1: PRESENT DAY ACTIVITIES */}
-              <div>
-                <h3 className="text-sm font-semibold flex items-center gap-2 mb-3 text-green-700 bg-green-50 p-2 rounded-lg">
-                   <Clock className="w-4 h-4" /> Today's Tasks
-                </h3>
-                {inspectPresent.length === 0 ? (
-                  <div className="text-sm text-muted-foreground text-center py-4 border-2 border-dashed rounded-lg">
-                    No activities scheduled for this specific date.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {inspectPresent.map((act, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-card border rounded-lg shadow-sm">
-                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                               <Sprout className="w-4 h-4" />
-                            </div>
-                            <div>
-                               <p className="font-medium text-sm">{act.activity}</p>
-                               <p className="text-xs text-muted-foreground">Scheduled for today</p>
-                            </div>
-                         </div>
-                         <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">Scheduled</Badge>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* SECTION 2: PENDING (PAST) ACTIVITIES */}
-              <div>
-                 <h3 className="text-sm font-semibold flex items-center gap-2 mb-3 text-amber-700 bg-amber-50 p-2 rounded-lg">
-                   <AlertTriangle className="w-4 h-4" /> Pending Activities (Past)
-                </h3>
-                {inspectPending.length === 0 ? (
-                  <div className="text-sm text-muted-foreground text-center py-4">
-                    No pending activities from previous days.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {inspectPending.map((act, idx) => (
-                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-amber-50/50 border border-amber-100 rounded-lg gap-3">
-                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
-                               <AlertCircle className="w-4 h-4" />
-                            </div>
-                            <div>
-                               <p className="font-medium text-sm">{act.activity}</p>
-                               <p className="text-xs text-red-500 font-medium">Due: {act.date}</p>
-                            </div>
-                         </div>
-                         
-                         {/* PRIORITY DROPDOWN */}
-                         <div className="flex items-center gap-2 w-full sm:w-auto">
-                            <span className="text-xs text-muted-foreground whitespace-nowrap">Priority:</span>
-                            <Select defaultValue="low">
-                              <SelectTrigger className="w-[110px] h-8 text-xs bg-white">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="low" className="text-xs">Low</SelectItem>
-                                <SelectItem value="medium" className="text-xs text-blue-600">Medium</SelectItem>
-                                <SelectItem value="high" className="text-xs text-orange-600">High</SelectItem>
-                                <SelectItem value="critical" className="text-xs text-red-600 font-bold">Critical</SelectItem>
-                              </SelectContent>
-                            </Select>
-                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </ScrollArea>
-          
-          <DialogFooter className="pt-4 border-t">
-            <Button variant="outline" onClick={() => setActivityDetailsOpen(false)}>Close</Button>
-            <Button>Save Updates</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Show selected farm and master plan above the calendar */}
       <div className="mb-4 flex flex-wrap items-center gap-4">
         {farmId && (
           <span className="inline-flex items-center px-3 py-1 rounded bg-muted text-foreground text-sm font-medium">
             <MapPin className="h-4 w-4 mr-1 text-muted-foreground" />
-            {apiFarms.find(f => f.farm_id === farmId)?.farm_id}
-            {apiFarms.find(f => f.farm_id === farmId) && (
-              <span className="ml-2 text-xs">{apiFarms.find(f => f.farm_id === farmId)?.area} acres</span>
-            )}
-            {apiFarms.find(f => f.farm_id === farmId) && (
-              <span className="ml-2 text-xs text-muted-foreground">{apiFarms.find(f => f.farm_id === farmId)?.village}</span>
+            {apiBlocks.find(b => b.block_id === farmId)?.block_name}
+            {apiBlocks.find(b => b.block_id === farmId) && (
+              <span className="ml-2 text-xs">{apiBlocks.find(b => b.block_id === farmId)?.total_area} acres</span>
             )}
           </span>
         )}
@@ -823,15 +831,36 @@ const CreateCultivationPlan: React.FC = () => {
         )}
       </div>
 
+      {/* Legend for overlap colors */}
+      <div className="mb-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <span className="h-4 w-4 rounded border border-green-500 bg-green-100" aria-label="1 task per day" />
+          <span>Light green: 1 task on the date</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="h-4 w-4 rounded border border-green-700 bg-green-400" aria-label="2 tasks per day" />
+          <span>Darker green: 2 tasks on the date</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="h-4 w-4 rounded border border-orange-500 bg-orange-100" aria-label=">2 tasks per day" />
+          <span>Orange: 3-5 tasks on the date</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="h-4 w-4 rounded border border-red-600 bg-red-200" aria-label=">5 tasks per day" />
+          <span>Dark red: 6+ tasks on the date</span>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {months.map((month) => (
           <MonthCalendar
             key={month.toISOString()}
             month={month}
             selectedDate={day0}
-            onDateClick={handleDayClick}
+            onDateClick={planMetaLoading ? undefined : handleDayClick}
             isSelectionMode={selectionMode}
             highlighted={highlighted}
+            highlightCounts={highlightCounts}
             blockedDates={blockedDates}
           />
         ))}
