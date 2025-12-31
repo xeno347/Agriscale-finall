@@ -565,7 +565,7 @@ const CultivationMasterModule = () => {
 			setLoading(true);
 			try {
 				const baseUrl = getBaseUrl();
-				const response = await fetch(`${baseUrl}/admin_cultivation/get_master_cultivation_plans`);
+				const response = await fetch(`${baseUrl}admin_cultivation/get_master_cultivation_plans`);
 				if (!response.ok) throw new Error('Failed to fetch plans');
 				const data = await response.json();
 				// Convert API response to MasterPlanner[]
