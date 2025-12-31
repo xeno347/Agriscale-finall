@@ -4,7 +4,7 @@ import axios from 'axios';
 // Use Vite env `VITE_API_BASE_URL` if provided, otherwise fallback to localhost.
 
 // Use VITE_API_BASE_URL if set, otherwise fallback to /api for production, or localhost for dev.
-let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? '/api';
+let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? '';
 
 export const getBaseUrl = (): string => baseUrl;
 
