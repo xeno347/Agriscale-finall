@@ -58,6 +58,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area'; // New component
+import getBaseUrl from '@/lib/config';
 
 // ============================================================================
 // TYPES
@@ -464,8 +465,7 @@ const CreateCultivationPlan: React.FC = () => {
   const navigate = useNavigate();
 
   // Fetch master plans from API on mount
-  // Define your backend base URL here
-  const BASE_URL = 'http://localhost:8000'; // <-- Change this to your backend URL if different
+  const BASE_URL = getBaseUrl(); // <-- Use shared config
 
   useEffect(() => {
     fetch(`${BASE_URL}/admin_cultivation/get_master_cultivation_plans`)
