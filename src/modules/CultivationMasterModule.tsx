@@ -57,6 +57,7 @@ import {
 	TableHeader,
 	TableRow,
 } from '@/components/ui/table';
+import getBaseUrl from '@/lib/config';
 
 // ============================================================
 // TYPES
@@ -247,7 +248,7 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 		};
 
 		try {
-			const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+			const baseUrl = getBaseUrl();
 			const response = await fetch(`${baseUrl}/admin_cultivation/save_master_cultivation_plan`, {
 				method: 'POST',
 				headers: {
@@ -563,7 +564,7 @@ const CultivationMasterModule = () => {
 		const fetchPlans = async () => {
 			setLoading(true);
 			try {
-				const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+				const baseUrl = getBaseUrl();
 				const response = await fetch(`${baseUrl}/admin_cultivation/get_master_cultivation_plans`);
 				if (!response.ok) throw new Error('Failed to fetch plans');
 				const data = await response.json();
