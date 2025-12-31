@@ -1,7 +1,9 @@
 // Central API base URL config for the app
 // Use Vite env `VITE_API_BASE_URL` if provided, otherwise fallback to localhost.
 
-let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? 'https://100.31.203.72';
+// In production, set VITE_API_BASE_URL=/api to match Nginx proxy.
+// In local dev, use your backend URL (e.g., http://localhost:8000).
+let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? 'http://100.31.203.72/';
 
 export const getBaseUrl = (): string => baseUrl;
 
