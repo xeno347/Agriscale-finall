@@ -1,4 +1,4 @@
-import { Users, UserCheck, Wheat, Sprout, Package, Calendar, Map, ClipboardList } from 'lucide-react';
+import { Users, UserCheck, Wheat, Sprout, Package, Calendar, UserPlus, Truck, Car } from 'lucide-react';
 import { Box } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -12,7 +12,7 @@ interface NavItemProps {
 
 const NavItem = ({ to, icon: Icon, label, notificationStatus = 'none' }: NavItemProps) => {
   const location = useLocation();
-  const isActive = location.pathname === to;
+  const isActive = location.pathname === to || location.pathname.startsWith(to + '/');
 
   return (
     <NavLink
@@ -54,7 +54,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           </div>
           <div>
             <h1 className="font-display font-bold text-xl text-sidebar-foreground">SBR</h1>
-            <p className="text-xs text-sidebar-foreground/60">Farm Connect</p>
+            <p className="text-xs text-sidebar-foreground/60">Agro Portal</p>
           </div>
         </div>
       </div>
@@ -78,14 +78,22 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           label="Farmers"
         />
 
+        {/* HARVEST SECTION */}
+        <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
+          Harvest Management
+        </p>
+
         <NavItem
-          to="/blocks"
-          icon={Map}
-          label="Blocks"
+          to="/harvest-planning"
+          icon={Sprout}
+          label="Harvest Planning"
         />
 
-        {/* HARVEST SECTION */}
-        
+        <NavItem
+          to="/harvest-orders"
+          icon={Package}
+          label="Harvest Orders"
+        />
         
         <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-4 mb-3 mt-6">
           Management
@@ -94,6 +102,24 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           to="/inventory"
           icon={Box}
           label="Inventory"
+        />
+        
+        <NavItem
+          to="/logistics"
+          icon={Truck}
+          label="Logistics"
+        />
+
+        <NavItem
+          to="/vehicle-management"
+          icon={Car}
+          label="Vehicle Management"
+        />
+
+        <NavItem
+          to="/staff-onboarding"
+          icon={UserPlus}
+          label="Staff Onboarding"
         />
 
         {/* OPERATION (Cultivation) Group */}
@@ -114,14 +140,8 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         />
         <NavItem
           to="/cultivation-plan"
-          icon={ClipboardList}
-          label="Cultivation Plan"
-        />
-
-        <NavItem
-          to="/harvest-orders"
           icon={Package}
-          label="Harvest Orders"
+          label="Cultivation Plan"
         />
        
       </nav>

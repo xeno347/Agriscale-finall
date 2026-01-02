@@ -7,7 +7,6 @@ import AppLayout from "./components/layout/AppLayout";
 import Index from "./pages/Index";
 import Leads from "./pages/Leads";
 import Farmers from "./pages/Farmers";
-import Blocks from "./pages/Blocks";
 import HarvestPlanning from "./pages/HarvestPlanning";
 import NotFound from "./pages/NotFound";
 import Inventory from "./pages/Inventory";
@@ -15,9 +14,12 @@ import CultivationMaster from "./pages/CultivationMaster";
 import CultivationPlan from "./pages/CultivationPlan";
 import CreateCultivationPlan from "./pages/CreateCultivationPlan";
 import CultivationCalendar from "./pages/CultivationCalendar";
-
-// Consolidated Harvest Orders Page
 import HarvestOrders from "./pages/HarvestOrders";
+import StaffOnboarding from "./pages/StaffOnboarding";
+import LogisticsManagement from "./pages/LogisticsManagement";
+
+// New Import
+import VehicleManagement from "./pages/VehicleManagement";
 
 const queryClient = new QueryClient();
 
@@ -32,7 +34,6 @@ const App = () => (
           
           <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
           <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
-          <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />
           
           {/* Operations */}
           <Route path="/cultivation-calendar" element={<AppLayout><CultivationCalendar /></AppLayout>} />
@@ -42,11 +43,13 @@ const App = () => (
 
           {/* Harvest Management */}
           <Route path="/harvest-planning" element={<AppLayout><HarvestPlanning /></AppLayout>} />
-          
-          {/* Single Route for Harvest Orders (Handling list + details internally) */}
           <Route path="/harvest-orders" element={<AppLayout><HarvestOrders /></AppLayout>} />
 
+          {/* Management */}
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
+          <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
+          <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
+          <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />
           
           <Route path="*" element={<NotFound />} />
         </Routes>
