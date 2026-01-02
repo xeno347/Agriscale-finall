@@ -96,7 +96,7 @@ const formatDateKey = (date: Date) => {
 };
 
 // --- API Fetch ---
-const BASE_URL = getBaseUrl();
+const BASE_URL = getBaseUrl().replace(/\/$/, '');
 
 const fetchCalendarData = async (): Promise<CalendarData> => {
   const url = `${BASE_URL}/admin_cultivation/fetch_cultivation_calander`;
