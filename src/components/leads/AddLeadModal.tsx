@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, ArrowRight, ArrowLeft, MapPin, Check, Info, Navigation } from 'lucide-react';
-import { MapContainer, TileLayer, FeatureGroup } from 'react-leaflet';
+import { MapContainer, TileLayer, FeatureGroup, Marker } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
@@ -31,17 +31,19 @@ export interface AddLeadFormData {
   estimatedLandArea?: number;
   waterAvailable: boolean;
   notes?: string;
+  landLocation?: { lat: number; lng: number } | null;
   landCoordinates?: { lat: number; lng: number }[];
 }
 
 const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState<'info' | 'mapping'>('info');
+  const [step, setStep] = useState<'info' | 'location' | 'mapping'>('info');
   const [skipMapping, setSkipMapping] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 22.5726, lng: 78.9629 });
+  const [landLocation, setLandLocation] = useState<{ lat: number; lng: number } | null>(null);
   const featureGroupRef = useRef(null);
-  
+
   const [formData, setFormData] = useState<AddLeadFormData>({
     fullName: '',
     phoneNumber: '',
@@ -84,6 +86,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
     if (open) {
       setStep('info');
       setSkipMapping(false);
+      setLandLocation(null);
       setFormData({
         fullName: '',
         phoneNumber: '',
@@ -103,10 +106,10 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   }, [open]);
 
   useEffect(() => {
-    if (step === 'mapping' && !skipMapping) {
+    if ((step === 'location' || step === 'mapping') && !landLocation) {
       getUserLocation();
     }
-  }, [step, skipMapping]);
+  }, [step]);
 
   const handleCanvasClick = () => {
     // No longer needed with leaflet
@@ -135,38 +138,32 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
 
   const handleNextStep = () => {
     if (isInfoValid()) {
+      setStep('location');
+    }
+  };
+
+  const handleLocationNext = () => {
+    if (landLocation) {
       setStep('mapping');
     }
   };
 
   const handleSubmit = async () => {
-    if (skipMapping) {
-      // Skip mapping and submit directly
-      setLoading(true);
-      try {
-        await onSubmit({
-          ...formData,
-          landCoordinates: [],
-        });
-        onClose();
-      } finally {
-        setLoading(false);
+    setLoading(true);
+    try {
+      let coordinates: { lat: number; lng: number }[] = [];
+      if (!skipMapping && featureGroupRef.current) {
+        coordinates = extractCoordinates();
       }
-    } else {
-      // Extract coordinates from leaflet draw
-      if (featureGroupRef.current) {
-        const coordinates = extractCoordinates();
-        setLoading(true);
-        try {
-          await onSubmit({
-            ...formData,
-            landCoordinates: coordinates,
-          });
-          onClose();
-        } finally {
-          setLoading(false);
-        }
-      }
+      const submitData: AddLeadFormData = {
+        ...formData,
+        landCoordinates: coordinates,
+        landLocation: landLocation || undefined,
+      };
+      await onSubmit(submitData);
+      onClose();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -198,14 +195,9 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl font-display flex items-center gap-2">
-            {step === 'info' ? (
-              <>Add New Lead</>
-            ) : (
-              <>
-                <MapPin className="w-5 h-5 text-primary" />
-                Land Mapping - {formData.fullName}
-              </>
-            )}
+            {step === 'info' && <>Add New Lead</>}
+            {step === 'location' && <><MapPin className="w-5 h-5 text-primary" />Provide Land Location - {formData.fullName}</>}
+            {step === 'mapping' && <><MapPin className="w-5 h-5 text-primary" />Land Mapping (Optional) - {formData.fullName}</>}
           </DialogTitle>
         </DialogHeader>
 
@@ -216,15 +208,23 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
             Lead Info
           </div>
           <ArrowRight className="w-4 h-4 text-muted-foreground" />
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${step === 'mapping' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${step === 'location' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
             <span className="w-5 h-5 rounded-full bg-background/20 flex items-center justify-center text-xs font-bold">2</span>
-            Land Mapping
+            Land Location
+          </div>
+          <ArrowRight className="w-4 h-4 text-muted-foreground" />
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${step === 'mapping' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+            <span className="w-5 h-5 rounded-full bg-background/20 flex items-center justify-center text-xs font-bold">3</span>
+            Land Mapping (Optional)
           </div>
         </div>
 
-        {step === 'info' ? (
+        {/* Step 1: Info */}
+        {step === 'info' && (
           <form onSubmit={(e) => { e.preventDefault(); handleNextStep(); }} className="space-y-6 pt-4">
+            {/* ...existing code for info form... */}
             <div className="grid grid-cols-2 gap-4">
+              {/* ...existing code for info fields... */}
               <div className="space-y-2">
                 <Label htmlFor="fullName">Full Name *</Label>
                 <Input
@@ -235,7 +235,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   placeholder="Enter farmer's full name"
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="phoneNumber">Phone Number *</Label>
                 <Input
@@ -246,7 +245,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   placeholder="+91 XXXXX XXXXX"
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="alternatePhone">Alternate Phone</Label>
                 <Input
@@ -256,7 +254,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   placeholder="+91 XXXXX XXXXX"
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="leadSource">Lead Source *</Label>
                 <Select
@@ -275,7 +272,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="farmingOption">Farming Option</Label>
                 <Select
@@ -291,7 +287,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="village">Village *</Label>
                 <Input
@@ -302,7 +297,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   placeholder="Enter village name"
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="taluka">Taluka</Label>
                 <Input
@@ -312,7 +306,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   placeholder="Enter taluka"
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="district">District *</Label>
                 <Input
@@ -323,7 +316,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   placeholder="Enter district"
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="state">State *</Label>
                 <Select
@@ -345,7 +337,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="estimatedLandArea">Estimated Land Area (acres)</Label>
                 <Input
@@ -356,7 +347,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   placeholder="Enter area in acres"
                 />
               </div>
-
               <div className="space-y-2">
                 <Label>Water Available</Label>
                 <div className="flex items-center gap-3 pt-2">
@@ -370,7 +360,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                 </div>
               </div>
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="notes">Notes</Label>
               <Textarea
@@ -381,61 +370,113 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                 rows={3}
               />
             </div>
-
             <div className="flex justify-end gap-3 pt-4 border-t">
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel
               </Button>
               <Button type="submit" disabled={!isInfoValid()} className="gap-2">
-                Next: Land Mapping
+                Next: Land Location
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </div>
           </form>
-        ) : (
+        )}
+
+        {/* Step 2: Land Location */}
+        {step === 'location' && (
+          <div className="space-y-4 pt-4">
+            <div className="flex items-start gap-3 p-3 bg-info/10 rounded-lg border border-info/20">
+              <Info className="w-5 h-5 text-info mt-0.5 shrink-0" />
+              <p className="text-sm text-muted-foreground">
+                Confirm or adjust the marker to indicate the main location of your land.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={getUserLocation}
+                disabled={locationLoading}
+                className="gap-2 flex-1"
+              >
+                {locationLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Navigation className="w-4 h-4" />
+                )}
+                {locationLoading ? 'Getting Location...' : 'Use My Location'}
+              </Button>
+            </div>
+            <div className="relative border-2 border-border rounded-lg overflow-hidden h-96">
+              <MapContainer
+                center={landLocation || mapCenter}
+                zoom={18}
+                style={{ height: '100%', width: '100%' }}
+              >
+                <TileLayer
+                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                  attribution='&copy; Esri'
+                />
+                {/* Draggable marker for land location */}
+                {((landLocation || mapCenter) &&
+                  <Marker
+                    position={landLocation || mapCenter}
+                    draggable={true}
+                    eventHandlers={{
+                      dragend: (e: any) => {
+                        const marker = e.target;
+                        const pos = marker.getLatLng();
+                        setLandLocation({ lat: pos.lat, lng: pos.lng });
+                      },
+                    }}
+                  />
+                )}
+              </MapContainer>
+            </div>
+            <div className="flex justify-between gap-3 pt-4 border-t">
+              <Button type="button" variant="outline" onClick={() => setStep('info')} className="gap-2">
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </Button>
+              <div className="flex gap-3">
+                <Button type="button" variant="outline" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleLocationNext}
+                  disabled={!landLocation}
+                  className="gap-2"
+                >
+                  Next: Land Mapping (Optional)
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Land Mapping (Optional) */}
+        {step === 'mapping' && (
           <div className="space-y-4">
             {!skipMapping ? (
               <>
-                {/* Info Banner */}
                 <div className="flex items-start gap-3 p-3 bg-info/10 rounded-lg border border-info/20">
                   <Info className="w-5 h-5 text-info mt-0.5 shrink-0" />
                   <p className="text-sm text-muted-foreground">
-                    Use the drawing tools on the map to mark your land boundary. You can draw polygons, rectangles, or circles.
+                    Use the drawing tools on the map to mark your land boundary. You can draw polygons, rectangles, or circles. This step is optional.
                   </p>
                 </div>
-
-                {/* Location Button */}
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={getUserLocation}
-                    disabled={locationLoading}
-                    className="gap-2 flex-1"
-                  >
-                    {locationLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Navigation className="w-4 h-4" />
-                    )}
-                    {locationLoading ? 'Getting Location...' : 'Use My Location'}
-                  </Button>
-                </div>
-
-                {/* Map */}
                 <div className="relative border-2 border-border rounded-lg overflow-hidden h-96">
                   <MapContainer
-                    center={[mapCenter.lat, mapCenter.lng]}
+                    center={landLocation || mapCenter}
                     zoom={18}
                     style={{ height: '100%', width: '100%' }}
                   >
-                    {/* Satellite View Tile */}
                     <TileLayer
                       url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                       attribution='&copy; Esri'
                     />
-                    
-                    {/* Drawing Tools */}
                     <FeatureGroup ref={featureGroupRef}>
                       <EditControl
                         position="topleft"
@@ -464,10 +505,8 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                 </p>
               </div>
             )}
-
-            {/* Actions */}
             <div className="flex justify-between gap-3 pt-4 border-t">
-              <Button type="button" variant="outline" onClick={() => setStep('info')} className="gap-2">
+              <Button type="button" variant="outline" onClick={() => setStep('location')} className="gap-2">
                 <ArrowLeft className="w-4 h-4" />
                 Back
               </Button>

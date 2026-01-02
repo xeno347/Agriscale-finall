@@ -7,6 +7,7 @@ import AppLayout from "./components/layout/AppLayout";
 import Index from "./pages/Index";
 import Leads from "./pages/Leads";
 import Farmers from "./pages/Farmers";
+import Blocks from "./pages/Blocks";
 import HarvestPlanning from "./pages/HarvestPlanning";
 import NotFound from "./pages/NotFound";
 import Inventory from "./pages/Inventory";
@@ -31,6 +32,7 @@ const App = () => (
           
           <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
           <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
+          <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />
           
           {/* Operations */}
           <Route path="/cultivation-calendar" element={<AppLayout><CultivationCalendar /></AppLayout>} />

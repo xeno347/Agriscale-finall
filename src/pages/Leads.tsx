@@ -87,7 +87,26 @@ const Leads = () => {
   const handleAddLead = async (data: AddLeadFormData) => {
     try {
       const base = getBaseUrl();
-      
+
+      // Determine land_coordinates logic
+      let land_coordinates = null;
+      // If landCoordinates is an array of objects and has more than 1, treat as mapping
+      if (Array.isArray(data.landCoordinates) && data.landCoordinates.length > 1) {
+        // Mapping done: [[lat, lng], ...]
+        land_coordinates = data.landCoordinates.map(coord => [coord.lat, coord.lng]);
+      } else if (
+        (!data.landCoordinates || data.landCoordinates.length === 0) && (data as any).landLocation
+      ) {
+        // Mapping skipped, but landLocation provided: [lat, lng]
+        const loc = (data as any).landLocation;
+        land_coordinates = [loc.lat, loc.lng];
+      } else if (Array.isArray(data.landCoordinates) && data.landCoordinates.length === 1) {
+        // Only one coordinate in mapping (edge case): treat as [lat, lng]
+        land_coordinates = [data.landCoordinates[0].lat, data.landCoordinates[0].lng];
+      } else {
+        land_coordinates = null;
+      }
+
       // Transform data to match backend schema exactly
       const payload = {
         full_name: data.fullName,
@@ -102,7 +121,7 @@ const Leads = () => {
         estimated_land_area: parseFloat(String(data.estimatedLandArea || 0)), // Ensure float type
         water_available: Boolean(data.waterAvailable), // Ensure boolean
         note: data.notes || null,
-        land_coordinates: data.landCoordinates && data.landCoordinates.length > 0 ? data.landCoordinates : null, // Ensure list or null
+        land_coordinates,
       };
       console.log('Submitting lead payload:', payload);
 
@@ -115,7 +134,7 @@ const Leads = () => {
       if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
 
       const result = await resp.json();
-      
+
       if (result.success) {
         // Create local lead object for UI
         const newLead: Lead = {

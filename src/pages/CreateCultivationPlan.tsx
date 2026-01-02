@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   CircleDot,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -59,6 +60,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area'; // New component
 import getBaseUrl from '@/lib/config';
+
+type LivePlanStepStatus = 'idle' | 'loading' | 'success' | 'error';
 
 // ============================================================================
 // TYPES
@@ -450,6 +453,12 @@ const CreateCultivationPlan: React.FC = () => {
   const [highlightCounts, setHighlightCounts] = useState<{ [date: string]: number }>({});
   const [savingPlan, setSavingPlan] = useState(false);
 
+  const [livePlanProgressOpen, setLivePlanProgressOpen] = useState(false);
+  const [livePlanStep, setLivePlanStep] = useState<1 | 2 | 3>(1);
+  const [savePlanStatus, setSavePlanStatus] = useState<LivePlanStepStatus>('idle');
+  const [assignFarmsStatus, setAssignFarmsStatus] = useState<LivePlanStepStatus>('idle');
+  const [livePlanError, setLivePlanError] = useState<string | null>(null);
+
   // --- State for mapped data (no popup) ---
   const [rawMappedData, setRawMappedData] = useState<any[]>([]);
 
@@ -531,11 +540,17 @@ const CreateCultivationPlan: React.FC = () => {
       // Use activity.dayOffset from the master plan
       const activityDate = addDays(baseDate, activity.dayOffset);
       if (activity.dayOffset <= 120) {
-        highlights[format(activityDate, 'yyyy-MM-dd')] = activity.activityId || activity.name;
+        highlights[format(activityDate, 'yyyy-MM-dd')] = activity.activityId;
       }
     });
     return highlights;
   };
+  
+  // --- Activity details inspection state (used by openActivityDetails) ---
+  const [activityDetailsOpen, setActivityDetailsOpen] = useState(false);
+  const [inspectedDate, setInspectedDate] = useState<Date | null>(null);
+  const [inspectPresent, setInspectPresent] = useState<any[]>([]);
+  const [inspectPending, setInspectPending] = useState<any[]>([]);
 
   const handleFarmSelect = (farm: Farm) => {
     setSelectedFarm(farm);
@@ -576,27 +591,57 @@ const CreateCultivationPlan: React.FC = () => {
 
     try {
       setSavingPlan(true);
-      const resp = await fetch(`${BASE_URL}/admin_cultivation/save_plan`, {
+      setLivePlanError(null);
+      setLivePlanStep(1);
+      setSavePlanStatus('idle');
+      setAssignFarmsStatus('idle');
+      setLivePlanProgressOpen(true);
+
+      const base = BASE_URL.replace(/\/$/, '');
+      const payload = {
+        plan_id: masterPlanId,
+        block_id: farmId,
+        date_mapping: rawMappedData,
+      };
+
+      // Step 1: Plan made and ready (no work needed)
+      setLivePlanStep(2);
+      setSavePlanStatus('loading');
+
+      const resp = await fetch(`${base}/admin_cultivation/save_plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan_id: masterPlanId,
-          block_id: farmId,
-          date_mapping: rawMappedData,
-        }),
+        body: JSON.stringify(payload),
       });
-      console.log('Save plan response:', rawMappedData);
       if (!resp.ok) throw new Error('Failed to save plan');
       const data = await resp.json();
-      if (data && data.status === 'success') {
-        toast.success('Plan saved successfully!');
-        navigate('/cultivation-plan');
-      } else {
-        toast.error('Failed to save plan');
+      if (!(data && data.status === 'success')) {
+        throw new Error('Save plan did not return success');
       }
+      setSavePlanStatus('success');
+
+      // Step 3: Assigning farms (same payload)
+      setLivePlanStep(3);
+      setAssignFarmsStatus('loading');
+      const resp2 = await fetch(`${base}/admin_cultivation/feild_assignment_updater`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp2.ok) throw new Error('Failed to assign farms');
+      const data2 = await resp2.json();
+      if (!(data2 && data2.status === 'success')) {
+        throw new Error('Field assignment did not return success');
+      }
+      setAssignFarmsStatus('success');
+      toast.success('Plan saved and farms assigned successfully!');
     } catch (err) {
       console.error('Failed to save plan:', err);
-      toast.error('Failed to save plan');
+      const message = err instanceof Error ? err.message : 'Something went wrong';
+      setLivePlanError(message);
+      if (livePlanStep === 2) setSavePlanStatus('error');
+      if (livePlanStep === 3) setAssignFarmsStatus('error');
+      toast.error(message);
     } finally {
       setSavingPlan(false);
     }
@@ -699,7 +744,7 @@ const CreateCultivationPlan: React.FC = () => {
         <div className="flex items-center gap-3">
           {day0 && (
             <Button
-              size="xl"
+              size="lg"
               className="gap-2 px-8 py-3 text-white font-extrabold text-lg bg-gradient-to-r from-green-600 via-emerald-500 to-lime-500 shadow-lg shadow-green-300/40 border-2 border-green-700 ring-4 ring-green-200 focus:ring-green-400 focus:outline-none transition-all duration-200 hover:scale-105 hover:bg-gradient-to-br hover:from-green-700 hover:to-lime-600"
               onClick={handleSaveLivePlan}
               disabled={savingPlan}
@@ -802,6 +847,126 @@ const CreateCultivationPlan: React.FC = () => {
             >
               {planMetaLoading ? 'Loading...' : 'Continue to Calendar'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- DIALOG: Live Plan Progress --- */}
+      <Dialog
+        open={livePlanProgressOpen}
+        onOpenChange={(open) => {
+          // Prevent accidental close while working
+          if (savingPlan) return;
+          setLivePlanProgressOpen(open);
+          if (!open) {
+            setLivePlanStep(1);
+            setSavePlanStatus('idle');
+            setAssignFarmsStatus('idle');
+            setLivePlanError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Publishing Live Plan</DialogTitle>
+            <DialogDescription>
+              Please wait while we save the plan and assign farms.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Step 1 */}
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 p-3">
+              <div className="mt-0.5">
+                <CheckCircle2 className="h-5 w-5 text-green-600" />
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold">Step 1: Plan made and ready to save</div>
+                <div className="text-sm text-muted-foreground">Ready</div>
+              </div>
+            </div>
+
+            {/* Step 2 */}
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-background p-3">
+              <div className="mt-0.5">
+                {savePlanStatus === 'loading' ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                ) : savePlanStatus === 'success' ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                ) : savePlanStatus === 'error' ? (
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                ) : (
+                  <CircleDot className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold">Step 2: Saving plan</div>
+                <div className="text-sm text-muted-foreground">
+                  {savePlanStatus === 'loading'
+                    ? 'Saving plan…'
+                    : savePlanStatus === 'success'
+                      ? 'Plan saved'
+                      : savePlanStatus === 'error'
+                        ? 'Failed to save plan'
+                        : 'Pending'}
+                </div>
+              </div>
+            </div>
+
+            {/* Step 3 */}
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-background p-3">
+              <div className="mt-0.5">
+                {assignFarmsStatus === 'loading' ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                ) : assignFarmsStatus === 'success' ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                ) : assignFarmsStatus === 'error' ? (
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                ) : (
+                  <CircleDot className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold">Step 3: Assigning farms</div>
+                <div className="text-sm text-muted-foreground">
+                  {assignFarmsStatus === 'loading'
+                    ? 'Assigning farms…'
+                    : assignFarmsStatus === 'success'
+                      ? 'Farms assigned successfully'
+                      : assignFarmsStatus === 'error'
+                        ? 'Failed to assign farms'
+                        : 'Pending'}
+                </div>
+              </div>
+            </div>
+
+            {livePlanError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {livePlanError}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            {assignFarmsStatus === 'success' ? (
+              <Button
+                className="bg-green-700 hover:bg-green-800"
+                onClick={() => {
+                  setLivePlanProgressOpen(false);
+                  navigate('/cultivation-plan');
+                }}
+              >
+                Done
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => setLivePlanProgressOpen(false)}
+                disabled={savingPlan}
+              >
+                Close
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
