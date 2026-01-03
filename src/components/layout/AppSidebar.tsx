@@ -9,9 +9,6 @@ import { Box } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
-// ✅ IMPORT 3F LOGO
-import ThreeFLogo from '@/assets/3f-logo.png';
-
 // --- NAV ITEM COMPONENT ---
 interface NavItemProps {
   to: string;
@@ -124,7 +121,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           
           {/* ✅ 3F LOGO */}
           <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow">
-            <img src={ThreeFLogo} alt="3F Logo" className="w-7 h-7 object-contain" />
+            <img src="/3f-logo.png" alt="3F Logo" className="w-7 h-7 object-contain" />
           </div>
 
           {!isCollapsed && (
