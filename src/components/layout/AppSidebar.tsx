@@ -3,7 +3,8 @@ import {
   Users, UserCheck, Sprout, Package, 
   Calendar, UserPlus, Truck, Car, 
   ChevronLeft, ChevronRight, ChevronDown, 
-  Layers 
+  Layers,
+  LayoutGrid
 } from 'lucide-react';
 import { Box } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -158,6 +159,9 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         <NavGroup label="Farm Management" isSidebarCollapsed={isCollapsed}>
           <NavItem isSidebarCollapsed={isCollapsed} to="/leads" icon={Users} label="Leads" notificationStatus={leadsComplete ? 'success' : 'warning'} />
           <NavItem isSidebarCollapsed={isCollapsed} to="/farmers" icon={UserCheck} label="Farmers" />
+          <NavItem isSidebarCollapsed={isCollapsed} to="/blocks" icon={LayoutGrid} label="Blocks" />
+          {/* <NavItem isSidebarCollapsed={isCollapsed} to="/" icon={UserCheck} label="Farmers" /> */}
+
         </NavGroup>
 
         {/* 2. Harvest Management */}

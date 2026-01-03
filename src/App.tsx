@@ -17,6 +17,7 @@ import CultivationCalendar from "./pages/CultivationCalendar";
 import HarvestOrders from "./pages/HarvestOrders";
 import StaffOnboarding from "./pages/StaffOnboarding";
 import LogisticsManagement from "./pages/LogisticsManagement";
+import Blocks from "./pages/Blocks";
 
 // New Import
 import VehicleManagement from "./pages/VehicleManagement";
@@ -50,6 +51,7 @@ const App = () => (
           <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
           <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
           <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />
+          <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />
           
           <Route path="*" element={<NotFound />} />
         </Routes>
