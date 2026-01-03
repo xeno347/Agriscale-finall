@@ -1,42 +1,198 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   Plus, Upload, Search, Filter, 
   X, User, Mail, Phone, Calendar, 
-  MapPin, Briefcase, Building2, Users 
+  Briefcase, Building2, Users,
+  Image as ImageIcon,
+  IdCard,
+  Landmark,
+  Hash
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getBaseUrl } from '@/lib/config';
 import { toast } from 'sonner';
 
 // --- TYPES ---
-interface Staff {
-  id: string;
-  fullName: string;
-  department: string;
-  designation: string;
-  type: 'Permanent' | 'Contract' | 'Temporary';
-  phone: string;
-  status: 'Active' | 'On Leave';
+interface StaffApiItem {
+  staff_id: string;
+  created_at: string;
+  account_details: {
+    bank_name: string;
+    ifsc_code: string;
+    account_number: string;
+  };
+  assigned_blocks: any[];
+  assigned_vehicles: any[];
+  staff_information: {
+    staff_name: string;
+    employment_type: 'Permanent' | 'Contract' | 'Temporary' | string;
+    staff_phone: string;
+    staff_department: string;
+    staff_designation: string;
+  };
 }
-
-// --- MOCK DATA ---
-const MOCK_STAFF: Staff[] = [
-  { id: 'S001', fullName: 'Rajesh Kumar', department: 'Operations', designation: 'Field Officer', type: 'Permanent', phone: '+91 98765 43210', status: 'Active' },
-  { id: 'S002', fullName: 'Amit Singh', department: 'Logistics', designation: 'Driver', type: 'Contract', phone: '+91 98765 43211', status: 'Active' },
-];
 
 const StaffOnboarding = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [staffList, setStaffList] = useState<StaffApiItem[]>([]);
+  const [isLoadingStaff, setIsLoadingStaff] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [joiningDate, setJoiningDate] = useState('2026-01-02');
+  const [department, setDepartment] = useState('');
+  const [designation, setDesignation] = useState('');
+  const [employmentType, setEmploymentType] = useState<'Permanent' | 'Contract' | 'Temporary'>('Permanent');
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
+  const [formStep, setFormStep] = useState<1 | 2>(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const resetForm = () => {
+    setFormStep(1);
+    setFullName('');
+    setPhone('');
+    setEmail('');
+    setJoiningDate('2026-01-02');
+    setDepartment('');
+    setDesignation('');
+    setEmploymentType('Permanent');
+    setBankName('');
+    setAccountNumber('');
+    setIfscCode('');
+  };
 
   const handleBulkUpload = () => {
     toast.success("Bulk upload feature triggered");
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsAddModalOpen(false);
-    toast.success("New employee added successfully");
+  const fetchAllStaff = async () => {
+    const BASE_URL = getBaseUrl().replace(/\/$/, '');
+    try {
+      setIsLoadingStaff(true);
+      const res = await fetch(`${BASE_URL}/admin_staff/get_all_staff`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const message = data?.message || data?.error || 'Failed to fetch staff';
+        toast.error(message);
+        return;
+      }
+
+      if (!Array.isArray(data)) {
+        toast.error('Invalid staff response');
+        return;
+      }
+
+      setStaffList(data);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to fetch staff');
+    } finally {
+      setIsLoadingStaff(false);
+    }
   };
+
+  useEffect(() => {
+    fetchAllStaff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+
+    const form = document.getElementById('add-staff-form') as HTMLFormElement | null;
+    if (form && !form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+
+    const BASE_URL = getBaseUrl().replace(/\/$/, '');
+    const payload = {
+      staff_information: {
+        staff_name: fullName.trim(),
+        staff_phone: phone.trim(),
+        staff_department: department,
+        staff_designation: designation,
+        employment_type: employmentType,
+      },
+      account_details: {
+        bank_name: bankName.trim(),
+        account_number: accountNumber.trim(),
+        ifsc_code: ifscCode.trim().toUpperCase(),
+      },
+      assigned_vehicles: [],
+      assigned_blocks: [],
+    };
+
+    try {
+      setIsSubmitting(true);
+      const res = await fetch(`${BASE_URL}/admin_staff/add_staff`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        // ignore non-JSON responses
+      }
+
+      if (!res.ok || (data?.status && data.status !== 'success')) {
+        const message = data?.message || data?.error || 'Failed to add employee';
+        toast.error(message);
+        return;
+      }
+
+      toast.success('New employee added successfully');
+      await fetchAllStaff();
+      setIsAddModalOpen(false);
+      resetForm();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add employee');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setIsAddModalOpen(false);
+    resetForm();
+  };
+
+  const handleNextStep = () => {
+    const form = document.getElementById('add-staff-form') as HTMLFormElement | null;
+    if (form && !form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+    setFormStep(2);
+  };
+
+  const handleOpenModal = () => {
+    resetForm();
+    setIsAddModalOpen(true);
+  };
+
+  const filteredStaff = staffList.filter((staff) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    const name = staff.staff_information?.staff_name?.toLowerCase() ?? '';
+    const id = staff.staff_id?.toLowerCase() ?? '';
+    return name.includes(q) || id.includes(q);
+  });
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in duration-300 relative">
@@ -56,7 +212,7 @@ const StaffOnboarding = () => {
             Bulk Upload
           </button>
           <button 
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={handleOpenModal}
             className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4" />
@@ -96,35 +252,61 @@ const StaffOnboarding = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {MOCK_STAFF.map((staff) => (
-              <tr key={staff.id} className="hover:bg-muted/20">
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
-                      {staff.fullName.charAt(0)}
-                    </div>
-                    <span className="font-medium text-foreground">{staff.fullName}</span>
-                  </div>
-                </td>
-                <td className="px-6 py-4 text-foreground">{staff.designation}</td>
-                <td className="px-6 py-4 text-muted-foreground">{staff.department}</td>
-                <td className="px-6 py-4">
-                  <span className={cn(
-                    "px-2 py-0.5 rounded-full text-xs font-medium border",
-                    staff.type === 'Permanent' ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-orange-50 text-orange-700 border-orange-200"
-                  )}>
-                    {staff.type}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-muted-foreground">{staff.phone}</td>
-                <td className="px-6 py-4">
-                  <span className="flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full w-fit">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-600"/>
-                    {staff.status}
-                  </span>
+            {isLoadingStaff ? (
+              <tr>
+                <td className="px-6 py-8 text-center text-muted-foreground" colSpan={6}>
+                  Loading staff...
                 </td>
               </tr>
-            ))}
+            ) : filteredStaff.length === 0 ? (
+              <tr>
+                <td className="px-6 py-8 text-center text-muted-foreground" colSpan={6}>
+                  No staff found.
+                </td>
+              </tr>
+            ) : (
+              filteredStaff.map((staff) => {
+                const staffName = staff.staff_information?.staff_name ?? '-';
+                const staffDesignation = staff.staff_information?.staff_designation ?? '-';
+                const staffDepartment = staff.staff_information?.staff_department ?? '-';
+                const staffPhone = staff.staff_information?.staff_phone ?? '-';
+                const staffType = staff.staff_information?.employment_type ?? '-';
+
+                return (
+                  <tr key={staff.staff_id} className="hover:bg-muted/20">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
+                          {(staffName || '?').charAt(0).toUpperCase()}
+                        </div>
+                        <span className="font-medium text-foreground">{staffName}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-foreground">{staffDesignation}</td>
+                    <td className="px-6 py-4 text-muted-foreground">{staffDepartment}</td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={cn(
+                          "px-2 py-0.5 rounded-full text-xs font-medium border",
+                          staffType === 'Permanent'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-orange-50 text-orange-700 border-orange-200'
+                        )}
+                      >
+                        {staffType}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-muted-foreground">{staffPhone}</td>
+                    <td className="px-6 py-4">
+                      <span className="flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full w-fit">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-600" />
+                        Active
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -136,9 +318,12 @@ const StaffOnboarding = () => {
             
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-white sticky top-0 z-10">
-              <h3 className="font-bold text-xl text-foreground">Add New Employee</h3>
+              <div>
+                <h3 className="font-bold text-xl text-foreground">Add New Employee</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Step {formStep} of 2</p>
+              </div>
               <button 
-                onClick={() => setIsAddModalOpen(false)} 
+                onClick={handleCloseModal} 
                 className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-muted transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -148,12 +333,48 @@ const StaffOnboarding = () => {
             {/* Scrollable Form Content */}
             <div className="p-6 overflow-y-auto">
               <form id="add-staff-form" onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                {formStep === 1 ? (
+                  <>
+                    {/* Profile Image */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Profile Image</label>
+                      <div className="relative">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted/80"
+                        />
+                        <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">Upload a clear face photo.</p>
+                    </div>
+
+                    {/* Aadhaar Card Photo */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Aadhaar Card Photo</label>
+                      <div className="relative">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted/80"
+                        />
+                        <IdCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">Upload front side (preferred).</p>
+                    </div>
                 
                 {/* Full Name */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Full Name *</label>
                   <div className="relative">
-                    <input required className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10" placeholder="e.g. John Doe" />
+                    <input
+                      required
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10"
+                      placeholder="e.g. John Doe"
+                    />
                     <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   </div>
                 </div>
@@ -162,7 +383,14 @@ const StaffOnboarding = () => {
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Phone *</label>
                   <div className="relative">
-                    <input required type="tel" className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10" placeholder="+91 00000 00000" />
+                    <input
+                      required
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10"
+                      placeholder="+91 00000 00000"
+                    />
                     <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   </div>
                 </div>
@@ -171,7 +399,13 @@ const StaffOnboarding = () => {
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Email</label>
                   <div className="relative">
-                    <input type="email" className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10" placeholder="john@example.com" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10"
+                      placeholder="john@example.com"
+                    />
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   </div>
                 </div>
@@ -180,16 +414,27 @@ const StaffOnboarding = () => {
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Joining Date *</label>
                   <div className="relative">
-                    <input required type="date" defaultValue="2026-01-02" className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10" />
+                    <input
+                      required
+                      type="date"
+                      value={joiningDate}
+                      onChange={(e) => setJoiningDate(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10"
+                    />
                     <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                   </div>
                 </div>
 
                 {/* Department */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Department</label>
+                  <label className="text-sm font-medium text-foreground">Department *</label>
                   <div className="relative">
-                    <select className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 appearance-none">
+                    <select
+                      required
+                      value={department}
+                      onChange={(e) => setDepartment(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 appearance-none"
+                    >
                       <option value="">Select department</option>
                       <option value="Admin">Admin</option>
                       <option value="Finance">Finance</option>
@@ -203,9 +448,14 @@ const StaffOnboarding = () => {
 
                 {/* Designation */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Designation</label>
+                  <label className="text-sm font-medium text-foreground">Designation *</label>
                   <div className="relative">
-                    <select className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 appearance-none">
+                    <select
+                      required
+                      value={designation}
+                      onChange={(e) => setDesignation(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 appearance-none"
+                    >
                       <option value="">Select designation</option>
                       <option value="Driver">Driver</option>
                       <option value="Executive">Executive</option>
@@ -218,35 +468,29 @@ const StaffOnboarding = () => {
                   </div>
                 </div>
 
-                {/* Location */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Location</label>
-                  <div className="relative">
-                    <select className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 appearance-none">
-                      <option value="">Select location</option>
-                      <option value="HQ">Headquarters</option>
-                      <option value="Warehouse A">Warehouse A</option>
-                      <option value="Field Site 1">Field Site 1</option>
-                    </select>
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                {/* Driving Licence Photo (Driver only) */}
+                {designation === 'Driver' && (
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-sm font-medium text-foreground">Driving Licence Photo</label>
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted/80"
+                      />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Required for drivers.</p>
                   </div>
-                </div>
-
-                {/* Geo-Fence */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Geo-Fence Location (Attendance)</label>
-                  <select className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all">
-                    <option value="">Select geo-fence location</option>
-                    <option value="GF-001">Main Office Geo-Fence</option>
-                    <option value="GF-002">Warehouse Geo-Fence</option>
-                  </select>
-                  <p className="text-[11px] text-muted-foreground">Used for geo-fenced attendance tracking</p>
-                </div>
+                )}
 
                 {/* Employment Type */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Employment Type</label>
-                  <select className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all">
+                  <select
+                    value={employmentType}
+                    onChange={(e) => setEmploymentType(e.target.value as any)}
+                    className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                  >
                     <option value="Permanent">Permanent</option>
                     <option value="Contract">Contract</option>
                     <option value="Temporary">Temporary</option>
@@ -267,6 +511,57 @@ const StaffOnboarding = () => {
                   <p className="text-[11px] text-muted-foreground mt-1">Link this employee to a user account to enable self-service attendance.</p>
                 </div>
 
+                  </>
+                ) : (
+                  <>
+                    {/* Bank Name */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Bank Name *</label>
+                      <div className="relative">
+                        <input
+                          required
+                          value={bankName}
+                          onChange={(e) => setBankName(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10"
+                          placeholder="e.g. State Bank of India"
+                        />
+                        <Landmark className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* Account Number */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Account Number *</label>
+                      <div className="relative">
+                        <input
+                          required
+                          inputMode="numeric"
+                          value={accountNumber}
+                          onChange={(e) => setAccountNumber(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10"
+                          placeholder="e.g. 1234567890"
+                        />
+                        <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* IFSC */}
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium text-foreground">IFSC Code *</label>
+                      <div className="relative">
+                        <input
+                          required
+                          value={ifscCode}
+                          onChange={(e) => setIfscCode(e.target.value)}
+                          className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                          placeholder="e.g. SBIN0001234"
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">Used for bank transfers / salary payments.</p>
+                    </div>
+                  </>
+                )}
+
               </form>
             </div>
 
@@ -274,18 +569,42 @@ const StaffOnboarding = () => {
             <div className="px-6 py-4 border-t border-border bg-gray-50 flex justify-end gap-3">
               <button 
                 type="button" 
-                onClick={() => setIsAddModalOpen(false)} 
+                onClick={handleCloseModal} 
                 className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
               >
                 Cancel
               </button>
-              <button 
-                type="submit" 
-                form="add-staff-form"
-                className="px-5 py-2.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
-              >
-                Create Employee
-              </button>
+
+              {formStep === 2 && (
+                <button
+                  type="button"
+                  onClick={() => setFormStep(1)}
+                  disabled={isSubmitting}
+                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                >
+                  Back
+                </button>
+              )}
+
+              {formStep === 1 ? (
+                <button
+                  type="button"
+                  onClick={handleNextStep}
+                  disabled={isSubmitting}
+                  className="px-5 py-2.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  form="add-staff-form"
+                  disabled={isSubmitting}
+                  className="px-5 py-2.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+                >
+                  {isSubmitting ? 'Creating...' : 'Create Employee'}
+                </button>
+              )}
             </div>
 
           </div>

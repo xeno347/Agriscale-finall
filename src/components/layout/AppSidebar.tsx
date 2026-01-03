@@ -130,7 +130,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           {!isCollapsed && (
             <div>
               <h1 className="font-bold text-lg text-[#1e293b] leading-tight">
-                SaiBioresources Pvt Ltd
+                SaiBioresources
               </h1>
               <p className="text-xs text-gray-500 font-medium">
                 Farm Connect
