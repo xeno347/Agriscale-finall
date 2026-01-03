@@ -9,11 +9,15 @@ import {
   Leaf,
   ClipboardList,
   Wheat,
-  Send,
-  Watch,
   Truck,
   CheckCircle2,
-  AlertCircle
+  Watch,
+  ChevronDown,
+  ChevronUp,
+  Info,
+  Wrench,
+  Minus,
+  Hash
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
@@ -78,31 +82,28 @@ interface CalendarData {
   [date: string]: CalendarActivity[];
 }
 
-// --- Vehicle Types & Mock Data ---
-interface Vehicle {
+// --- Asset Types & Mock Data ---
+interface Asset {
   id: string;
   name: string;
-  type: 'Tractor' | 'Harvester' | 'Truck';
-  schedule: Record<string, string>; // date (YYYY-MM-DD) -> Task Name
+  type: string;
+  category: 'Vehicle' | 'Equipment';
+  schedule: Record<string, string>; // date -> task
 }
 
-const MOCK_VEHICLES: Vehicle[] = [
-  { 
-    id: 'v1', name: 'John Deere 5310', type: 'Tractor', 
-    schedule: { '2026-01-02': 'Ploughing Field A', '2026-01-05': 'Maintenance' } 
-  },
-  { 
-    id: 'v2', name: 'Mahindra JIVO', type: 'Tractor', 
-    schedule: { '2026-01-03': 'Transport' } 
-  },
-  { 
-    id: 'v3', name: 'Kubota Harvester', type: 'Harvester', 
-    schedule: { '2026-01-01': 'Harvest Block C', '2026-01-02': 'Harvest Block C' } 
-  },
-  { 
-    id: 'v4', name: 'Tata Ace Gold', type: 'Truck', 
-    schedule: {} 
-  }
+const MOCK_VEHICLES: Asset[] = [
+  { id: 'v1', name: 'John Deere 5310', type: 'Tractor', category: 'Vehicle', schedule: { '2026-01-02': 'Ploughing' } },
+  { id: 'v2', name: 'Mahindra JIVO', type: 'Tractor', category: 'Vehicle', schedule: { '2026-01-03': 'Transport' } },
+  { id: 'v3', name: 'Kubota Harvester', type: 'Harvester', category: 'Vehicle', schedule: {} },
+  { id: 'v4', name: 'Tata Ace Gold', type: 'Truck', category: 'Vehicle', schedule: {} },
+  { id: 'v5', name: 'New Holland 3630', type: 'Tractor', category: 'Vehicle', schedule: {} }
+];
+
+const MOCK_EQUIPMENT: Asset[] = [
+  { id: 'e1', name: 'MB Plough 2-Bottom', type: 'Plough', category: 'Equipment', schedule: {} },
+  { id: 'e2', name: 'Rotavator 6ft', type: 'Rotavator', category: 'Equipment', schedule: {} },
+  { id: 'e3', name: 'Boom Sprayer 500L', type: 'Sprayer', category: 'Equipment', schedule: {} },
+  { id: 'e4', name: 'Seed Drill 9-Row', type: 'Seeder', category: 'Equipment', schedule: {} }
 ];
 
 type FarmsById = Record<string, ApiFarm>;
@@ -110,13 +111,14 @@ type PendingByDate = Record<string, Record<string, boolean>>;
 
 const getActivityIcon = (activity: string) => {
   const key = activity.trim().toLowerCase();
-  if (key.includes('bed')) return <Shovel className="w-4 h-4 text-muted-foreground" />;
-  if (key.includes('plough')) return <Tractor className="w-4 h-4 text-muted-foreground" />;
-  if (key.includes('irrig')) return <Droplets className="w-4 h-4 text-muted-foreground" />;
-  if (key.includes('fert') || key.includes('weed')) return <Leaf className="w-4 h-4 text-muted-foreground" />;
-  if (key.includes('visit')) return <ClipboardList className="w-4 h-4 text-muted-foreground" />;
-  if (key.includes('harvest')) return <Wheat className="w-4 h-4 text-muted-foreground" />;
-  return <ClipboardList className="w-4 h-4 text-muted-foreground" />;
+  const iconClass = "w-4 h-4 text-gray-500";
+  if (key.includes('bed')) return <Shovel className={iconClass} />;
+  if (key.includes('plough')) return <Tractor className={iconClass} />;
+  if (key.includes('irrig')) return <Droplets className={iconClass} />;
+  if (key.includes('fert') || key.includes('weed')) return <Leaf className={iconClass} />;
+  if (key.includes('visit')) return <ClipboardList className={iconClass} />;
+  if (key.includes('harvest')) return <Wheat className={iconClass} />;
+  return <ClipboardList className={iconClass} />;
 };
 
 const isHarvestActivity = (activity: string) => activity.trim().toLowerCase().includes('harvest');
@@ -151,6 +153,7 @@ const fetchCalendarData = async (): Promise<CalendarData> => {
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch calendar data');
     const data: ApiResponse = await res.json();
+    
     const calendarByDate: Record<string, Map<string, CalendarActivity>> = {};
 
     for (const planKey in data.plan) {
@@ -331,10 +334,14 @@ const CultivationCalendar = () => {
   const [baseDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [expandedActivityIds, setExpandedActivityIds] = useState<Record<string, boolean>>({});
   
-  // New State for Vehicle Selection
-  const [isVehicleSelectionOpen, setIsVehicleSelectionOpen] = useState(false);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  // New State for Assignment
+  const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
+  // Vehicles: Multi-select array
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
+  // Equipment: Map of ID -> Count (e.g. {e1: 2, e3: 1})
+  const [equipmentCounts, setEquipmentCounts] = useState<Record<string, number>>({});
 
   const [activitiesData, setActivitiesData] = useState<CalendarData>({});
   const [farmsById, setFarmsById] = useState<FarmsById>({});
@@ -375,20 +382,20 @@ const CultivationCalendar = () => {
 
   const closeModal = () => {
     setIsModalOpen(false);
-    setIsVehicleSelectionOpen(false);
-    setSelectedVehicleId(null);
-  };
-
-  const handleSendHarvestOrder = (activity: CalendarActivity, dateStr: string) => {
-    console.log('[CultivationCalendar] Send harvest order', {
-      date: dateStr,
-      activity,
-    });
-    toast.success('Harvest order sent');
+    setIsAssignmentOpen(false);
+    setSelectedVehicleIds([]);
+    setEquipmentCounts({});
   };
 
   const getTaskKey = (task: CalendarActivity) => {
     return `${task.plan_id}__${task.block_id}__${task.index}__${task.activity}`;
+  };
+
+  const toggleActivityExpansion = (taskKey: string) => {
+    setExpandedActivityIds(prev => ({
+      ...prev,
+      [taskKey]: !prev[taskKey]
+    }));
   };
 
   useEffect(() => {
@@ -411,18 +418,39 @@ const CultivationCalendar = () => {
     setSelectedTaskKeys(next);
   };
 
-  // Step 1: Click "Assign Task" opens Vehicle Modal
+  // Step 1: Open Assignment Modal
   const handleAssignTasksClick = () => {
     if (!anySelected) return;
-    setIsVehicleSelectionOpen(true);
+    setIsAssignmentOpen(true);
   };
 
-  // Step 2: Confirm vehicle and save assignment
-  const handleConfirmVehicleAssignment = () => {
-    if (!selectedDate || !selectedVehicleId) return;
-    const selectedTasks = selectedActivities.filter((t) => selectedTaskKeys[getTaskKey(t)]);
-    const vehicle = MOCK_VEHICLES.find(v => v.id === selectedVehicleId);
+  // Helper: Toggle Vehicle Selection (Multi-select)
+  const toggleVehicleSelection = (vId: string) => {
+    setSelectedVehicleIds(prev => 
+      prev.includes(vId) ? prev.filter(id => id !== vId) : [...prev, vId]
+    );
+  };
 
+  // Helper: Adjust Equipment Quantity
+  const updateEquipmentCount = (eId: string, delta: number) => {
+    setEquipmentCounts(prev => {
+      const current = prev[eId] || 0;
+      const next = Math.max(0, current + delta);
+      if (next === 0) {
+        const { [eId]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [eId]: next };
+    });
+  };
+
+  // Step 2: Confirm Assignment
+  const handleConfirmAssignment = () => {
+    if (!selectedDate || selectedVehicleIds.length === 0) return;
+    
+    const selectedTasks = selectedActivities.filter((t) => selectedTaskKeys[getTaskKey(t)]);
+    
+    // Update Local State (Simulation)
     setPendingByDate((prev) => {
       const current = prev[selectedDate] ?? {};
       const nextForDate: Record<string, boolean> = { ...current };
@@ -435,22 +463,21 @@ const CultivationCalendar = () => {
       };
     });
 
-    toast.success(`Tasks assigned to ${vehicle?.name}`, {
-      description: `${selectedTasks.length} tasks scheduled for ${selectedDate}`
+    const totalEqCount = Object.values(equipmentCounts).reduce((a, b) => a + b, 0);
+    toast.success('Assignment Confirmed', {
+      description: `Assigned ${selectedVehicleIds.length} Vehicles ${totalEqCount > 0 ? `& ${totalEqCount} Equipments` : ''} to ${selectedTasks.length} tasks.`
     });
 
     // Reset and close
     setSelectedTaskKeys({});
-    setSelectedVehicleId(null);
-    setIsVehicleSelectionOpen(false);
-    // Optionally close the main modal too, or keep it open to see changes
-    // setIsModalOpen(false); 
+    setSelectedVehicleIds([]);
+    setEquipmentCounts({});
+    setIsAssignmentOpen(false);
   };
 
   // --- Helper to Generate Dates for Chart ---
   const getChartDates = () => {
     if (!selectedDate) return [];
-    // Show selected date + 4 days ahead (5 days total)
     const dates = [];
     for (let i = 0; i < 5; i++) {
       dates.push(addDays(selectedDate, i));
@@ -459,6 +486,114 @@ const CultivationCalendar = () => {
   };
 
   const chartDates = getChartDates();
+
+  // Reusable Availability Row Component (For Vehicles Only)
+  const VehicleAvailabilityRow = ({ 
+    asset, 
+    isSelected, 
+    onSelect
+  }: { 
+    asset: Asset, 
+    isSelected: boolean, 
+    onSelect: () => void
+  }) => {
+    const isBusyOnSelected = !!asset.schedule[selectedDate!];
+    
+    return (
+      <div 
+        onClick={() => !isBusyOnSelected && onSelect()}
+        className={cn(
+          "grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 p-2 rounded-lg border transition-all cursor-pointer items-center group",
+          isSelected 
+            ? "border-primary bg-primary/5 ring-1 ring-primary" 
+            : isBusyOnSelected ? "border-transparent opacity-60 cursor-not-allowed" : "border-border hover:border-primary/50"
+        )}
+      >
+        {/* Vehicle Info */}
+        <div className="flex items-center gap-3 pr-2">
+          <div className={cn(
+            "p-2 rounded-md border shadow-sm",
+            isSelected ? "bg-primary text-primary-foreground" : "bg-white text-muted-foreground"
+          )}>
+            <Truck className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold truncate text-foreground">{asset.name}</div>
+            <div className="text-[10px] text-muted-foreground">{asset.type}</div>
+          </div>
+        </div>
+
+        {/* Date Status Cols */}
+        {chartDates.map(date => {
+          const taskName = asset.schedule[date];
+          const isBusy = !!taskName;
+          
+          return (
+            <div key={date} className="flex justify-center h-full items-center">
+              {isBusy ? (
+                <div className="w-full h-8 bg-red-100 border border-red-200 rounded-md flex items-center justify-center group/tooltip relative">
+                  <span className="text-[10px] font-bold text-red-700">Busy</span>
+                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap pointer-events-none z-10">
+                    {taskName}
+                  </div>
+                </div>
+              ) : (
+                <div className={cn(
+                  "w-full h-8 border rounded-md flex items-center justify-center transition-colors",
+                  date === selectedDate 
+                    ? (isSelected ? "bg-green-600 border-green-600 text-white" : "bg-green-100 border-green-200 text-green-700")
+                    : "bg-gray-50 border-gray-100"
+                )}>
+                  {date === selectedDate && isSelected && <CheckCircle2 className="w-4 h-4" />}
+                  {date === selectedDate && !isSelected && <span className="text-[10px] font-bold">Free</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Reusable Quantity Row Component (For Equipment)
+  const EquipmentQuantityRow = ({ asset, count }: { asset: Asset, count: number }) => {
+    return (
+      <div className={cn(
+        "flex items-center justify-between p-3 rounded-lg border transition-all",
+        count > 0 ? "border-orange-200 bg-orange-50" : "border-border hover:border-gray-300 bg-white"
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "p-2 rounded-md border shadow-sm",
+            count > 0 ? "bg-orange-100 text-orange-700 border-orange-200" : "bg-gray-50 text-muted-foreground"
+          )}>
+            <Wrench className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-foreground">{asset.name}</div>
+            <div className="text-[10px] text-muted-foreground">{asset.type}</div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 bg-white rounded-md border border-gray-200 p-1 shadow-sm">
+          <button 
+            onClick={() => updateEquipmentCount(asset.id, -1)}
+            disabled={count === 0}
+            className="p-1 hover:bg-gray-100 rounded text-gray-500 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <Minus className="w-3 h-3" />
+          </button>
+          <span className="w-4 text-center text-sm font-bold text-foreground">{count}</span>
+          <button 
+            onClick={() => updateEquipmentCount(asset.id, 1)}
+            className="p-1 hover:bg-gray-100 rounded text-gray-700"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in duration-300 min-h-screen bg-gray-50/50">
@@ -504,225 +639,313 @@ const CultivationCalendar = () => {
         </div>
       )}
 
-      {/* --- ACTIVITY MODAL --- */}
+      {/* --- ACTIVITY MODAL (TABLE LAYOUT) --- */}
       {isModalOpen && selectedDate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-background border border-border w-full max-w-2xl rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[85vh]">
+          <div className="bg-background border border-border w-full max-w-4xl rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[85vh]">
             
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30 shrink-0">
+            <div className="flex items-center justify-between p-5 border-b border-border bg-muted/30 shrink-0">
               <div className="flex flex-col">
-                <h2 className="text-sm font-semibold flex items-center gap-2">
-                  <CalendarIcon className="w-4 h-4 text-muted-foreground" />
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <CalendarIcon className="w-5 h-5 text-muted-foreground" />
                   <span>{new Date(selectedDate).toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
                 </h2>
-                <div className="mt-2 flex items-center gap-2">
-                  <button type="button" onClick={toggleSelectAll} className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors" disabled={selectedActivities.length === 0}>
-                    {allSelected ? 'Unselect all' : 'Select all'}
-                  </button>
-                  <span className="text-xs text-muted-foreground">•</span>
-                  <span className="text-xs text-muted-foreground">
-                    Selected: {allSelectedKeys.filter((k) => !!selectedTaskKeys[k]).length}/{selectedActivities.length}
-                  </span>
+                <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
+                  <span>Total Tasks: <span className="font-semibold text-foreground">{selectedActivities.length}</span></span>
+                  <span>•</span>
+                  <span>Pending: <span className="font-semibold text-orange-600">
+                    {selectedActivities.filter(act => !!pendingByDate?.[selectedDate]?.[getTaskKey(act)]).length}
+                  </span></span>
                 </div>
               </div>
-              <button onClick={closeModal} className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-muted transition-colors">
-                <X className="w-4 h-4" />
+              <button onClick={closeModal} className="text-muted-foreground hover:text-foreground p-2 rounded-md hover:bg-muted transition-colors">
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* List Content */}
-            <div className="p-4 overflow-y-auto bg-gray-50/50 flex-1">
-              {selectedActivities.length > 0 ? (
-                <ul className="space-y-3">
-                  {selectedActivities.map((act, idx) => (
-                    <li key={idx} className="p-3 rounded-lg border shadow-sm bg-white relative">
-                      {!!pendingByDate?.[selectedDate]?.[getTaskKey(act)] && (
-                        <span className="absolute top-2 right-2 rounded-full bg-orange-100 text-orange-700 border border-orange-200 px-2 py-0.5 text-[11px] font-medium">
-                          Pending
-                        </span>
-                      )}
-                      <div className="flex items-center gap-3">
-                        <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={!!selectedTaskKeys[getTaskKey(act)]}
-                            onChange={(e) => {
-                              const key = getTaskKey(act);
-                              setSelectedTaskKeys((prev) => ({ ...prev, [key]: e.target.checked }));
-                            }}
-                          />
-                          <span className="text-xs text-muted-foreground">Select</span>
-                        </label>
-                        {getActivityIcon(act.activity)}
-                        <span className="font-semibold text-foreground">{act.activity}</span>
-                      </div>
-                      
-                      {/* Farm Assignments Details */}
-                      {Array.isArray(act.assignments) && act.assignments.length > 0 && (
-                        <div className="mt-3 rounded-md border border-border bg-muted/20 overflow-hidden">
-                          <div className="grid grid-cols-2 text-[11px] px-3 py-2 border-b border-border bg-white">
-                            <span className="text-muted-foreground">Farm ID</span>
-                            <span className="text-muted-foreground text-right">Assigned Area</span>
-                          </div>
-                          <div className="divide-y divide-border">
-                            {act.assignments.map((a, aIdx) => (
-                              <div key={`${a.farm_id}-${aIdx}`} className="grid grid-cols-2 px-3 py-2 text-xs bg-white">
-                                <div className="min-w-0">
-                                  <div className="font-mono text-[11px] text-foreground truncate">{a.farm_id}</div>
-                                </div>
-                                <span className="text-right text-foreground">{(Number(a.assigned_area) || 0).toFixed(2)} acres</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="h-24 flex items-center justify-center border-2 border-dashed border-gray-200 rounded-lg bg-white/50">
-                  <p className="text-xs text-muted-foreground">No activities found for this date.</p>
+            {/* List Content - TABLE LAYOUT */}
+            <div className="flex-1 overflow-hidden flex flex-col bg-white">
+              {/* Nomenclature for Table */}
+              <div className="px-5 py-3 border-b border-border bg-gray-50 flex justify-end items-center gap-4">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1">
+                  <Info className="w-3 h-3" /> Progress Guide:
+                </span>
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                  <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded bg-green-500"></div>Today</span>
+                  <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded bg-purple-500"></div>Tom (Done)</span>
+                  <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded bg-gray-300"></div>Tom (Pending)</span>
                 </div>
-              )}
+              </div>
+
+              {/* Table Header */}
+              <div className="grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_40px] gap-2 px-5 py-3 border-b border-border bg-gray-50/50 text-[11px] font-bold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
+                <div className="flex justify-center">
+                  <input type="checkbox" className="h-4 w-4" checked={allSelected} onChange={toggleSelectAll} disabled={selectedActivities.length === 0} />
+                </div>
+                <div>Activity</div>
+                <div>Block ID</div>
+                <div>Total Area</div>
+                <div>Workspan</div>
+                <div></div> {/* Expansion Toggle */}
+              </div>
+
+              {/* Table Body */}
+              <div className="overflow-y-auto flex-1">
+                {selectedActivities.length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {selectedActivities.map((act, idx) => {
+                      const taskKey = getTaskKey(act);
+                      const isExpanded = expandedActivityIds[taskKey];
+                      const totalArea = Array.isArray(act.assignments) 
+                        ? act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0)
+                        : 0;
+                      
+                      // Mock Progress %
+                      const isEven = idx % 2 === 0; // Even = Done, Odd = Pending
+                      const percentText = isEven ? "100%" : "50%";
+                      const statusText = isEven ? "Completed" : "In Progress";
+                      
+                      return (
+                        <div key={idx} className="group bg-white hover:bg-gray-50/50 transition-colors">
+                          <div className="grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_40px] gap-2 px-5 py-4 items-center">
+                            
+                            {/* Checkbox */}
+                            <div className="flex justify-center">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer"
+                                checked={!!selectedTaskKeys[taskKey]}
+                                onChange={(e) => {
+                                  setSelectedTaskKeys((prev) => ({ ...prev, [taskKey]: e.target.checked }));
+                                }}
+                              />
+                            </div>
+
+                            {/* Activity Name */}
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="p-1.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 shrink-0">
+                                {getActivityIcon(act.activity)}
+                              </div>
+                              <span className="text-sm font-semibold text-foreground truncate">{act.activity}</span>
+                            </div>
+
+                            {/* Block ID */}
+                            <div>
+                              <span className="inline-flex items-center px-2 py-1 rounded text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                                BLOCK {act.block_id || 'GEN'}
+                              </span>
+                            </div>
+
+                            {/* Area */}
+                            <div className="text-sm font-medium text-foreground">
+                              {totalArea.toFixed(2)} <span className="text-xs text-muted-foreground">Acres</span>
+                            </div>
+
+                            {/* Progress Bar (Workspan) */}
+                            <div className="pr-4 flex items-center gap-3">
+                              <div className="flex-1">
+                                <div className="flex h-3 w-full rounded-sm overflow-hidden bg-gray-200 border border-gray-300 shadow-sm relative">
+                                  {/* Segment 1: Today */}
+                                  <div className="h-full w-1/2 bg-green-500 border-r border-white/30 flex items-center justify-center">
+                                    <span className="text-[7px] font-bold text-white leading-none">50%</span>
+                                  </div>
+                                  {/* Segment 2: Tomorrow */}
+                                  <div 
+                                    className={cn(
+                                      "h-full w-1/2 transition-colors flex items-center justify-center",
+                                      isEven ? "bg-purple-500" : "bg-gray-300"
+                                    )}
+                                  >
+                                    <span className={cn("text-[7px] font-bold leading-none", isEven ? "text-white" : "text-gray-500")}>
+                                      {isEven ? "50%" : "0%"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <span className={cn("text-[9px] font-bold min-w-[35px]", isEven ? "text-green-600" : "text-orange-600")}>
+                                {percentText}
+                              </span>
+                            </div>
+
+                            {/* Expand Button */}
+                            <div className="flex justify-center">
+                              <button 
+                                onClick={() => toggleActivityExpansion(taskKey)}
+                                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-gray-100 transition-colors"
+                              >
+                                {isExpanded ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Collapsible Details */}
+                          {isExpanded && Array.isArray(act.assignments) && act.assignments.length > 0 && (
+                            <div className="bg-gray-50/80 border-t border-border px-5 py-3 shadow-inner">
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Field Assignments</h4>
+                                  <div className="bg-white border border-border rounded-md divide-y divide-border">
+                                    {act.assignments.map((a, aIdx) => (
+                                      <div key={`${a.farm_id}-${aIdx}`} className="flex justify-between px-3 py-2 text-xs">
+                                        <span className="font-mono text-gray-600">{a.farm_id}</span>
+                                        <span className="font-medium text-gray-900">{Number(a.assigned_area).toFixed(2)} Ac</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                {/* Placeholder for vehicle info or other details if needed */}
+                                <div className="flex flex-col justify-center items-center text-center p-4 border-2 border-dashed border-gray-200 rounded-md">
+                                  <Tractor className="w-6 h-6 text-gray-300 mb-1" />
+                                  <p className="text-xs text-muted-foreground">Vehicle assignment pending</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8">
+                    <ClipboardList className="w-10 h-10 mb-2 opacity-20" />
+                    <p className="text-sm">No scheduled activities for this date.</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 border-t border-border bg-white flex justify-end gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={handleAssignTasksClick}
-                disabled={!anySelected}
-                className={cn(
-                  "px-4 py-2 text-sm font-medium rounded-md transition-colors",
-                  anySelected
-                    ? "bg-green-800 hover:bg-green-900 text-white"
-                    : "bg-muted text-muted-foreground cursor-not-allowed"
-                )}
-              >
-                Assign Task
-              </button>
-              <button onClick={closeModal} className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-                Close
-              </button>
+            <div className="p-4 border-t border-border bg-white flex justify-between items-center shrink-0">
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">{allSelectedKeys.filter((k) => !!selectedTaskKeys[k]).length}</span> tasks selected
+              </div>
+              <div className="flex gap-2">
+                <button onClick={closeModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAssignTasksClick}
+                  disabled={!anySelected}
+                  className={cn(
+                    "px-4 py-2 text-sm font-medium rounded-md transition-colors",
+                    anySelected
+                      ? "bg-green-800 hover:bg-green-900 text-white"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  )}
+                >
+                  Assign Task
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- VEHICLE SELECTION MODAL (Availability Chart) --- */}
-      {isVehicleSelectionOpen && selectedDate && (
+      {/* --- ASSIGNMENT MODAL (VEHICLE + EQUIPMENT) --- */}
+      {isAssignmentOpen && selectedDate && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-background border border-border w-full max-w-3xl rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col">
+          <div className="bg-background border border-border w-full max-w-4xl rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]">
             
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
               <div>
-                <h3 className="text-lg font-semibold text-foreground">Select Vehicle</h3>
-                <p className="text-sm text-muted-foreground">Check availability for {new Date(selectedDate).toDateString()}</p>
+                <h3 className="text-lg font-semibold text-foreground">Assign Resources</h3>
+                <p className="text-sm text-muted-foreground">Select Vehicle and Equipment for {new Date(selectedDate).toDateString()}</p>
               </div>
-              <button onClick={() => setIsVehicleSelectionOpen(false)} className="p-1 hover:bg-muted rounded-md">
+              <button onClick={() => setIsAssignmentOpen(false)} className="p-1 hover:bg-muted rounded-md">
                 <X className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
 
-            {/* Availability Chart */}
-            <div className="p-6 bg-white overflow-x-auto">
-              <div className="min-w-[600px]">
-                {/* Header Row: Dates */}
-                <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4">
-                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider self-end pb-2">Vehicle</div>
-                  {chartDates.map(date => (
-                    <div key={date} className={cn(
-                      "text-center pb-2 border-b-2",
-                      date === selectedDate ? "border-primary text-primary font-bold" : "border-transparent text-muted-foreground"
-                    )}>
-                      <div className="text-[10px] uppercase">{getDayName(date)}</div>
-                      <div className="text-sm">{getDayNum(date)}</div>
-                    </div>
-                  ))}
+            {/* Content: Split Layout */}
+            <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6 space-y-8">
+              
+              {/* SECTION 1: VEHICLES (Multi-Select + Calendar) */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                    <Truck className="w-4 h-4" /> Select Vehicles
+                  </h4>
+                  {selectedVehicleIds.length > 0 && (
+                    <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">
+                      {selectedVehicleIds.length} Selected
+                    </span>
+                  )}
                 </div>
-
-                {/* Rows: Vehicles */}
-                <div className="space-y-2">
-                  {MOCK_VEHICLES.map(vehicle => {
-                    const isBusyOnSelected = !!vehicle.schedule[selectedDate];
-                    
-                    return (
-                      <div 
-                        key={vehicle.id}
-                        onClick={() => !isBusyOnSelected && setSelectedVehicleId(vehicle.id)}
-                        className={cn(
-                          "grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 p-2 rounded-lg border transition-all cursor-pointer items-center group",
-                          selectedVehicleId === vehicle.id 
-                            ? "border-primary bg-primary/5 ring-1 ring-primary" 
-                            : isBusyOnSelected ? "border-transparent opacity-60 cursor-not-allowed" : "border-border hover:border-primary/50"
-                        )}
-                      >
-                        {/* Vehicle Info Col */}
-                        <div className="flex items-center gap-3 pr-2">
-                          <div className="p-2 rounded-md bg-white border shadow-sm">
-                            <Truck className="w-4 h-4 text-muted-foreground" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold truncate text-foreground">{vehicle.name}</div>
-                            <div className="text-[10px] text-muted-foreground">{vehicle.type}</div>
-                          </div>
+                
+                <div className="overflow-x-auto bg-white rounded-lg border border-border shadow-sm p-4">
+                  <div className="min-w-[600px]">
+                    {/* Header Row */}
+                    <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4 text-xs font-semibold text-muted-foreground">
+                      <div className="self-end pb-2">Vehicle Name</div>
+                      {chartDates.map(date => (
+                        <div key={date} className={cn("text-center pb-2 border-b-2", date === selectedDate ? "border-primary text-primary" : "border-transparent")}>
+                          <div className="text-[10px] uppercase">{getDayName(date)}</div>
+                          <div>{getDayNum(date)}</div>
                         </div>
+                      ))}
+                    </div>
 
-                        {/* Date Status Cols */}
-                        {chartDates.map(date => {
-                          const taskName = vehicle.schedule[date];
-                          const isBusy = !!taskName;
-                          
-                          return (
-                            <div key={date} className="flex justify-center h-full items-center">
-                              {isBusy ? (
-                                <div className="w-full h-8 bg-red-100 border border-red-200 rounded-md flex items-center justify-center group/tooltip relative">
-                                  <span className="text-[10px] font-bold text-red-700">Busy</span>
-                                  {/* Tooltip */}
-                                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap pointer-events-none z-10">
-                                    {taskName}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className={cn(
-                                  "w-full h-8 border rounded-md flex items-center justify-center transition-colors",
-                                  date === selectedDate 
-                                    ? (selectedVehicleId === vehicle.id ? "bg-green-600 border-green-600 text-white" : "bg-green-100 border-green-200 text-green-700")
-                                    : "bg-gray-50 border-gray-100"
-                                )}>
-                                  {date === selectedDate && selectedVehicleId === vehicle.id && <CheckCircle2 className="w-4 h-4" />}
-                                  {date === selectedDate && selectedVehicleId !== vehicle.id && <span className="text-[10px] font-bold">Free</span>}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
+                    {/* Vehicle Rows */}
+                    <div className="space-y-2">
+                      {MOCK_VEHICLES.map(vehicle => (
+                        <VehicleAvailabilityRow 
+                          key={vehicle.id} 
+                          asset={vehicle} 
+                          isSelected={selectedVehicleIds.includes(vehicle.id)} 
+                          onSelect={() => toggleVehicleSelection(vehicle.id)} 
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              {/* SECTION 2: EQUIPMENT (Abundance Counter) */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                    <Wrench className="w-4 h-4" /> Select Equipment
+                  </h4>
+                  {Object.values(equipmentCounts).reduce((a,b)=>a+b,0) > 0 && (
+                    <span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200">
+                      <Hash className="w-3 h-3" />
+                      {Object.values(equipmentCounts).reduce((a,b)=>a+b,0)} Total
+                    </span>
+                  )}
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {MOCK_EQUIPMENT.map(equipment => (
+                    <EquipmentQuantityRow 
+                      key={equipment.id} 
+                      asset={equipment} 
+                      count={equipmentCounts[equipment.id] || 0} 
+                    />
+                  ))}
+                </div>
+              </div>
+
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-border bg-gray-50 flex justify-between items-center">
+            <div className="p-4 border-t border-border bg-white flex justify-between items-center">
               <div className="flex gap-4 text-xs text-muted-foreground">
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-green-100 border border-green-200 rounded-sm"></div> Available</div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-red-100 border border-red-200 rounded-sm"></div> Busy</div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setIsVehicleSelectionOpen(false)} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">
+                <button onClick={() => setIsAssignmentOpen(false)} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">
                   Cancel
                 </button>
                 <button 
-                  onClick={handleConfirmVehicleAssignment}
-                  disabled={!selectedVehicleId}
+                  onClick={handleConfirmAssignment}
+                  disabled={selectedVehicleIds.length === 0}
                   className={cn(
                     "px-4 py-2 text-sm font-medium rounded-md transition-colors",
-                    selectedVehicleId ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed"
+                    selectedVehicleIds.length > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed"
                   )}
                 >
                   Confirm Assignment
