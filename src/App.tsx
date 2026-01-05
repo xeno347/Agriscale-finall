@@ -18,6 +18,7 @@ import HarvestOrders from "./pages/HarvestOrders";
 import StaffOnboarding from "./pages/StaffOnboarding";
 import LogisticsManagement from "./pages/LogisticsManagement";
 import Blocks from "./pages/Blocks";
+import TasksBeta from "./pages/TasksBeta";
 
 // New Import
 import VehicleManagement from "./pages/VehicleManagement";
@@ -34,6 +35,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           
           <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
+          <Route path="/tasks-beta" element={<AppLayout><TasksBeta /></AppLayout>} />
           <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
           
           {/* Operations */}
