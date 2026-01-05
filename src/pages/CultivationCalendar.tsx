@@ -31,6 +31,7 @@ interface ApiActivity {
     [date: string]: Array<{
       farm_id: string;
       assigned_area: number;
+      status?: string;
     }>;
   };
 }
@@ -72,9 +73,12 @@ interface CalendarActivity {
   activity: string;
   block_id: string;
   plan_id: string;
+  calander_id: string;
+  farm_id: string;
   assignments: Array<{
     farm_id: string;
     assigned_area: number;
+    status?: string;
   }>;
 }
 
@@ -91,23 +95,52 @@ interface Asset {
   schedule: Record<string, string>; // date -> task
 }
 
-const MOCK_VEHICLES: Asset[] = [
-  { id: 'v1', name: 'John Deere 5310', type: 'Tractor', category: 'Vehicle', schedule: { '2026-01-02': 'Ploughing' } },
-  { id: 'v2', name: 'Mahindra JIVO', type: 'Tractor', category: 'Vehicle', schedule: { '2026-01-03': 'Transport' } },
-  { id: 'v3', name: 'Kubota Harvester', type: 'Harvester', category: 'Vehicle', schedule: {} },
-  { id: 'v4', name: 'Tata Ace Gold', type: 'Truck', category: 'Vehicle', schedule: {} },
-  { id: 'v5', name: 'New Holland 3630', type: 'Tractor', category: 'Vehicle', schedule: {} }
-];
+type ApiVehicle = {
+  servise_history?: any[];
+  fuel_logs?: any[];
+  created_at?: string;
+  work_calandar?: any[] | Record<string, any> | null;
+  vehicle_information?: {
+    owned_by?: string;
+    company?: string;
+    model?: string;
+    type?: string;
+    last_service_date?: string;
+    vehicle_number?: string;
+  };
+  vehicle_id: string;
+  assigned_staff?: any;
+};
 
-const MOCK_EQUIPMENT: Asset[] = [
-  { id: 'e1', name: 'MB Plough 2-Bottom', type: 'Plough', category: 'Equipment', schedule: {} },
-  { id: 'e2', name: 'Rotavator 6ft', type: 'Rotavator', category: 'Equipment', schedule: {} },
-  { id: 'e3', name: 'Boom Sprayer 500L', type: 'Sprayer', category: 'Equipment', schedule: {} },
-  { id: 'e4', name: 'Seed Drill 9-Row', type: 'Seeder', category: 'Equipment', schedule: {} }
-];
+type ApiInventoryItem = {
+  last_updated?: string;
+  unit?: string;
+  threshold?: number;
+  Invent_id?: string;
+  category?: string;
+  stock?: number;
+  item?: string;
+  id?: string;
+};
+
+type InventoryItemsResponse = {
+  inventory_items?: ApiInventoryItem[];
+};
 
 type FarmsById = Record<string, ApiFarm>;
 type PendingByDate = Record<string, Record<string, boolean>>;
+
+const normalizeAssignmentStatus = (raw?: string) => {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return 'unassigned';
+  // backend typo tolerance
+  if (s === 'unaasigned') return 'unassigned';
+  return s;
+};
+
+const isPendingAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'pending';
+const isCompletedAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'completed';
+const isOverdueAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'overdue';
 
 const getActivityIcon = (activity: string) => {
   const key = activity.trim().toLowerCase();
@@ -163,31 +196,60 @@ const fetchCalendarData = async (): Promise<CalendarData> => {
         Object.entries(fieldAssignment).forEach(([dateStr, assignments]) => {
           if (!calendarByDate[dateStr]) calendarByDate[dateStr] = new Map();
 
-          const activityKey = `${plan.plan_id}__${plan.block_id}__${activity.index}__${activity.activity}`;
-          const normalizedAssignments = Array.isArray(assignments) ? assignments : [];
+          // For every feild (farm_id), make a separate row even if activity/date are same.
+          // planKey is the backend "any_key" (calander_id)
+          const normalizedAssignments = Array.isArray(assignments)
+            ? assignments
+                .filter((a) => !!a && typeof a === 'object')
+                .map((a: any) => ({
+                  farm_id: String(a?.farm_id || '').trim(),
+                  assigned_area: Number(a?.assigned_area) || 0,
+                  status: normalizeAssignmentStatus(a?.status),
+                }))
+                .filter((a) => !!a.farm_id)
+            : [];
 
-          const existing = calendarByDate[dateStr].get(activityKey);
-          if (!existing) {
-            calendarByDate[dateStr].set(activityKey, {
+          // Combine duplicates per farm_id for the same activity/date
+          const byFarm = new Map<string, { farm_id: string; assigned_area: number; status: string }>();
+          for (const a of normalizedAssignments) {
+            const existing = byFarm.get(a.farm_id);
+            if (!existing) {
+              byFarm.set(a.farm_id, {
+                farm_id: a.farm_id,
+                assigned_area: Number(a.assigned_area) || 0,
+                status: normalizeAssignmentStatus(a.status),
+              });
+              continue;
+            }
+            const nextArea = (Number(existing.assigned_area) || 0) + (Number(a.assigned_area) || 0);
+            // Status precedence (most restrictive first): completed > pending > overdue > unassigned
+            const nextStatus =
+              isCompletedAssignmentStatus(existing.status) || isCompletedAssignmentStatus(a.status)
+                ? 'completed'
+                : isPendingAssignmentStatus(existing.status) || isPendingAssignmentStatus(a.status)
+                  ? 'pending'
+                  : isOverdueAssignmentStatus(existing.status) || isOverdueAssignmentStatus(a.status)
+                    ? 'overdue'
+                    : normalizeAssignmentStatus(existing.status);
+            byFarm.set(a.farm_id, {
+              farm_id: existing.farm_id,
+              assigned_area: nextArea,
+              status: nextStatus,
+            });
+          }
+
+          for (const farm of byFarm.values()) {
+            const rowKey = `${planKey}__${plan.plan_id}__${plan.block_id}__${activity.index}__${activity.activity}__${farm.farm_id}`;
+            calendarByDate[dateStr].set(rowKey, {
               index: activity.index,
               activity: activity.activity,
               block_id: plan.block_id,
               plan_id: plan.plan_id,
-              assignments: normalizedAssignments,
+              calander_id: planKey,
+              farm_id: farm.farm_id,
+              assignments: [farm],
             });
-            return;
           }
-
-          const seen = new Set(existing.assignments.map((a) => `${a.farm_id}__${a.assigned_area}`));
-          const merged = [...existing.assignments];
-          for (const a of normalizedAssignments) {
-            const k = `${a.farm_id}__${a.assigned_area}`;
-            if (!seen.has(k)) {
-              seen.add(k);
-              merged.push(a);
-            }
-          }
-          calendarByDate[dateStr].set(activityKey, { ...existing, assignments: merged });
         });
       });
     }
@@ -243,6 +305,30 @@ const MonthCard = ({
   const todayDateObj = new Date();
   todayDateObj.setHours(0, 0, 0, 0);
 
+  const hasAnyPendingOnDate = (dateStr: string) => {
+    const dayActs = activities[dateStr];
+    const fromApi = Array.isArray(dayActs)
+      ? dayActs.some((act) => Array.isArray(act.assignments) && act.assignments.some((a) => isPendingAssignmentStatus(a?.status)))
+      : false;
+    const fromLocal = !!pendingByDate?.[dateStr] && Object.keys(pendingByDate[dateStr]).length > 0;
+    return fromApi || fromLocal;
+  };
+
+  const hasAnyOverdueOnDate = (dateStr: string) => {
+    const dayActs = activities[dateStr];
+    return Array.isArray(dayActs)
+      ? dayActs.some((act) => Array.isArray(act.assignments) && act.assignments.some((a) => isOverdueAssignmentStatus(a?.status)))
+      : false;
+  };
+
+  const isAllCompletedOnDate = (dateStr: string) => {
+    const dayActs = activities[dateStr];
+    if (!Array.isArray(dayActs) || dayActs.length === 0) return false;
+    return dayActs.every(
+      (act) => Array.isArray(act.assignments) && act.assignments.some((a) => isCompletedAssignmentStatus(a?.status))
+    );
+  };
+
   return (
     <div className="bg-card border border-border rounded-xl p-4 flex flex-col h-full bg-white shadow-sm hover:shadow-md transition-shadow">
       <div className="text-center mb-6 pt-2">
@@ -265,22 +351,33 @@ const MonthCard = ({
           const cellDate = new Date(year, month, day);
           cellDate.setHours(0, 0, 0, 0);
           const isToday = cellDate.getTime() === todayDateObj.getTime();
-          const isPast = cellDate.getTime() < todayDateObj.getTime();
           const dayActs = activities[dateStr];
           const hasActivity = dayActs && dayActs.length > 0;
           const hasHarvesting = Array.isArray(dayActs) && dayActs.some((a) => isHarvestActivity(a.activity));
-          const hasPending = !!pendingByDate?.[dateStr] && Object.keys(pendingByDate[dateStr]).length > 0;
+          const hasOverdue = hasAnyOverdueOnDate(dateStr);
+          const hasPending = hasAnyPendingOnDate(dateStr);
+          const allCompleted = isAllCompletedOnDate(dateStr);
+
           let bgClass = "hover:bg-secondary";
           let textClass = "text-muted-foreground/60";
-          if (isToday) {
+
+          // Status-driven coloring (priority): overdue (red) > pending (orange) > all done (green)
+          if (hasOverdue) {
+            bgClass = "bg-red-100 text-red-700 border border-red-200";
+            textClass = "text-red-700";
+          } else if (hasPending) {
+            bgClass = "bg-orange-100 text-orange-800 border border-orange-200";
+            textClass = "text-orange-800";
+          } else if (allCompleted) {
             bgClass = "bg-green-600 text-white shadow-md shadow-green-200";
             textClass = "text-white";
-          } else if (isPast && hasActivity) {
-            bgClass = "bg-red-100 text-red-600 border border-red-200";
-            textClass = "text-red-600";
           } else if (hasActivity) {
             bgClass = "bg-gray-100 text-gray-700";
             textClass = "text-gray-700";
+          } else if (isToday) {
+            // Keep "today" highlighted even when there are no tasks on this date.
+            bgClass = "bg-green-600 text-white shadow-md shadow-green-200";
+            textClass = "text-white";
           }
           return (
             <div
@@ -288,7 +385,7 @@ const MonthCard = ({
               onClick={() => onDateClick(dateStr)}
               className="flex items-center justify-center cursor-pointer group relative"
             >
-              {(isToday || (isPast && hasActivity) || hasActivity) ? (
+              {(isToday || hasActivity) ? (
                 <div className={cn(
                   "w-8 h-8 rounded-md flex flex-col items-center justify-center transition-all shadow-sm relative",
                   bgClass
@@ -338,10 +435,18 @@ const CultivationCalendar = () => {
   
   // New State for Assignment
   const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
+  const [assignmentStep, setAssignmentStep] = useState<1 | 2>(1);
   // Vehicles: Multi-select array
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
   // Equipment: Map of ID -> Count (e.g. {e1: 2, e3: 1})
   const [equipmentCounts, setEquipmentCounts] = useState<Record<string, number>>({});
+
+  const [vehiclesForAssignment, setVehiclesForAssignment] = useState<Asset[]>([]);
+  const [isLoadingVehiclesForAssignment, setIsLoadingVehiclesForAssignment] = useState(false);
+
+  const [inventoryItems, setInventoryItems] = useState<ApiInventoryItem[]>([]);
+  const [isLoadingInventoryItems, setIsLoadingInventoryItems] = useState(false);
+  const [isAssigningTask, setIsAssigningTask] = useState(false);
 
   const [activitiesData, setActivitiesData] = useState<CalendarData>({});
   const [farmsById, setFarmsById] = useState<FarmsById>({});
@@ -383,12 +488,146 @@ const CultivationCalendar = () => {
   const closeModal = () => {
     setIsModalOpen(false);
     setIsAssignmentOpen(false);
+    setAssignmentStep(1);
     setSelectedVehicleIds([]);
     setEquipmentCounts({});
   };
 
+  const closeAssignmentModal = () => {
+    setIsAssignmentOpen(false);
+    setAssignmentStep(1);
+    setSelectedVehicleIds([]);
+    setEquipmentCounts({});
+  };
+
+  const isTaskPending = (task: CalendarActivity) => {
+    const list = Array.isArray(task.assignments) ? task.assignments : [];
+    const fromApi = list.some((a) => isPendingAssignmentStatus(a?.status));
+    if (fromApi) return true;
+    if (!selectedDate) return false;
+    const taskKey = getTaskKey(task);
+    return !!pendingByDate?.[selectedDate]?.[taskKey];
+  };
+
+  const isTaskCompleted = (task: CalendarActivity) => {
+    const list = Array.isArray(task.assignments) ? task.assignments : [];
+    return list.some((a) => isCompletedAssignmentStatus(a?.status));
+  };
+
+  const isTaskOverdue = (task: CalendarActivity) => {
+    const list = Array.isArray(task.assignments) ? task.assignments : [];
+    return list.some((a) => isOverdueAssignmentStatus(a?.status));
+  };
+
+  const isTaskAssignable = (task: CalendarActivity) => !isTaskPending(task) && !isTaskCompleted(task);
+
+  const getInventoryItemId = (item: ApiInventoryItem): string => {
+    return String(item?.id || item?.Invent_id || item?.item || '');
+  };
+
+  const fetchInventoryItems = async () => {
+    setIsLoadingInventoryItems(true);
+    try {
+      const res = await fetch(`${BASE_URL}/inventory_management/get_inventory_items`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(data?.message || 'Failed to load inventory items');
+        setInventoryItems([]);
+        return;
+      }
+
+      const items: ApiInventoryItem[] = Array.isArray(data?.inventory_items)
+        ? data.inventory_items
+        : Array.isArray((data as InventoryItemsResponse)?.inventory_items)
+          ? (data as InventoryItemsResponse).inventory_items!
+          : [];
+
+      setInventoryItems(items);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load inventory items');
+      setInventoryItems([]);
+    } finally {
+      setIsLoadingInventoryItems(false);
+    }
+  };
+
+  const buildVehicleSchedule = (raw: any): Record<string, string> => {
+    if (!raw) return {};
+
+    // If API returns an object map like {"2026-01-03": "Ploughing"}
+    if (!Array.isArray(raw) && typeof raw === 'object') {
+      const schedule: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (!k) continue;
+        if (typeof v === 'string') {
+          schedule[k] = v;
+        } else if (v && typeof v === 'object') {
+          const task = (v as any)?.activity || (v as any)?.activity_type || (v as any)?.task || (v as any)?.type;
+          schedule[k] = String(task || 'Busy');
+        } else {
+          schedule[k] = 'Busy';
+        }
+      }
+      return schedule;
+    }
+
+    // If API returns an array of entries
+    if (Array.isArray(raw)) {
+      const schedule: Record<string, string> = {};
+      for (const item of raw) {
+        const date = item?.date || item?.day || item?.created_at;
+        if (!date) continue;
+        const task = item?.activity || item?.activity_type || item?.task || item?.type;
+        schedule[String(date).slice(0, 10)] = String(task || 'Busy');
+      }
+      return schedule;
+    }
+
+    return {};
+  };
+
+  const fetchVehiclesForAssignment = async () => {
+    setIsLoadingVehiclesForAssignment(true);
+    try {
+      const res = await fetch(`${BASE_URL}/admin_vehicles/get_all_vehicles`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(data?.message || 'Failed to load vehicles');
+        setVehiclesForAssignment([]);
+        return;
+      }
+
+      const list: ApiVehicle[] = Array.isArray(data) ? data : [];
+      const mapped: Asset[] = list.map((v) => {
+        const info = v?.vehicle_information || {};
+        const vehicleNumber = info?.vehicle_number || '';
+        return {
+          id: v.vehicle_id,
+          name: vehicleNumber || v.vehicle_id,
+          type: info?.type || 'Vehicle',
+          category: 'Vehicle',
+          // If work_calandar is empty => schedule {} => shows Free
+          schedule: buildVehicleSchedule(v?.work_calandar),
+        };
+      });
+
+      setVehiclesForAssignment(mapped);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load vehicles');
+      setVehiclesForAssignment([]);
+    } finally {
+      setIsLoadingVehiclesForAssignment(false);
+    }
+  };
+
   const getTaskKey = (task: CalendarActivity) => {
-    return `${task.plan_id}__${task.block_id}__${task.index}__${task.activity}`;
+    return `${task.calander_id}__${task.plan_id}__${task.block_id}__${task.index}__${task.activity}__${task.farm_id}`;
   };
 
   const toggleActivityExpansion = (taskKey: string) => {
@@ -407,6 +646,11 @@ const CultivationCalendar = () => {
   const anySelected = allSelectedKeys.some((k) => !!selectedTaskKeys[k]);
   const allSelected = allSelectedKeys.length > 0 && allSelectedKeys.every((k) => !!selectedTaskKeys[k]);
 
+  const anyAssignableSelected = selectedActivities.some((t) => {
+    if (!isTaskAssignable(t)) return false;
+    return !!selectedTaskKeys[getTaskKey(t)];
+  });
+
   const toggleSelectAll = () => {
     if (allSelectedKeys.length === 0) return;
     if (allSelected) {
@@ -420,8 +664,11 @@ const CultivationCalendar = () => {
 
   // Step 1: Open Assignment Modal
   const handleAssignTasksClick = () => {
-    if (!anySelected) return;
+    if (!anyAssignableSelected) return;
+    setAssignmentStep(1);
     setIsAssignmentOpen(true);
+    fetchVehiclesForAssignment();
+    fetchInventoryItems();
   };
 
   // Helper: Toggle Vehicle Selection (Multi-select)
@@ -432,10 +679,12 @@ const CultivationCalendar = () => {
   };
 
   // Helper: Adjust Equipment Quantity
-  const updateEquipmentCount = (eId: string, delta: number) => {
+  const updateEquipmentCount = (eId: string, delta: number, max?: number) => {
     setEquipmentCounts(prev => {
       const current = prev[eId] || 0;
-      const next = Math.max(0, current + delta);
+      const boundedMax = typeof max === 'number' && Number.isFinite(max) ? Math.max(0, Math.floor(max)) : undefined;
+      const rawNext = current + delta;
+      const next = Math.max(0, boundedMax !== undefined ? Math.min(boundedMax, rawNext) : rawNext);
       if (next === 0) {
         const { [eId]: _, ...rest } = prev;
         return rest;
@@ -444,35 +693,177 @@ const CultivationCalendar = () => {
     });
   };
 
-  // Step 2: Confirm Assignment
-  const handleConfirmAssignment = () => {
-    if (!selectedDate || selectedVehicleIds.length === 0) return;
-    
-    const selectedTasks = selectedActivities.filter((t) => selectedTaskKeys[getTaskKey(t)]);
-    
-    // Update Local State (Simulation)
-    setPendingByDate((prev) => {
-      const current = prev[selectedDate] ?? {};
-      const nextForDate: Record<string, boolean> = { ...current };
-      for (const t of selectedTasks) {
-        nextForDate[getTaskKey(t)] = true;
+  // Step 2: Confirm Assignment (Backend)
+  const handleConfirmAssignment = async () => {
+    if (!selectedDate) return;
+    if (selectedVehicleIds.length === 0) return;
+
+    const selectedTasks = selectedActivities.filter((t) => selectedTaskKeys[getTaskKey(t)] && isTaskAssignable(t));
+    if (selectedTasks.length === 0) {
+      toast.error('Please select at least one task');
+      return;
+    }
+
+    // Aggregate assigned acres per (farm_id + activity) for assign-task
+    const assignedByFarmActivity = new Map<
+      string,
+      { farm_id: string; activity: string; assigned_acres: number; date: string }
+    >();
+
+    // Also aggregate per calander_id for update_task_status
+    const assignedByCalendarFarmActivity = new Map<
+      string,
+      Map<string, { farm_id: string; activity: string; assigned_acres: number; date: string }>
+    >();
+    const feildIdSet = new Set<string>();
+
+    for (const task of selectedTasks) {
+      const activity = String(task?.activity || '').trim();
+      const calanderId = String(task?.calander_id || '').trim();
+      const assignments = Array.isArray(task.assignments) ? task.assignments : [];
+      for (const a of assignments) {
+        const farmId = String(a?.farm_id || '');
+        if (!farmId) continue;
+        feildIdSet.add(farmId);
+
+        const acres = Number(a?.assigned_area) || 0;
+        const key = `${farmId}__${activity}`;
+        const existing = assignedByFarmActivity.get(key);
+        if (!existing) {
+          assignedByFarmActivity.set(key, {
+            farm_id: farmId,
+            activity: activity || 'Activity',
+            assigned_acres: acres,
+            date: selectedDate,
+          });
+        } else {
+          assignedByFarmActivity.set(key, {
+            ...existing,
+            assigned_acres: (Number(existing.assigned_acres) || 0) + acres,
+          });
+        }
+
+        if (calanderId) {
+          const perCalendar = assignedByCalendarFarmActivity.get(calanderId) ?? new Map();
+          const calKey = `${farmId}__${activity}`;
+          const calExisting = perCalendar.get(calKey);
+          if (!calExisting) {
+            perCalendar.set(calKey, {
+              farm_id: farmId,
+              activity: activity || 'Activity',
+              assigned_acres: acres,
+              date: selectedDate,
+            });
+          } else {
+            perCalendar.set(calKey, {
+              ...calExisting,
+              assigned_acres: (Number(calExisting.assigned_acres) || 0) + acres,
+            });
+          }
+          assignedByCalendarFarmActivity.set(calanderId, perCalendar);
+        }
       }
+    }
+
+    const feildIds = Array.from(feildIdSet);
+    const assignedAcres = Array.from(assignedByFarmActivity.values());
+
+    const vehicles = selectedVehicleIds.map((vehicleId) => {
+      const v = vehiclesForAssignment.find((x) => x.id === vehicleId);
       return {
-        ...prev,
-        [selectedDate]: nextForDate,
+        vehicle_id: vehicleId,
+        vehicle_number: v?.name || vehicleId,
       };
     });
 
-    const totalEqCount = Object.values(equipmentCounts).reduce((a, b) => a + b, 0);
-    toast.success('Assignment Confirmed', {
-      description: `Assigned ${selectedVehicleIds.length} Vehicles ${totalEqCount > 0 ? `& ${totalEqCount} Equipments` : ''} to ${selectedTasks.length} tasks.`
-    });
+    const equipment = Object.entries(equipmentCounts)
+      .filter(([, qty]) => (Number(qty) || 0) > 0)
+      .map(([equipmentId, qty]) => {
+        const item = inventoryItems.find((it) => getInventoryItemId(it) === equipmentId);
+        return {
+          equipment_id: equipmentId,
+          equipment_name: item?.item || equipmentId,
+          quantity: Math.max(0, Math.floor(Number(qty) || 0)),
+        };
+      });
 
-    // Reset and close
-    setSelectedTaskKeys({});
-    setSelectedVehicleIds([]);
-    setEquipmentCounts({});
-    setIsAssignmentOpen(false);
+    const payload = {
+      feild_id: feildIds,
+      assigned_acres: assignedAcres,
+      vehicles,
+      equipment,
+    };
+
+    setIsAssigningTask(true);
+    try {
+      const res = await fetch(`${BASE_URL}/admin_cultivation/assign-task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(data?.message || 'Failed to assign task');
+        return;
+      }
+
+      if (data?.success === true) {
+        // Update backend task status per calander_id (plan "any_key")
+        const updateCalls = Array.from(assignedByCalendarFarmActivity.entries()).map(
+          async ([calanderId, map]) => {
+            const updatePayload = {
+              calander_id: calanderId,
+              assigned_acres: Array.from(map.values()),
+            };
+            const updateRes = await fetch(`${BASE_URL}/admin_cultivation/update_task_status`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updatePayload),
+            });
+            const updateData: any = await updateRes.json().catch(() => null);
+            if (!updateRes.ok) {
+              throw new Error(updateData?.message || 'Failed to update task status');
+            }
+            return updateData;
+          }
+        );
+
+        if (updateCalls.length > 0) {
+          const results = await Promise.allSettled(updateCalls);
+          const failures = results.filter((r) => r.status === 'rejected');
+          if (failures.length > 0) {
+            toast.error('Assigned, but status update failed for some tasks');
+          }
+        }
+
+        // Mark selected tasks as pending (local UI state)
+        setPendingByDate((prev) => {
+          const current = prev[selectedDate] ?? {};
+          const nextForDate: Record<string, boolean> = { ...current };
+          for (const t of selectedTasks) {
+            nextForDate[getTaskKey(t)] = true;
+          }
+          return {
+            ...prev,
+            [selectedDate]: nextForDate,
+          };
+        });
+
+        toast.success('Task assigned successfully');
+
+        // Reset and close
+        setSelectedTaskKeys({});
+        setSelectedVehicleIds([]);
+        setEquipmentCounts({});
+        setIsAssignmentOpen(false);
+      } else {
+        toast.error(data?.message || 'Failed to assign task');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to assign task');
+    } finally {
+      setIsAssigningTask(false);
+    }
   };
 
   // --- Helper to Generate Dates for Chart ---
@@ -556,7 +947,20 @@ const CultivationCalendar = () => {
   };
 
   // Reusable Quantity Row Component (For Equipment)
-  const EquipmentQuantityRow = ({ asset, count }: { asset: Asset, count: number }) => {
+  const EquipmentQuantityRow = ({
+    item,
+    count,
+  }: {
+    item: ApiInventoryItem;
+    count: number;
+  }) => {
+    const id = getInventoryItemId(item);
+    const title = item?.item || id || 'Item';
+    const category = item?.category || 'Inventory';
+    const unit = item?.unit || '';
+    const maxQty = Number(item?.stock ?? 0);
+    const maxSafe = Number.isFinite(maxQty) ? Math.max(0, Math.floor(maxQty)) : 0;
+
     return (
       <div className={cn(
         "flex items-center justify-between p-3 rounded-lg border transition-all",
@@ -570,14 +974,16 @@ const CultivationCalendar = () => {
             <Wrench className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-sm font-semibold text-foreground">{asset.name}</div>
-            <div className="text-[10px] text-muted-foreground">{asset.type}</div>
+            <div className="text-sm font-semibold text-foreground">{title}</div>
+            <div className="text-[10px] text-muted-foreground">
+              {category}{maxSafe > 0 ? ` • Available: ${maxSafe}${unit ? ` ${unit}` : ''}` : ' • Out of stock'}
+            </div>
           </div>
         </div>
 
         <div className="flex items-center gap-3 bg-white rounded-md border border-gray-200 p-1 shadow-sm">
           <button 
-            onClick={() => updateEquipmentCount(asset.id, -1)}
+            onClick={() => updateEquipmentCount(id, -1, maxSafe)}
             disabled={count === 0}
             className="p-1 hover:bg-gray-100 rounded text-gray-500 disabled:opacity-30 disabled:hover:bg-transparent"
           >
@@ -585,8 +991,9 @@ const CultivationCalendar = () => {
           </button>
           <span className="w-4 text-center text-sm font-bold text-foreground">{count}</span>
           <button 
-            onClick={() => updateEquipmentCount(asset.id, 1)}
-            className="p-1 hover:bg-gray-100 rounded text-gray-700"
+            onClick={() => updateEquipmentCount(id, 1, maxSafe)}
+            disabled={maxSafe === 0 || count >= maxSafe}
+            className="p-1 hover:bg-gray-100 rounded text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <Plus className="w-3 h-3" />
           </button>
@@ -615,11 +1022,15 @@ const CultivationCalendar = () => {
       <div className="flex items-center gap-6 bg-white border border-border px-4 py-2 rounded-lg w-fit shadow-sm">
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 bg-green-600 rounded shadow-sm" />
-          <span className="text-xs text-foreground">Present Day</span>
+          <span className="text-xs text-foreground">All Done</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 bg-orange-100 border border-orange-200 rounded shadow-sm" />
+          <span className="text-xs text-foreground">Pending</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 bg-red-100 border border-red-200 rounded shadow-sm" />
-          <span className="text-xs text-foreground">Pending Tasks</span>
+          <span className="text-xs text-foreground">Overdue</span>
         </div>
       </div>
 
@@ -655,7 +1066,7 @@ const CultivationCalendar = () => {
                   <span>Total Tasks: <span className="font-semibold text-foreground">{selectedActivities.length}</span></span>
                   <span>•</span>
                   <span>Pending: <span className="font-semibold text-orange-600">
-                    {selectedActivities.filter(act => !!pendingByDate?.[selectedDate]?.[getTaskKey(act)]).length}
+                    {selectedActivities.filter((act) => isTaskPending(act)).length}
                   </span></span>
                 </div>
               </div>
@@ -684,9 +1095,9 @@ const CultivationCalendar = () => {
                   <input type="checkbox" className="h-4 w-4" checked={allSelected} onChange={toggleSelectAll} disabled={selectedActivities.length === 0} />
                 </div>
                 <div>Activity</div>
-                <div>Block ID</div>
-                <div>Total Area</div>
-                <div>Workspan</div>
+                <div>Farm ID</div>
+                <div>Assigned Acres</div>
+                <div>Status</div>
                 <div></div> {/* Expansion Toggle */}
               </div>
 
@@ -697,6 +1108,9 @@ const CultivationCalendar = () => {
                     {selectedActivities.map((act, idx) => {
                       const taskKey = getTaskKey(act);
                       const isExpanded = expandedActivityIds[taskKey];
+                      const pendingTask = isTaskPending(act);
+                      const completedTask = isTaskCompleted(act);
+                      const overdueTask = !completedTask && isTaskOverdue(act);
                       const totalArea = Array.isArray(act.assignments) 
                         ? act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0)
                         : 0;
@@ -707,7 +1121,17 @@ const CultivationCalendar = () => {
                       const statusText = isEven ? "Completed" : "In Progress";
                       
                       return (
-                        <div key={idx} className="group bg-white hover:bg-gray-50/50 transition-colors">
+                        <div
+                          key={idx}
+                          className={cn(
+                            "group transition-colors",
+                            completedTask
+                              ? "bg-green-50 hover:bg-green-50/80"
+                              : overdueTask
+                                ? "bg-red-50 hover:bg-red-50/80"
+                                : "bg-white hover:bg-gray-50/50"
+                          )}
+                        >
                           <div className="grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_40px] gap-2 px-5 py-4 items-center">
                             
                             {/* Checkbox */}
@@ -716,6 +1140,7 @@ const CultivationCalendar = () => {
                                 type="checkbox"
                                 className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer"
                                 checked={!!selectedTaskKeys[taskKey]}
+                                disabled={pendingTask || completedTask}
                                 onChange={(e) => {
                                   setSelectedTaskKeys((prev) => ({ ...prev, [taskKey]: e.target.checked }));
                                 }}
@@ -727,45 +1152,77 @@ const CultivationCalendar = () => {
                               <div className="p-1.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 shrink-0">
                                 {getActivityIcon(act.activity)}
                               </div>
-                              <span className="text-sm font-semibold text-foreground truncate">{act.activity}</span>
+                              <div className="min-w-0 flex items-center gap-2">
+                                <span className="text-sm font-semibold text-foreground truncate">{act.activity}</span>
+                                {pendingTask && (
+                                  <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">
+                                    Pending
+                                  </span>
+                                )}
+                                {overdueTask && (
+                                  <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
+                                    Overdue
+                                  </span>
+                                )}
+                                {completedTask && (
+                                  <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">
+                                    Done
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
-                            {/* Block ID */}
+                            {/* Farm ID */}
                             <div>
-                              <span className="inline-flex items-center px-2 py-1 rounded text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
-                                BLOCK {act.block_id || 'GEN'}
+                              <span className={cn(
+                                "inline-flex items-center px-2 py-1 rounded text-[11px] font-bold border",
+                                completedTask
+                                  ? "bg-green-100 text-green-800 border-green-200"
+                                  : overdueTask
+                                    ? "bg-red-100 text-red-800 border-red-200"
+                                    : "bg-gray-50 text-gray-700 border-gray-200"
+                              )}>
+                                {act.farm_id || '—'}
                               </span>
                             </div>
 
-                            {/* Area */}
+                            {/* Assigned Acres */}
                             <div className="text-sm font-medium text-foreground">
                               {totalArea.toFixed(2)} <span className="text-xs text-muted-foreground">Acres</span>
                             </div>
 
-                            {/* Progress Bar (Workspan) */}
+                            {/* Status */}
                             <div className="pr-4 flex items-center gap-3">
-                              <div className="flex-1">
-                                <div className="flex h-3 w-full rounded-sm overflow-hidden bg-gray-200 border border-gray-300 shadow-sm relative">
-                                  {/* Segment 1: Today */}
-                                  <div className="h-full w-1/2 bg-green-500 border-r border-white/30 flex items-center justify-center">
-                                    <span className="text-[7px] font-bold text-white leading-none">50%</span>
+                              {completedTask ? (
+                                <span className="inline-flex items-center px-2 py-1 rounded text-[11px] font-bold bg-green-100 text-green-800 border border-green-200">
+                                  Done
+                                </span>
+                              ) : (
+                                <>
+                                  <div className="flex-1">
+                                    <div className="flex h-3 w-full rounded-sm overflow-hidden bg-gray-200 border border-gray-300 shadow-sm relative">
+                                      {/* Segment 1: Today */}
+                                      <div className="h-full w-1/2 bg-green-500 border-r border-white/30 flex items-center justify-center">
+                                        <span className="text-[7px] font-bold text-white leading-none">50%</span>
+                                      </div>
+                                      {/* Segment 2: Tomorrow */}
+                                      <div
+                                        className={cn(
+                                          "h-full w-1/2 transition-colors flex items-center justify-center",
+                                          isEven ? "bg-purple-500" : "bg-gray-300"
+                                        )}
+                                      >
+                                        <span className={cn("text-[7px] font-bold leading-none", isEven ? "text-white" : "text-gray-500")}>
+                                          {isEven ? "50%" : "0%"}
+                                        </span>
+                                      </div>
+                                    </div>
                                   </div>
-                                  {/* Segment 2: Tomorrow */}
-                                  <div 
-                                    className={cn(
-                                      "h-full w-1/2 transition-colors flex items-center justify-center",
-                                      isEven ? "bg-purple-500" : "bg-gray-300"
-                                    )}
-                                  >
-                                    <span className={cn("text-[7px] font-bold leading-none", isEven ? "text-white" : "text-gray-500")}>
-                                      {isEven ? "50%" : "0%"}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                              <span className={cn("text-[9px] font-bold min-w-[35px]", isEven ? "text-green-600" : "text-orange-600")}>
-                                {percentText}
-                              </span>
+                                  <span className={cn("text-[9px] font-bold min-w-[35px]", isEven ? "text-green-600" : "text-orange-600")}>
+                                    {percentText}
+                                  </span>
+                                </>
+                              )}
                             </div>
 
                             {/* Expand Button */}
@@ -787,9 +1244,26 @@ const CultivationCalendar = () => {
                                   <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Field Assignments</h4>
                                   <div className="bg-white border border-border rounded-md divide-y divide-border">
                                     {act.assignments.map((a, aIdx) => (
-                                      <div key={`${a.farm_id}-${aIdx}`} className="flex justify-between px-3 py-2 text-xs">
-                                        <span className="font-mono text-gray-600">{a.farm_id}</span>
-                                        <span className="font-medium text-gray-900">{Number(a.assigned_area).toFixed(2)} Ac</span>
+                                      <div key={`${a.farm_id}-${aIdx}`} className="flex justify-between px-3 py-2 text-xs items-center gap-2">
+                                        <span className="font-mono text-gray-600 truncate">{a.farm_id}</span>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          {isPendingAssignmentStatus(a?.status) && (
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">
+                                              Pending
+                                            </span>
+                                          )}
+                                          {isOverdueAssignmentStatus(a?.status) && (
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
+                                              Overdue
+                                            </span>
+                                          )}
+                                          {isCompletedAssignmentStatus(a?.status) && (
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">
+                                              Done
+                                            </span>
+                                          )}
+                                          <span className="font-medium text-gray-900">{Number(a.assigned_area).toFixed(2)} Ac</span>
+                                        </div>
                                       </div>
                                     ))}
                                   </div>
@@ -824,19 +1298,19 @@ const CultivationCalendar = () => {
                 <button onClick={closeModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  onClick={handleAssignTasksClick}
-                  disabled={!anySelected}
-                  className={cn(
-                    "px-4 py-2 text-sm font-medium rounded-md transition-colors",
-                    anySelected
-                      ? "bg-green-800 hover:bg-green-900 text-white"
-                      : "bg-muted text-muted-foreground cursor-not-allowed"
-                  )}
-                >
-                  Assign Task
-                </button>
+                {anyAssignableSelected ? (
+                  <button
+                    type="button"
+                    onClick={handleAssignTasksClick}
+                    className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-green-800 hover:bg-green-900 text-white"
+                  >
+                    Assign Task
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md bg-orange-100 text-orange-800 border border-orange-200">
+                    Pending
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -852,81 +1326,104 @@ const CultivationCalendar = () => {
             <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
               <div>
                 <h3 className="text-lg font-semibold text-foreground">Assign Resources</h3>
-                <p className="text-sm text-muted-foreground">Select Vehicle and Equipment for {new Date(selectedDate).toDateString()}</p>
+                <p className="text-sm text-muted-foreground">
+                  Step {assignmentStep} of 2 • {assignmentStep === 1 ? 'Vehicle allocation' : 'Equipment selection'} • {new Date(selectedDate).toDateString()}
+                </p>
               </div>
-              <button onClick={() => setIsAssignmentOpen(false)} className="p-1 hover:bg-muted rounded-md">
+              <button onClick={closeAssignmentModal} className="p-1 hover:bg-muted rounded-md">
                 <X className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
 
-            {/* Content: Split Layout */}
+            {/* Content */}
             <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6 space-y-8">
               
-              {/* SECTION 1: VEHICLES (Multi-Select + Calendar) */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
-                    <Truck className="w-4 h-4" /> Select Vehicles
-                  </h4>
-                  {selectedVehicleIds.length > 0 && (
-                    <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">
-                      {selectedVehicleIds.length} Selected
-                    </span>
-                  )}
-                </div>
-                
-                <div className="overflow-x-auto bg-white rounded-lg border border-border shadow-sm p-4">
-                  <div className="min-w-[600px]">
-                    {/* Header Row */}
-                    <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4 text-xs font-semibold text-muted-foreground">
-                      <div className="self-end pb-2">Vehicle Name</div>
-                      {chartDates.map(date => (
-                        <div key={date} className={cn("text-center pb-2 border-b-2", date === selectedDate ? "border-primary text-primary" : "border-transparent")}>
-                          <div className="text-[10px] uppercase">{getDayName(date)}</div>
-                          <div>{getDayNum(date)}</div>
-                        </div>
-                      ))}
-                    </div>
+              {assignmentStep === 1 ? (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                      <Truck className="w-4 h-4" /> Select Vehicles
+                    </h4>
+                    {selectedVehicleIds.length > 0 && (
+                      <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">
+                        {selectedVehicleIds.length} Selected
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="overflow-x-auto bg-white rounded-lg border border-border shadow-sm p-4">
+                    <div className="min-w-[600px]">
+                      {/* Header Row */}
+                      <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4 text-xs font-semibold text-muted-foreground">
+                        <div className="self-end pb-2">Vehicle Name</div>
+                        {chartDates.map(date => (
+                          <div key={date} className={cn("text-center pb-2 border-b-2", date === selectedDate ? "border-primary text-primary" : "border-transparent")}>
+                            <div className="text-[10px] uppercase">{getDayName(date)}</div>
+                            <div>{getDayNum(date)}</div>
+                          </div>
+                        ))}
+                      </div>
 
-                    {/* Vehicle Rows */}
-                    <div className="space-y-2">
-                      {MOCK_VEHICLES.map(vehicle => (
-                        <VehicleAvailabilityRow 
-                          key={vehicle.id} 
-                          asset={vehicle} 
-                          isSelected={selectedVehicleIds.includes(vehicle.id)} 
-                          onSelect={() => toggleVehicleSelection(vehicle.id)} 
-                        />
-                      ))}
+                      {/* Vehicle Rows */}
+                      <div className="space-y-2">
+                        {isLoadingVehiclesForAssignment ? (
+                          <div className="p-4 text-sm text-muted-foreground">Loading vehicles…</div>
+                        ) : vehiclesForAssignment.length === 0 ? (
+                          <div className="p-4 text-sm text-muted-foreground">No vehicles found.</div>
+                        ) : (
+                          vehiclesForAssignment.map(vehicle => (
+                            <VehicleAvailabilityRow 
+                              key={vehicle.id} 
+                              asset={vehicle} 
+                              isSelected={selectedVehicleIds.includes(vehicle.id)} 
+                              onSelect={() => toggleVehicleSelection(vehicle.id)} 
+                            />
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                      <Wrench className="w-4 h-4" /> Select Equipment
+                    </h4>
+                    {Object.values(equipmentCounts).reduce((a,b)=>a+b,0) > 0 && (
+                      <span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200">
+                        <Hash className="w-3 h-3" />
+                        {Object.values(equipmentCounts).reduce((a,b)=>a+b,0)} Total
+                      </span>
+                    )}
+                  </div>
 
-              {/* SECTION 2: EQUIPMENT (Abundance Counter) */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
-                    <Wrench className="w-4 h-4" /> Select Equipment
-                  </h4>
-                  {Object.values(equipmentCounts).reduce((a,b)=>a+b,0) > 0 && (
-                    <span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200">
-                      <Hash className="w-3 h-3" />
-                      {Object.values(equipmentCounts).reduce((a,b)=>a+b,0)} Total
-                    </span>
-                  )}
+                  <div className="text-xs text-muted-foreground mb-3">
+                    Vehicles allocated: <span className="font-semibold text-foreground">{selectedVehicleIds.length}</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {isLoadingInventoryItems ? (
+                      <div className="col-span-full p-4 text-sm text-muted-foreground">Loading inventory items…</div>
+                    ) : inventoryItems.length === 0 ? (
+                      <div className="col-span-full p-4 text-sm text-muted-foreground">No inventory items found.</div>
+                    ) : (
+                      inventoryItems
+                        .filter((it) => !!getInventoryItemId(it))
+                        .map((it) => {
+                          const id = getInventoryItemId(it);
+                          return (
+                            <EquipmentQuantityRow
+                              key={id}
+                              item={it}
+                              count={equipmentCounts[id] || 0}
+                            />
+                          );
+                        })
+                    )}
+                  </div>
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {MOCK_EQUIPMENT.map(equipment => (
-                    <EquipmentQuantityRow 
-                      key={equipment.id} 
-                      asset={equipment} 
-                      count={equipmentCounts[equipment.id] || 0} 
-                    />
-                  ))}
-                </div>
-              </div>
+              )}
 
             </div>
 
@@ -937,19 +1434,40 @@ const CultivationCalendar = () => {
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-red-100 border border-red-200 rounded-sm"></div> Busy</div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setIsAssignmentOpen(false)} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">
+                <button onClick={closeAssignmentModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">
                   Cancel
                 </button>
-                <button 
-                  onClick={handleConfirmAssignment}
-                  disabled={selectedVehicleIds.length === 0}
-                  className={cn(
-                    "px-4 py-2 text-sm font-medium rounded-md transition-colors",
-                    selectedVehicleIds.length > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed"
-                  )}
-                >
-                  Confirm Assignment
-                </button>
+                {assignmentStep === 2 && (
+                  <button
+                    type="button"
+                    onClick={() => setAssignmentStep(1)}
+                    className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors"
+                  >
+                    Back
+                  </button>
+                )}
+
+                {assignmentStep === 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setAssignmentStep(2)}
+                    disabled={selectedVehicleIds.length === 0}
+                    className={cn(
+                      "px-4 py-2 text-sm font-medium rounded-md transition-colors",
+                      selectedVehicleIds.length > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed"
+                    )}
+                  >
+                    Next
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleConfirmAssignment}
+                    disabled={isAssigningTask}
+                    className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    {isAssigningTask ? 'Assigning…' : 'Confirm Assignment'}
+                  </button>
+                )}
               </div>
             </div>
 

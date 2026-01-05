@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckSquare,
   Calendar as CalendarIcon,
@@ -9,56 +9,258 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import getBaseUrl from "@/lib/config";
 import { toast } from "sonner";
 
 interface Task {
   id: string;
+  task_id: string;
   task_no: string;
   activity: string;
   date: string;
   farm_id: string;
+  feild_id: string;
   work_allocated: number;
   work_done: number;
   status: "Pending" | "In Progress" | "Completed";
 }
 
+type ApiTask = {
+  allocation_schema?: Record<string, unknown>;
+  created_at?: string;
+  task_id: string;
+  feild_id?: string[];
+  assigned_acres?: Array<{
+    activity?: string;
+    assigned_acres?: number;
+    farm_id?: string;
+  }>;
+  vehicles?: Array<{ vehicle_id?: string; vehicle_number?: string }>;
+  equipment?: Array<{ equipment_name?: string; equipment_id?: string; quantity?: number }>;
+};
+
+type WsNewTaskAssigned = {
+  event: "NEW_TASK_ASSIGNED";
+  task: {
+    feild_id?: string[];
+    assigned_acres?: Array<{
+      farm_id: string;
+      assigned_acres: number;
+      activity?: string;
+    }>;
+    vehicles?: Array<{
+      vehicle_id: string;
+      vehicle_number: string;
+    }>;
+    equipment?: Array<{
+      equipment_id: string;
+      equipment_name: string;
+      quantity: number;
+    }>;
+    task_id: string;
+    created_at?: string;
+    allocation_schema?: Record<string, unknown>;
+  };
+};
+
+type WsMessage = WsNewTaskAssigned | { event?: string; [k: string]: unknown };
+
+const toWsUrl = (baseUrl: string) => {
+  const base = String(baseUrl || "").replace(/\/$/, "");
+  try {
+    const url = new URL(`${base}/ws/tasks`);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+  } catch {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const fallbackBase = base.startsWith("http") ? base : `${origin}${base.startsWith("/") ? "" : "/"}${base}`;
+    const url = new URL(`${fallbackBase.replace(/\/$/, "")}/ws/tasks`);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+  }
+};
+
+const wsTaskToRows = (t: WsNewTaskAssigned["task"]): Task[] => {
+  const taskId = String(t?.task_id || "");
+  const createdAt = String(t?.created_at || "");
+  const date = createdAt ? createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+  const assigned = Array.isArray(t?.assigned_acres) ? t.assigned_acres : [];
+
+  const shortNo = taskId
+    ? taskId.replace(/-/g, "").slice(0, 8).toUpperCase()
+    : `${Date.now()}`;
+
+  if (assigned.length > 0) {
+    return assigned.map((a, idx) => {
+      const farmId = String(a?.farm_id || "").trim() || "—";
+      const activity = String(a?.activity || "").trim() || "Assigned Task";
+      const allocated = Number(a?.assigned_acres) || 0;
+      const compositeId = `${taskId || shortNo}__${farmId}__${activity}`;
+      return {
+        id: compositeId,
+        task_id: taskId || shortNo,
+        task_no: `TSK-${shortNo}-${idx + 1}`,
+        activity,
+        date,
+        farm_id: farmId,
+        feild_id: farmId,
+        work_allocated: Number.isFinite(allocated) && allocated > 0 ? allocated : 0,
+        work_done: 0,
+        status: "Pending",
+      };
+    });
+  }
+
+  const fields = Array.isArray(t?.feild_id) ? t.feild_id.filter(Boolean) : [];
+  if (fields.length > 0) {
+    return fields.map((farmId, idx) => {
+      const safeFarm = String(farmId).trim() || "—";
+      const compositeId = `${taskId || shortNo}__${safeFarm}`;
+      return {
+        id: compositeId,
+        task_id: taskId || shortNo,
+        task_no: `TSK-${shortNo}-${idx + 1}`,
+        activity: "Assigned Task",
+        date,
+        farm_id: safeFarm,
+        feild_id: safeFarm,
+        work_allocated: 0,
+        work_done: 0,
+        status: "Pending",
+      };
+    });
+  }
+
+  return [
+    {
+      id: taskId || `${Date.now()}`,
+      task_id: taskId || shortNo,
+      task_no: `TSK-${shortNo}`,
+      activity: "Assigned Task",
+      date,
+      farm_id: "—",
+      feild_id: "—",
+      work_allocated: 0,
+      work_done: 0,
+      status: "Pending",
+    },
+  ];
+};
+
+const apiTaskToRows = (t: ApiTask): Task[] => {
+  const taskId = String(t?.task_id || "");
+  const createdAt = String(t?.created_at || "");
+  const date = createdAt ? createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+  const assigned = Array.isArray(t?.assigned_acres) ? t.assigned_acres : [];
+
+  const shortNo = taskId
+    ? taskId.replace(/-/g, "").slice(0, 8).toUpperCase()
+    : `${Date.now()}`;
+
+  if (assigned.length > 0) {
+    return assigned.map((a, idx) => {
+      const farmId = String(a?.farm_id || "").trim() || "—";
+      const activity = String(a?.activity || "").trim() || "Assigned Task";
+      const allocated = Number(a?.assigned_acres) || 0;
+      const compositeId = `${taskId || shortNo}__${farmId}__${activity}`;
+      return {
+        id: compositeId,
+        task_id: taskId || shortNo,
+        task_no: `TSK-${shortNo}-${idx + 1}`,
+        activity,
+        date,
+        farm_id: farmId,
+        feild_id: farmId,
+        work_allocated: Number.isFinite(allocated) && allocated > 0 ? allocated : 0,
+        work_done: 0,
+        status: "Pending",
+      };
+    });
+  }
+
+  const fields = Array.isArray(t?.feild_id) ? t.feild_id.filter(Boolean) : [];
+  if (fields.length > 0) {
+    return fields.map((farmId, idx) => {
+      const safeFarm = String(farmId).trim() || "—";
+      const compositeId = `${taskId || shortNo}__${safeFarm}`;
+      return {
+        id: compositeId,
+        task_id: taskId || shortNo,
+        task_no: `TSK-${shortNo}-${idx + 1}`,
+        activity: "Assigned Task",
+        date,
+        farm_id: safeFarm,
+        feild_id: safeFarm,
+        work_allocated: 0,
+        work_done: 0,
+        status: "Pending",
+      };
+    });
+  }
+
+  return [
+    {
+      id: taskId || `${Date.now()}`,
+      task_id: taskId || shortNo,
+      task_no: `TSK-${shortNo}`,
+      activity: "Assigned Task",
+      date,
+      farm_id: "—",
+      feild_id: "—",
+      work_allocated: 0,
+      work_done: 0,
+      status: "Pending",
+    },
+  ];
+};
+
 const INITIAL_TASKS: Task[] = [
   {
     id: "1",
+    task_id: "1",
     task_no: "TSK-001",
     activity: "Ploughing",
     date: "2026-01-04",
     farm_id: "F-101 (Block A)",
+    feild_id: "F-101 (Block A)",
     work_allocated: 12.5,
     work_done: 0,
     status: "Pending",
   },
   {
     id: "2",
+    task_id: "2",
     task_no: "TSK-002",
     activity: "Seeding",
     date: "2026-01-04",
     farm_id: "F-105 (Block B)",
+    feild_id: "F-105 (Block B)",
     work_allocated: 8,
     work_done: 4,
     status: "In Progress",
   },
   {
     id: "3",
+    task_id: "3",
     task_no: "TSK-003",
     activity: "Irrigation",
     date: "2026-01-04",
     farm_id: "F-202 (Block C)",
+    feild_id: "F-202 (Block C)",
     work_allocated: 15,
     work_done: 0,
     status: "Pending",
   },
   {
     id: "4",
+    task_id: "4",
     task_no: "TSK-004",
     activity: "Fertilizing",
     date: "2026-01-04",
     farm_id: "F-110 (Block A)",
+    feild_id: "F-110 (Block A)",
     work_allocated: 5.5,
     work_done: 5.5,
     status: "Completed",
@@ -66,10 +268,113 @@ const INITIAL_TASKS: Task[] = [
 ];
 
 const TasksBeta = () => {
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [inputAcres, setInputAcres] = useState("");
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+  const [isUpdatingTask, setIsUpdatingTask] = useState(false);
+
+  const BASE_URL = useMemo(() => getBaseUrl().replace(/\/$/, ""), []);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const closedByUserRef = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const load = async () => {
+      setIsLoadingTasks(true);
+      try {
+        const res = await fetch(`${BASE_URL}/admin_all_task/get_all_tasks`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+        });
+        const data: any = await res.json().catch(() => null);
+        if (!res.ok) {
+          toast.error(data?.message || "Failed to load tasks");
+          setTasks(INITIAL_TASKS);
+          return;
+        }
+
+        const list: ApiTask[] = Array.isArray(data) ? data : [];
+        const mapped = list
+          .filter((t) => !!t?.task_id)
+          .flatMap(apiTaskToRows)
+          .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+        setTasks(mapped.length ? mapped : []);
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+        toast.error(e?.message || "Failed to load tasks");
+        setTasks(INITIAL_TASKS);
+      } finally {
+        setIsLoadingTasks(false);
+      }
+    };
+
+    load();
+    return () => controller.abort();
+  }, [BASE_URL]);
+
+  useEffect(() => {
+    const wsUrl = toWsUrl(BASE_URL);
+
+    const connect = () => {
+      if (closedByUserRef.current) return;
+      try {
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onmessage = (evt) => {
+          let msg: WsMessage | null = null;
+          try {
+            msg = JSON.parse(String(evt?.data || ""));
+          } catch {
+            return;
+          }
+          if (!msg || typeof msg !== "object") return;
+
+          if (msg.event === "NEW_TASK_ASSIGNED" && (msg as WsNewTaskAssigned).task) {
+            const incoming = (msg as WsNewTaskAssigned).task;
+            const rows = wsTaskToRows(incoming);
+            setTasks((prev) => {
+              const existing = new Set(prev.map((t) => t.id));
+              const toAdd = rows.filter((r) => !existing.has(r.id));
+              return toAdd.length ? [...toAdd, ...prev] : prev;
+            });
+            toast.success("New task assigned", {
+              description: rows.length === 1 ? rows[0].task_no : `${rows.length} rows added`,
+            });
+          }
+        };
+
+        ws.onclose = () => {
+          wsRef.current = null;
+          if (closedByUserRef.current) return;
+          if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = window.setTimeout(() => connect(), 3000);
+        };
+      } catch {
+        if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = window.setTimeout(() => connect(), 3000);
+      }
+    };
+
+    connect();
+
+    return () => {
+      closedByUserRef.current = true;
+      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      try {
+        wsRef.current?.close();
+      } catch {
+        // ignore
+      }
+      wsRef.current = null;
+    };
+  }, [BASE_URL]);
 
   const handleMarkDoneClick = (task: Task) => {
     setSelectedTask(task);
@@ -83,7 +388,7 @@ const TasksBeta = () => {
     setInputAcres("");
   };
 
-  const handleSaveProgress = () => {
+  const handleSaveProgress = async () => {
     if (!selectedTask) return;
 
     const acres = parseFloat(inputAcres);
@@ -95,35 +400,59 @@ const TasksBeta = () => {
       return;
     }
 
-    if (acres > selectedTask.work_allocated) {
-      toast.error("Input Error", {
-        description: "Work done cannot exceed allocated area.",
+    setIsUpdatingTask(true);
+    try {
+      const payload = {
+        task_id: String(selectedTask.task_id || "").trim(),
+        feild_id: String(selectedTask.feild_id || selectedTask.farm_id || "").trim(),
+        completed_acres: acres,
+      };
+
+      if (!payload.task_id || !payload.feild_id) {
+        toast.error("Missing task identifiers", {
+          description: "task_id / feild_id not available for this row.",
+        });
+        return;
+      }
+      console.log("Payload:", payload); 
+      const res = await fetch(`${BASE_URL}/admin_all_task/update_task_status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-      return;
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(data?.message || "Failed to update task status");
+        return;
+      }
+
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === selectedTask.id
+            ? {
+                ...t,
+                work_done: acres,
+                status:
+                  acres >= t.work_allocated
+                    ? "Completed"
+                    : acres > 0
+                    ? "In Progress"
+                    : "Pending",
+              }
+            : t
+        )
+      );
+
+      toast.success("Task Updated", {
+        description: `Recorded ${acres} acres for ${selectedTask.task_no}`,
+      });
+
+      closeModal();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update task status");
+    } finally {
+      setIsUpdatingTask(false);
     }
-
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === selectedTask.id
-          ? {
-              ...t,
-              work_done: acres,
-              status:
-                acres >= t.work_allocated
-                  ? "Completed"
-                  : acres > 0
-                  ? "In Progress"
-                  : "Pending",
-            }
-          : t
-      )
-    );
-
-    toast.success("Task Updated", {
-      description: `Recorded ${acres} acres for ${selectedTask.task_no}`,
-    });
-
-    closeModal();
   };
 
   return (
@@ -142,7 +471,6 @@ const TasksBeta = () => {
             <tr>
               <th className="px-6 py-3 text-left">Task</th>
               <th className="px-6 py-3">Activity</th>
-              <th className="px-6 py-3">Date</th>
               <th className="px-6 py-3">Land</th>
               <th className="px-6 py-3">Progress</th>
               <th className="px-6 py-3">Allocated</th>
@@ -151,16 +479,25 @@ const TasksBeta = () => {
             </tr>
           </thead>
           <tbody>
-            {tasks.map((task) => (
-              <tr key={task.id} className="border-t">
+            {isLoadingTasks ? (
+              <tr className="border-t">
+                <td className="px-6 py-6 text-sm text-muted-foreground" colSpan={7}>
+                  Loading tasks…
+                </td>
+              </tr>
+            ) : tasks.length === 0 ? (
+              <tr className="border-t">
+                <td className="px-6 py-6 text-sm text-muted-foreground" colSpan={7}>
+                  No tasks found.
+                </td>
+              </tr>
+            ) : (
+              tasks.map((task) => (
+                <tr key={task.id} className="border-t">
                 <td className="px-6 py-3 font-mono">{task.task_no}</td>
                 <td className="px-6 py-3 flex items-center gap-2">
                   <Tractor className="w-4 h-4 text-gray-400" />
                   {task.activity}
-                </td>
-                <td className="px-6 py-3">
-                  <CalendarIcon className="inline w-3 h-3 mr-1" />
-                  {task.date}
                 </td>
                 <td className="px-6 py-3">
                   <MapPin className="inline w-3 h-3 mr-1" />
@@ -176,7 +513,15 @@ const TasksBeta = () => {
                           : "bg-blue-500"
                       )}
                       style={{
-                        width: `${(task.work_done / task.work_allocated) * 100}%`,
+                        width: `${Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            task.work_allocated > 0
+                              ? (task.work_done / task.work_allocated) * 100
+                              : 0
+                          )
+                        )}%`,
                       }}
                     />
                   </div>
@@ -192,8 +537,9 @@ const TasksBeta = () => {
                     {task.status === "Completed" ? "Completed" : "Update"}
                   </button>
                 </td>
-              </tr>
-            ))}
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -228,10 +574,11 @@ const TasksBeta = () => {
               </button>
               <button
                 onClick={handleSaveProgress}
+                disabled={isUpdatingTask}
                 className="px-4 py-2 bg-gray-900 text-white text-sm rounded"
               >
                 <Save className="inline w-4 h-4 mr-1" />
-                Save
+                {isUpdatingTask ? "Saving…" : "Save"}
               </button>
             </div>
           </div>
