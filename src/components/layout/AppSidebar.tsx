@@ -18,9 +18,6 @@ import {
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
-// Logo
-import ThreeFLogo from "@/assets/3f-logo.png";
-
 /* ---------------- NAV ITEM ---------------- */
 
 interface NavItemProps {
@@ -165,7 +162,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow">
             <img
-              src={ThreeFLogo}
+              src="/3f-logo.png"
               alt="3F Logo"
               className="w-7 h-7 object-contain"
             />
@@ -226,6 +223,14 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             to="/farmers"
             icon={UserCheck}
             label="Farmers"
+          />
+        
+
+        <NavItem
+            isSidebarCollapsed={isCollapsed}
+            to="/blocks"
+            icon={Layers}
+            label="Blocks"
           />
         </NavGroup>
 
