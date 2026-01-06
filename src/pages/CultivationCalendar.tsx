@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Calendar as CalendarIcon,
   X,
@@ -12,18 +12,16 @@ import {
   Truck,
   CheckCircle2,
   Watch,
-  ChevronDown,
-  ChevronUp,
   Info,
   Wrench,
   Minus,
   Hash,
-  AlertTriangle,
-  CloudRain,
   MapPin,
-  User,
-  FileText,
-  Image as ImageIcon
+  ChevronRight,
+  ArrowLeft,
+  Filter,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
@@ -31,6 +29,9 @@ import { toast } from 'sonner';
 
 // ✅ Import the Sidebar
 import { TaskSidebar, SidebarTask } from '@/components/cultivation/TaskSidebar';
+
+// --- CONFIGURATION ---
+const USE_MOCK_DATA = true; // 🟢 TOGGLE THIS TO FALSE TO USE REAL API
 
 // --- Types ---
 interface ApiActivity {
@@ -185,229 +186,95 @@ const getDayNum = (dateStr: string) => {
   return date.getDate();
 };
 
-// --- NEW COMPONENT: Weekly Field Visit Calendar ---
-const WeeklyFieldVisits = ({ activities }: { activities: CalendarData }) => {
-  const today = new Date();
-  // Calculate start of week (Sunday)
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
+const getWeekRangeString = (startDate: Date) => {
+  const end = new Date(startDate);
+  end.setDate(startDate.getDate() + 6);
+  const startStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${startStr} - ${endStr}`;
+};
 
-  const weekDays = Array.from({ length: 7 }).map((_, i) => {
-    const d = new Date(startOfWeek);
-    d.setDate(startOfWeek.getDate() + i);
-    return {
-      date: d,
-      dateKey: formatDateKey(d),
-      dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
-      dayNum: d.getDate()
+// --- MOCK DATA GENERATORS (Used if USE_MOCK_DATA is true) ---
+const generateMockFarms = (): FarmsById => {
+  const farms: FarmsById = {};
+  const villages = ["Greenfield", "Riverdale", "Sunny Side", "Hilltop", "Meadow"];
+  for(let i = 1; i <= 20; i++) {
+    const id = `F-${100 + i}`;
+    farms[id] = {
+      farm_id: id,
+      farmer_id: `FMR-${500 + i}`,
+      area: Math.floor(Math.random() * 10) + 2,
+      created_at: new Date().toISOString(),
+      block_id: ["A", "B", "C"][Math.floor(Math.random() * 3)],
+      priority: 1,
+      harvest_log: {},
+      land_data: {
+        farming_option: "Organic",
+        state: "State",
+        district: "District " + Math.ceil(i/5),
+        village: villages[i % villages.length]
+      }
     };
-  });
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800">
-          <ClipboardList className="w-5 h-5 text-blue-600" />
-          Weekly Field Visits
-        </h3>
-        <span className="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-          {weekDays[0].dayName} {weekDays[0].dayNum} - {weekDays[6].dayName} {weekDays[6].dayNum}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-7 gap-4">
-        {weekDays.map((day) => {
-          const isToday = day.dateKey === formatDateKey(new Date());
-          const dayActivities = activities[day.dateKey] || [];
-          
-          // Filter ONLY for "Visit" activities
-          const visits = dayActivities.filter(act => 
-            act.activity.toLowerCase().includes('visit')
-          );
-
-          return (
-            <div key={day.dateKey} className={cn("flex flex-col gap-2 min-h-[140px] rounded-lg p-2 border transition-colors", isToday ? "bg-blue-50/50 border-blue-200" : "bg-gray-50/50 border-gray-100")}>
-              <div className={cn("text-center text-xs font-bold mb-1", isToday ? "text-blue-700" : "text-gray-500")}>
-                {day.dayName} <span className="ml-1 text-sm">{day.dayNum}</span>
-              </div>
-
-              {visits.length > 0 ? (
-                <div className="flex flex-col gap-2 overflow-y-auto max-h-[120px] pr-1">
-                  {visits.map((visit, idx) => {
-                    const isCompleted = visit.assignments.some(a => isCompletedAssignmentStatus(a.status));
-                    
-                    return (
-                      <div key={`${visit.calander_id}-${idx}`} className="group relative">
-                        {/* Task Card */}
-                        <div className={cn(
-                          "p-2 rounded-md border text-xs cursor-pointer shadow-sm hover:shadow-md transition-all",
-                          isCompleted ? "bg-green-100 border-green-200 text-green-800" : "bg-white border-gray-200 text-gray-700"
-                        )}>
-                          <div className="font-bold truncate mb-0.5">{visit.activity}</div>
-                          <div className="flex justify-between items-center text-[10px] opacity-80">
-                            <span>{visit.farm_id}</span>
-                            {isCompleted ? <CheckCircle2 className="w-3 h-3"/> : <Watch className="w-3 h-3"/>}
-                          </div>
-                        </div>
-
-                        {/* HOVER TOOLTIP: Field Input Details */}
-                        <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto p-0 overflow-hidden transform scale-95 group-hover:scale-100 origin-bottom duration-200">
-                          <div className="bg-gray-50 px-3 py-2 border-b border-gray-100 flex justify-between items-center">
-                            <span className="font-bold text-xs text-gray-700">Visit Report</span>
-                            <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-bold uppercase", isCompleted ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700")}>
-                              {isCompleted ? "Submitted" : "Pending"}
-                            </span>
-                          </div>
-                          
-                          <div className="p-3 space-y-3">
-                            {/* Meta */}
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                              <MapPin className="w-3 h-3" />
-                              <span>{visit.farm_id || "Unassigned Field"}</span>
-                            </div>
-
-                            {/* Inputs */}
-                            {isCompleted ? (
-                              <div className="space-y-2 bg-blue-50/50 p-2 rounded-lg border border-blue-100">
-                                <div className="flex items-start gap-2">
-                                  <User className="w-3 h-3 text-blue-600 mt-0.5" />
-                                  <div>
-                                    <span className="text-[10px] text-gray-400 block uppercase font-bold tracking-wider">Field Officer</span>
-                                    <span className="text-xs font-semibold text-gray-800">Ramesh Kumar</span>
-                                  </div>
-                                </div>
-                                <div className="flex items-start gap-2">
-                                  <FileText className="w-3 h-3 text-blue-600 mt-0.5" />
-                                  <div>
-                                    <span className="text-[10px] text-gray-400 block uppercase font-bold tracking-wider">Observations</span>
-                                    <p className="text-[10px] text-gray-700 leading-tight">
-                                      Crop growth is consistent. Slight moisture deficit in Zone 2. No pests detected.
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="flex items-start gap-2">
-                                  <ImageIcon className="w-3 h-3 text-blue-600 mt-0.5" />
-                                  <div>
-                                    <span className="text-[10px] text-gray-400 block uppercase font-bold tracking-wider">Attachments</span>
-                                    <span className="text-[10px] text-blue-600 underline cursor-pointer">View 3 Images</span>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="text-center py-2">
-                                <div className="inline-flex bg-gray-100 p-2 rounded-full mb-1">
-                                  <ClipboardList className="w-4 h-4 text-gray-400" />
-                                </div>
-                                <p className="text-[10px] text-gray-400 italic">No input data yet.</p>
-                              </div>
-                            )}
-                          </div>
-                          {/* Triangle Pointer */}
-                          <div className="absolute bottom-[-5px] left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-r border-b border-gray-200 rotate-45"></div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="flex-1 flex items-center justify-center text-gray-300 text-[10px] italic">
-                  No visits
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+  }
+  return farms;
 };
 
-// --- NEW: Inline Field Visit Timeline kept on the same page (no separate route) ---
-const InlineTimeline = ({ activities }: { activities: CalendarData }) => {
-  const [selectedWeekIndex, setSelectedWeekIndex] = useState(0);
+const generateMockCalendarData = (): CalendarData => {
+  const data: CalendarData = {};
   const today = new Date();
-  today.setHours(0,0,0,0);
-  const startOfThisWeek = new Date(today);
-  startOfThisWeek.setDate(today.getDate() - today.getDay());
+  // Generate data for past 60 days and future 60 days
+  for (let i = -60; i <= 60; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const dateKey = formatDateKey(d);
+    
+    const activities: CalendarActivity[] = [];
+    const numActivities = Math.random() > 0.4 ? Math.floor(Math.random() * 4) + 1 : 0; 
 
-  const weeks = Array.from({ length: 8 }).map((_, i) => {
-    const d = new Date(startOfThisWeek);
-    d.setDate(startOfThisWeek.getDate() + i * 7);
-    return { start: d, key: formatDateKey(d), label: `${d.toLocaleString('default', { month: 'short' })} ${d.getDate()}` };
-  });
-
-  const selectedWeek = weeks[selectedWeekIndex];
-
-  const totalVisits = selectedWeek
-    ? (() => {
-        const days = Array.from({ length: 7 }).map((_, i) => {
-          const d = new Date(selectedWeek.start);
-          d.setDate(selectedWeek.start.getDate() + i);
-          const k = formatDateKey(d);
-          const acts = activities[k] || [];
-          return acts.filter((a) => a.activity.toLowerCase().includes('visit')).length;
-        });
-        return days.reduce((s, n) => s + n, 0);
-      })()
-    : 0;
-
-  return (
-    <div className="bg-white border border-border rounded-lg p-4 shadow-sm flex gap-4">
-      <div className="w-56 border-r pr-3">
-        <div className="text-sm font-semibold mb-3">Weeks</div>
-        <div className="space-y-2">
-          {weeks.map((w, idx) => (
-            <button
-              key={w.key}
-              onClick={() => setSelectedWeekIndex(idx)}
-              className={cn(
-                "w-full text-left p-2 rounded-md transition-colors",
-                idx === selectedWeekIndex ? "bg-green-50 border border-green-200" : "hover:bg-gray-50"
-              )}
-            >
-              <div className="text-xs font-bold">{w.label}</div>
-              <div className="text-[11px] text-muted-foreground">{w.key}</div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex-1">
-        <div className="flex items-center justify-between mb-2">
-          <div>
-            <h4 className="text-sm font-bold">Week details</h4>
-            <div className="text-xs text-muted-foreground">{selectedWeek?.label} • {totalVisits} visits</div>
-          </div>
-          <div className="text-xs text-muted-foreground">Current</div>
-        </div>
-
-        <div className="border rounded-md p-3 bg-gray-50 min-h-[120px]">
-          {selectedWeek ? (
-            <div className="space-y-2">
-              {Array.from({ length: 7 }).map((_, i) => {
-                const d = new Date(selectedWeek.start);
-                d.setDate(selectedWeek.start.getDate() + i);
-                const k = formatDateKey(d);
-                const acts = activities[k] || [];
-                const visits = acts.filter((a) => a.activity.toLowerCase().includes('visit'));
-                return (
-                  <div key={k} className="flex items-center justify-between p-2 bg-white border rounded">
-                    <div className="text-sm">{d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</div>
-                    <div className="text-xs text-muted-foreground">{visits.length} visit(s)</div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">No week selected</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+    for (let j = 0; j < numActivities; j++) {
+      const isVisit = Math.random() > 0.7; // 30% chance of field visit
+      const activityType = isVisit ? "Field Visit" : ["Irrigation", "Fertilizer", "Harvesting", "Weeding"][Math.floor(Math.random() * 4)];
+      const farmId = `F-${100 + Math.ceil(Math.random() * 20)}`;
+      
+      // Status logic: Past = Likely Completed, Future = Pending
+      let status = 'pending';
+      if (i < -1) status = Math.random() > 0.2 ? 'completed' : 'overdue';
+      else if (i <= 1) status = Math.random() > 0.5 ? 'completed' : 'pending';
+      
+      activities.push({
+        index: j,
+        activity: activityType,
+        block_id: "A",
+        plan_id: "P-001",
+        calander_id: "CAL-2025",
+        farm_id: farmId,
+        assignments: [{
+          farm_id: farmId,
+          assigned_area: 2.5,
+          status: status
+        }]
+      });
+    }
+    if (activities.length > 0) data[dateKey] = activities;
+  }
+  return data;
 };
 
-// --- API Fetch ---
+const MOCK_VEHICLES: Asset[] = [
+  { id: "V-001", name: "Tractor JD-500", type: "Tractor", category: "Vehicle", schedule: {} },
+  { id: "V-002", name: "Pickup T-10", type: "Truck", category: "Vehicle", schedule: {} },
+  { id: "V-003", name: "Harvester X2", type: "Harvester", category: "Vehicle", schedule: {} },
+  { id: "V-004", name: "Drone Sprayer", type: "Drone", category: "Equipment", schedule: {} },
+];
+
+const MOCK_INVENTORY: ApiInventoryItem[] = [
+  { id: "INV-001", item: "Spade", stock: 20, unit: "pcs", category: "Tool" },
+  { id: "INV-002", item: "Wrench Set", stock: 5, unit: "set", category: "Tool" },
+  { id: "INV-003", item: "Pesticide", stock: 50, unit: "L", category: "Consumable" },
+  { id: "INV-004", item: "Seeds", stock: 100, unit: "kg", category: "Consumable" },
+];
+
+// --- API Fetch Functions (Originals kept intact) ---
 const BASE_URL = getBaseUrl().replace(/\/$/, '');
 
 const fetchCalendarData = async (): Promise<CalendarData> => {
@@ -506,6 +373,195 @@ const fetchFarmsById = async (): Promise<FarmsById> => {
     console.error(error);
     return {};
   }
+};
+
+// --- Sub-components for Field Visit View ---
+
+const FieldVisitCard = ({ 
+  weekStart, 
+  activities, 
+  isCurrent,
+  onViewDetails 
+}: { 
+  weekStart: Date; 
+  activities: CalendarActivity[]; 
+  isCurrent: boolean;
+  onViewDetails: () => void;
+}) => {
+  const totalFields = activities.length;
+  const completed = activities.filter(a => Array.isArray(a.assignments) && a.assignments.some(as => isCompletedAssignmentStatus(as.status))).length;
+  const pending = totalFields - completed;
+  const progress = totalFields > 0 ? (completed / totalFields) * 100 : 0;
+  
+  const rangeStr = getWeekRangeString(weekStart);
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 relative overflow-hidden transition-all hover:shadow-md h-full flex flex-col justify-between">
+      <div>
+        <div className="flex justify-between items-start mb-6">
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="w-4 h-4 text-gray-500" />
+            <span className="font-semibold text-gray-800">{rangeStr}</span>
+          </div>
+          {isCurrent && (
+            <span className="bg-green-800 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide">
+              Current
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2 mb-1">
+              <MapPin className="w-4 h-4 text-gray-400" />
+              <span className="text-xl font-bold text-gray-900">{totalFields}</span>
+            </div>
+            <span className="text-[10px] text-gray-500 font-medium">Total Fields</span>
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle2 className="w-4 h-4 text-green-600" />
+              <span className="text-xl font-bold text-green-700">{completed}</span>
+            </div>
+            <span className="text-[10px] text-gray-500 font-medium">Visited</span>
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2 mb-1">
+              <Watch className="w-4 h-4 text-orange-500" />
+              <span className="text-xl font-bold text-orange-600">{pending}</span>
+            </div>
+            <span className="text-[10px] text-gray-500 font-medium">Pending</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2">
+          <div className="flex justify-between items-end mb-2">
+            <span className="text-xs text-gray-500 font-medium">Progress</span>
+            <span className="text-xs font-bold text-gray-700">{Math.round(progress)}%</span>
+          </div>
+          <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-green-800 rounded-full transition-all duration-500" 
+              style={{ width: `${progress}%` }} 
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end mt-4">
+          <button 
+            onClick={onViewDetails}
+            className="text-xs font-semibold text-green-700 hover:text-green-900 flex items-center gap-1 transition-colors"
+          >
+            View Details <ChevronRight className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const FieldVisitSidebar = ({ 
+  weekStart, 
+  activities, 
+  farmsById,
+  onClose 
+}: { 
+  weekStart: Date; 
+  activities: CalendarActivity[]; 
+  farmsById: FarmsById;
+  onClose: () => void;
+}) => {
+  const [filter, setFilter] = useState<'all' | 'completed' | 'pending'>('all');
+
+  const filteredActivities = activities.filter(act => {
+    const isCompleted = Array.isArray(act.assignments) && act.assignments.some(as => isCompletedAssignmentStatus(as.status));
+    if (filter === 'completed') return isCompleted;
+    if (filter === 'pending') return !isCompleted;
+    return true;
+  });
+
+  return (
+    <div className="flex flex-col h-full bg-white border-l border-gray-200 w-[400px] shrink-0 animate-in slide-in-from-right duration-300">
+      <div className="p-5 border-b border-gray-200">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-bold text-lg text-gray-900">Field Visit Details</h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
+        <p className="text-sm text-gray-500">{getWeekRangeString(weekStart)}</p>
+        
+        <div className="mt-4 flex bg-gray-100 p-1 rounded-lg">
+          {(['all', 'completed', 'pending'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={cn(
+                "flex-1 py-1.5 text-xs font-medium rounded-md capitalize transition-all",
+                filter === f ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+              )}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/50">
+        {filteredActivities.length > 0 ? (
+          filteredActivities.map((act, idx) => {
+            const farm = farmsById[act.farm_id];
+            const isCompleted = Array.isArray(act.assignments) && act.assignments.some(as => isCompletedAssignmentStatus(as.status));
+            const address = farm?.land_data 
+              ? `${farm.land_data.village}, ${farm.land_data.district}` 
+              : 'Location data unavailable';
+            const acres = farm?.area || 0;
+            
+            return (
+              <div key={idx} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm hover:border-green-200 transition-colors">
+                <div className="flex justify-between items-start mb-3">
+                  <span className="text-xs font-mono font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                    FLD-{act.farm_id}
+                  </span>
+                  <span className={cn(
+                    "px-2 py-0.5 rounded text-[10px] font-bold border",
+                    isCompleted 
+                      ? "bg-green-50 text-green-700 border-green-200" 
+                      : "bg-orange-50 text-orange-700 border-orange-200"
+                  )}>
+                    {isCompleted ? 'Visited' : 'Pending'}
+                  </span>
+                </div>
+                
+                <div className="space-y-2 mb-3">
+                  <div className="flex items-start gap-2">
+                    <MapPin className="w-3.5 h-3.5 text-gray-400 mt-0.5 shrink-0" />
+                    <span className="text-sm font-medium text-gray-800 line-clamp-2">{address}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Leaf className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    <span className="text-xs text-gray-600">{acres} acres</span>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-gray-100 flex items-center gap-2 text-xs text-gray-400">
+                   <CalendarIcon className="w-3 h-3" />
+                   <span>Plan: {act.calander_id}</span>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-gray-400">
+            <Filter className="w-8 h-8 mb-2 opacity-20" />
+            <p className="text-sm">No visits found</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 
@@ -652,14 +708,15 @@ const MonthCard = ({
 
 // --- Main Component ---
 const CultivationCalendar = () => {
-  // keep Field Visit timeline on the same page — toggle it instead of navigating away
-  const [showFieldVisit, setShowFieldVisit] = useState(false);
-  // (if you still use useNavigate elsewhere, keep/import it at the top; otherwise it's not required)
   const [baseDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [expandedActivityIds, setExpandedActivityIds] = useState<Record<string, boolean>>({});
   
+  // --- Field Visit View State ---
+  const [isFieldVisitView, setIsFieldVisitView] = useState(false);
+  const [selectedVisitWeekStart, setSelectedVisitWeekStart] = useState<Date | null>(null);
+  const [timelineOffset, setTimelineOffset] = useState(0); 
+
   // New State for Assignment
   const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
   const [assignmentStep, setAssignmentStep] = useState<1 | 2>(1);
@@ -687,24 +744,34 @@ const CultivationCalendar = () => {
 
   useEffect(() => {
     setLoading(true);
-    Promise.allSettled([fetchCalendarData(), fetchFarmsById()]).then((results) => {
-      const [calendarResult, farmsResult] = results;
+    if (USE_MOCK_DATA) {
+      // Use Mock Data Generators
+      setTimeout(() => {
+        setActivitiesData(generateMockCalendarData());
+        setFarmsById(generateMockFarms());
+        setLoading(false);
+      }, 500); // Simulate network delay
+    } else {
+      // Use Real APIs
+      Promise.allSettled([fetchCalendarData(), fetchFarmsById()]).then((results) => {
+        const [calendarResult, farmsResult] = results;
 
-      if (calendarResult.status === 'fulfilled') {
-        setActivitiesData(calendarResult.value);
-      } else {
-        console.error(calendarResult.reason);
-        setError('Failed to load calendar data');
-      }
+        if (calendarResult.status === 'fulfilled') {
+          setActivitiesData(calendarResult.value);
+        } else {
+          console.error(calendarResult.reason);
+          setError('Failed to load calendar data');
+        }
 
-      if (farmsResult.status === 'fulfilled') {
-        setFarmsById(farmsResult.value);
-      } else {
-        console.error(farmsResult.reason);
-      }
+        if (farmsResult.status === 'fulfilled') {
+          setFarmsById(farmsResult.value);
+        } else {
+          console.error(farmsResult.reason);
+        }
 
-      setLoading(false);
-    });
+        setLoading(false);
+      });
+    }
   }, []);
 
   // --- Logic to Populate Sidebar Data (from API or Mock) ---
@@ -725,12 +792,6 @@ const CultivationCalendar = () => {
 
         activities.forEach((act, idx) => {
           const totalArea = act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0);
-          
-          // Generate a detailed string for "Land" to support the complex filters
-          // Format: Cluster X - Zone Y - Block Z - Field A
-          // We mock this format because the API only gives `block_id` and `farm_id`
-          // In a real app, you would join actual data: 
-          // `Cluster ${act.cluster} - Zone ${act.zone} - Block ${act.block_id} - Field ${act.farm_id}`
           const landStr = `Cluster A - Zone 1 - Block ${act.block_id || 'Gen'} - Field ${act.farm_id}`;
 
           const taskItem: SidebarTask = {
@@ -740,7 +801,7 @@ const CultivationCalendar = () => {
             date: dateStr,
             land: landStr,
             workAllocated: parseFloat(totalArea.toFixed(2)),
-            workDone: 0 // API doesn't return progress for planned tasks, so 0
+            workDone: 0 
           };
 
           if (dateStr === todayStr) {
@@ -754,9 +815,51 @@ const CultivationCalendar = () => {
       });
     }
 
-    // Note: If pending/carry/early are empty, the Sidebar component handles fallback to Dummy Data internally for demo purposes.
     return { pendingToday: pending, carryForward: carry, earlyCompletion: early };
   }, [activitiesData]);
+
+  // --- Field Visit Data Logic ---
+  const fieldVisitWeeks = useMemo(() => {
+    if (!isFieldVisitView) return [];
+    
+    // Generate weeks based on timelineOffset
+    // Default range: +2 weeks (future) to -6 weeks (past)
+    // Offset shifts this window.
+    
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const dayOfWeek = today.getDay(); // 0 is Sunday
+    const startOfCurrentWeek = new Date(today);
+    startOfCurrentWeek.setDate(today.getDate() - dayOfWeek); // Start on Sunday
+
+    const weeks = [];
+    const rangeStart = 2 + timelineOffset;
+    const rangeEnd = -6 + timelineOffset;
+
+    for (let i = rangeStart; i >= rangeEnd; i--) {
+      const start = new Date(startOfCurrentWeek);
+      start.setDate(startOfCurrentWeek.getDate() + (i * 7));
+      
+      // Collect activities for this week
+      const weeklyActivities: CalendarActivity[] = [];
+      for(let d = 0; d < 7; d++) {
+        const currentDay = new Date(start);
+        currentDay.setDate(start.getDate() + d);
+        const k = formatDateKey(currentDay);
+        const acts = activitiesData[k] || [];
+        // Filter only visits
+        const visits = acts.filter(a => a.activity.toLowerCase().includes('visit'));
+        weeklyActivities.push(...visits);
+      }
+      
+      weeks.push({
+        start,
+        activities: weeklyActivities,
+        isCurrent: i === 0 // 0 is always the current real-time week
+      });
+    }
+    return weeks;
+  }, [activitiesData, isFieldVisitView, timelineOffset]);
 
   const handleDateClick = (dateStr: string) => {
     setSelectedDate(dateStr);
@@ -805,6 +908,14 @@ const CultivationCalendar = () => {
 
   const fetchInventoryItems = async () => {
     setIsLoadingInventoryItems(true);
+    if (USE_MOCK_DATA) {
+        setTimeout(() => {
+            setInventoryItems(MOCK_INVENTORY);
+            setIsLoadingInventoryItems(false);
+        }, 300);
+        return;
+    }
+    
     try {
       const res = await fetch(`${BASE_URL}/inventory_management/get_inventory_items`, {
         method: 'GET',
@@ -864,6 +975,14 @@ const CultivationCalendar = () => {
 
   const fetchVehiclesForAssignment = async () => {
     setIsLoadingVehiclesForAssignment(true);
+    if (USE_MOCK_DATA) {
+        setTimeout(() => {
+            setVehiclesForAssignment(MOCK_VEHICLES);
+            setIsLoadingVehiclesForAssignment(false);
+        }, 300);
+        return;
+    }
+
     try {
       const res = await fetch(`${BASE_URL}/admin_vehicles/get_all_vehicles`, {
         method: 'GET',
@@ -900,13 +1019,6 @@ const CultivationCalendar = () => {
 
   const getTaskKey = (task: CalendarActivity) => {
     return `${task.calander_id}__${task.plan_id}__${task.block_id}__${task.index}__${task.activity}__${task.farm_id}`;
-  };
-
-  const toggleActivityExpansion = (taskKey: string) => {
-    setExpandedActivityIds(prev => ({
-      ...prev,
-      [taskKey]: !prev[taskKey]
-    }));
   };
 
   useEffect(() => {
@@ -1027,6 +1139,25 @@ const CultivationCalendar = () => {
 
     setIsAssigningTask(true);
     try {
+      if (USE_MOCK_DATA) {
+        // Mock successful assignment
+        setTimeout(() => {
+             setPendingByDate((prev) => {
+                const current = prev[selectedDate] ?? {};
+                const nextForDate: Record<string, boolean> = { ...current };
+                for (const t of selectedTasks) nextForDate[getTaskKey(t)] = true;
+                return { ...prev, [selectedDate]: nextForDate };
+             });
+             toast.success('Task assigned successfully (Mock)');
+             setSelectedTaskKeys({});
+             setSelectedVehicleIds([]);
+             setEquipmentCounts({});
+             setIsAssignmentOpen(false);
+             setIsAssigningTask(false);
+        }, 800);
+        return;
+      }
+
       const res = await fetch(`${BASE_URL}/admin_cultivation/assign-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1070,7 +1201,7 @@ const CultivationCalendar = () => {
     } catch (e: any) {
       toast.error(e?.message || 'Failed to assign task');
     } finally {
-      setIsAssigningTask(false);
+        if (!USE_MOCK_DATA) setIsAssigningTask(false);
     }
   };
 
@@ -1142,6 +1273,116 @@ const CultivationCalendar = () => {
     );
   };
 
+  // --- Render Condition for View Field Visit ---
+  if (isFieldVisitView) {
+    const sortedWeeks = [...fieldVisitWeeks].sort((a,b) => b.start.getTime() - a.start.getTime());
+    const selectedWeekData = selectedVisitWeekStart 
+      ? sortedWeeks.find(w => w.start.getTime() === selectedVisitWeekStart.getTime()) 
+      : null;
+
+    return (
+      <div className="p-0 h-screen flex flex-col bg-gray-50 animate-in fade-in duration-300">
+        <header className="px-8 py-5 bg-white border-b border-gray-200 flex justify-between items-center shrink-0 z-20">
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <button onClick={() => setIsFieldVisitView(false)} className="p-1 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-700 transition-colors">
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <Tractor className="w-6 h-6 text-green-700" />
+                Field Visit Calendar
+              </h1>
+            </div>
+            <p className="text-sm text-gray-500 pl-10">Weekly visit tracking & management</p>
+          </div>
+          <button onClick={() => setIsFieldVisitView(false)} className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+             Back to Calendar
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-hidden flex">
+          {/* Timeline and List Container */}
+          <div className="flex-1 overflow-y-auto p-8 pl-4 scroll-smooth">
+            <div className="flex flex-col gap-0 max-w-5xl">
+               <div className="flex items-center justify-between pl-3 mb-4 pr-4">
+                  <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Timeline</div>
+                  <button 
+                    onClick={() => setTimelineOffset(prev => prev + 4)} 
+                    className="flex items-center gap-1 text-[10px] font-bold uppercase text-green-700 hover:bg-green-50 px-2 py-1 rounded transition-colors"
+                  >
+                    Load Future <ChevronUp className="w-3 h-3" />
+                  </button>
+               </div>
+               
+               {sortedWeeks.map((week, i) => (
+                 <div key={i} className="flex gap-4 group">
+                    {/* Timeline Column */}
+                    <div className="flex flex-col items-center w-24 flex-shrink-0 relative">
+                       {/* The Vertical Line */}
+                       <div className={cn(
+                         "absolute top-0 bottom-0 w-0.5 bg-green-200 left-1/2 -translate-x-1/2",
+                         i === 0 ? "top-8" : "", 
+                         i === sortedWeeks.length - 1 ? "bottom-auto h-8" : ""
+                       )}></div>
+
+                       {/* The Node/Dot */}
+                       <div className="relative z-10 mt-8 flex flex-col items-center gap-1.5 w-full">
+                         {week.isCurrent ? (
+                            <div className="flex flex-col items-center animate-in zoom-in duration-300">
+                               <div className="w-10 h-10 rounded-full bg-green-100 border-2 border-green-200 flex items-center justify-center shadow-sm">
+                                  <div className="w-4 h-4 rounded-full bg-orange-500 border-2 border-white shadow-sm ring-2 ring-orange-200"></div>
+                               </div>
+                               <span className="text-[10px] font-bold text-green-800 uppercase tracking-tight bg-green-100 px-2 py-0.5 rounded-full mt-1 border border-green-200">This Week</span>
+                            </div>
+                         ) : (
+                            <div className="flex flex-col items-center">
+                               <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white shadow-sm ring-1 ring-green-200/50"></div>
+                               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-1">
+                                  {week.start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                               </span>
+                            </div>
+                         )}
+                       </div>
+                    </div>
+
+                    {/* Content Column */}
+                    <div className="flex-1 pb-6 pt-2">
+                       <FieldVisitCard 
+                         weekStart={week.start}
+                         activities={week.activities}
+                         isCurrent={week.isCurrent}
+                         onViewDetails={() => setSelectedVisitWeekStart(week.start)}
+                       />
+                    </div>
+                 </div>
+               ))}
+
+               <div className="flex justify-center mt-2 mb-8">
+                  <button 
+                    onClick={() => setTimelineOffset(prev => prev - 4)} 
+                    className="flex items-center gap-1 text-[10px] font-bold uppercase text-gray-500 hover:text-gray-900 hover:bg-gray-100 px-3 py-1.5 rounded-full border border-gray-200 transition-colors shadow-sm"
+                  >
+                    <ChevronDown className="w-3 h-3" /> Load Past Weeks
+                  </button>
+               </div>
+            </div>
+          </div>
+
+          {/* Details Sidebar */}
+          {selectedWeekData && (
+             <FieldVisitSidebar 
+               weekStart={selectedWeekData.start}
+               activities={selectedWeekData.activities}
+               farmsById={farmsById}
+               onClose={() => setSelectedVisitWeekStart(null)}
+             />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // --- Normal Calendar View ---
   return (
     <div className="p-8 space-y-8 animate-in fade-in duration-300 min-h-screen bg-gray-50/50">
       <div className="flex items-center justify-between">
@@ -1150,7 +1391,15 @@ const CultivationCalendar = () => {
           <p className="text-muted-foreground mt-1">Manage your cultivation schedule and track pending tasks.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => setShowFieldVisit((s) => !s)} className="px-3 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">{showFieldVisit ? 'Hide Field Visit' : 'View Field Visit'}</button>
+          {/* View Field Visit button restored */}
+          <button 
+            onClick={() => setIsFieldVisitView(true)}
+            className="px-4 py-2.5 text-sm font-medium border border-gray-300 bg-white rounded-lg hover:bg-gray-50 hover:text-green-700 transition-colors shadow-sm flex items-center gap-2"
+          >
+            <Tractor className="w-4 h-4" />
+            View Field Visit
+          </button>
+          
           <button className="flex items-center gap-2 bg-green-800 hover:bg-green-900 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-sm">
             <Plus className="w-4 h-4" /> Create Plan
           </button>
@@ -1162,16 +1411,6 @@ const CultivationCalendar = () => {
         <div className="flex items-center gap-2"><div className="w-4 h-4 bg-orange-100 border border-orange-200 rounded shadow-sm" /><span className="text-xs text-foreground">Pending</span></div>
         <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-100 border border-red-200 rounded shadow-sm" /><span className="text-xs text-foreground">Overdue</span></div>
       </div>
-
-      {/* ✅ ADDED: Weekly Field Visit Calendar Section (inline) */}
-      {!loading && !error && (
-        <div className="space-y-6">
-          <WeeklyFieldVisits activities={activitiesData} />
-          {showFieldVisit && (
-            <InlineTimeline activities={activitiesData} />
-          )}
-        </div>
-      )}
 
       {!loading && !error && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -1212,7 +1451,6 @@ const CultivationCalendar = () => {
             </div>
 
             <div className="flex-1 overflow-hidden flex flex-col bg-white">
-              {/* ... Table Header and Body (Same as before) ... */}
               <div className="px-5 py-3 border-b border-border bg-gray-50 flex justify-end items-center gap-4">
                 <span className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1"><Info className="w-3 h-3" /> Progress Guide:</span>
                 <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
@@ -1222,13 +1460,12 @@ const CultivationCalendar = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_40px] gap-2 px-5 py-3 border-b border-border bg-gray-50/50 text-[11px] font-bold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
+              {/* ✅ MODIFIED: Removed Status Column & Chevron Column from Grid */}
+              <div className="grid grid-cols-[40px_1.5fr_1fr_1fr] gap-2 px-5 py-3 border-b border-border bg-gray-50/50 text-[11px] font-bold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
                 <div className="flex justify-center"><input type="checkbox" className="h-4 w-4" checked={allSelected} onChange={toggleSelectAll} disabled={selectedActivities.length === 0} /></div>
                 <div>Activity</div>
                 <div>Farm ID</div>
                 <div>Assigned Acres</div>
-                <div>Status</div>
-                <div></div>
               </div>
 
               <div className="overflow-y-auto flex-1">
@@ -1236,18 +1473,15 @@ const CultivationCalendar = () => {
                   <div className="divide-y divide-border">
                     {selectedActivities.map((act, idx) => {
                       const taskKey = getTaskKey(act);
-                      const isExpanded = expandedActivityIds[taskKey];
                       const pendingTask = isTaskPending(act);
                       const completedTask = isTaskCompleted(act);
                       const overdueTask = !completedTask && isTaskOverdue(act);
                       const totalArea = Array.isArray(act.assignments) ? act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0) : 0;
                       
-                      const isEven = idx % 2 === 0;
-                      const percentText = isEven ? "100%" : "50%";
-                      
                       return (
                         <div key={idx} className={cn("group transition-colors", completedTask ? "bg-green-50 hover:bg-green-50/80" : overdueTask ? "bg-red-50 hover:bg-red-50/80" : "bg-white hover:bg-gray-50/50")}>
-                          <div className="grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_40px] gap-2 px-5 py-4 items-center">
+                          {/* ✅ MODIFIED: Removed Status Column & Chevron Column */}
+                          <div className="grid grid-cols-[40px_1.5fr_1fr_1fr] gap-2 px-5 py-4 items-center">
                             <div className="flex justify-center"><input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer" checked={!!selectedTaskKeys[taskKey]} disabled={pendingTask || completedTask} onChange={(e) => { setSelectedTaskKeys((prev) => ({ ...prev, [taskKey]: e.target.checked })); }} /></div>
                             <div className="flex items-center gap-2.5 min-w-0">
                               <div className="p-1.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 shrink-0">{getActivityIcon(act.activity)}</div>
@@ -1260,24 +1494,7 @@ const CultivationCalendar = () => {
                             </div>
                             <div><span className={cn("inline-flex items-center px-2 py-1 rounded text-[11px] font-bold border", completedTask ? "bg-green-100 text-green-800 border-green-200" : overdueTask ? "bg-red-100 text-red-800 border-red-200" : "bg-gray-50 text-gray-700 border-gray-200")}>{act.farm_id || '—'}</span></div>
                             <div className="text-sm font-medium text-foreground">{totalArea.toFixed(2)} <span className="text-xs text-muted-foreground">Acres</span></div>
-                            <div className="pr-4 flex items-center gap-3">
-                              {completedTask ? <span className="inline-flex items-center px-2 py-1 rounded text-[11px] font-bold bg-green-100 text-green-800 border border-green-200">Done</span> : (
-                                <>
-                                  <div className="flex-1"><div className="flex h-3 w-full rounded-sm overflow-hidden bg-gray-200 border border-gray-300 shadow-sm relative"><div className="h-full w-1/2 bg-green-500 border-r border-white/30 flex items-center justify-center"><span className="text-[7px] font-bold text-white leading-none">50%</span></div><div className={cn("h-full w-1/2 transition-colors flex items-center justify-center", isEven ? "bg-purple-500" : "bg-gray-300")}><span className={cn("text-[7px] font-bold leading-none", isEven ? "text-white" : "text-gray-500")}>{isEven ? "50%" : "0%"}</span></div></div></div>
-                                  <span className={cn("text-[9px] font-bold min-w-[35px]", isEven ? "text-green-600" : "text-orange-600")}>{percentText}</span>
-                                </>
-                              )}
-                            </div>
-                            <div className="flex justify-center"><button onClick={() => toggleActivityExpansion(taskKey)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-gray-100 transition-colors">{isExpanded ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}</button></div>
                           </div>
-                          {isExpanded && Array.isArray(act.assignments) && act.assignments.length > 0 && (
-                            <div className="bg-gray-50/80 border-t border-border px-5 py-3 shadow-inner">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div><h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Field Assignments</h4><div className="bg-white border border-border rounded-md divide-y divide-border">{act.assignments.map((a, aIdx) => (<div key={`${a.farm_id}-${aIdx}`} className="flex justify-between px-3 py-2 text-xs items-center gap-2"><span className="font-mono text-gray-600 truncate">{a.farm_id}</span><div className="flex items-center gap-2 shrink-0">{isPendingAssignmentStatus(a?.status) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">Pending</span>}{isOverdueAssignmentStatus(a?.status) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">Overdue</span>}{isCompletedAssignmentStatus(a?.status) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">Done</span>}<span className="font-medium text-gray-900">{Number(a.assigned_area).toFixed(2)} Ac</span></div></div>))}</div></div>
-                                <div className="flex flex-col justify-center items-center text-center p-4 border-2 border-dashed border-gray-200 rounded-md"><Tractor className="w-6 h-6 text-gray-300 mb-1" /><p className="text-xs text-muted-foreground">Vehicle assignment pending</p></div>
-                              </div>
-                            </div>
-                          )}
                         </div>
                       );
                     })}
