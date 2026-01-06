@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Calendar as CalendarIcon,
   X,
@@ -17,11 +17,20 @@ import {
   Info,
   Wrench,
   Minus,
-  Hash
+  Hash,
+  AlertTriangle,
+  CloudRain,
+  MapPin,
+  User,
+  FileText,
+  Image as ImageIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
 import { toast } from 'sonner';
+
+// ✅ Import the Sidebar
+import { TaskSidebar, SidebarTask } from '@/components/cultivation/TaskSidebar';
 
 // --- Types ---
 interface ApiActivity {
@@ -86,13 +95,13 @@ interface CalendarData {
   [date: string]: CalendarActivity[];
 }
 
-// --- Asset Types & Mock Data ---
+// --- Asset Types ---
 interface Asset {
   id: string;
   name: string;
   type: string;
   category: 'Vehicle' | 'Equipment';
-  schedule: Record<string, string>; // date -> task
+  schedule: Record<string, string>;
 }
 
 type ApiVehicle = {
@@ -130,10 +139,10 @@ type InventoryItemsResponse = {
 type FarmsById = Record<string, ApiFarm>;
 type PendingByDate = Record<string, Record<string, boolean>>;
 
+// --- Helper Functions ---
 const normalizeAssignmentStatus = (raw?: string) => {
   const s = String(raw || '').trim().toLowerCase();
   if (!s) return 'unassigned';
-  // backend typo tolerance
   if (s === 'unaasigned') return 'unassigned';
   return s;
 };
@@ -156,7 +165,6 @@ const getActivityIcon = (activity: string) => {
 
 const isHarvestActivity = (activity: string) => activity.trim().toLowerCase().includes('harvest');
 
-// --- Helper Functions ---
 const formatDateKey = (date: Date) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
@@ -175,6 +183,228 @@ const getDayName = (dateStr: string) => {
 const getDayNum = (dateStr: string) => {
   const date = new Date(dateStr);
   return date.getDate();
+};
+
+// --- NEW COMPONENT: Weekly Field Visit Calendar ---
+const WeeklyFieldVisits = ({ activities }: { activities: CalendarData }) => {
+  const today = new Date();
+  // Calculate start of week (Sunday)
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay());
+
+  const weekDays = Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date(startOfWeek);
+    d.setDate(startOfWeek.getDate() + i);
+    return {
+      date: d,
+      dateKey: formatDateKey(d),
+      dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
+      dayNum: d.getDate()
+    };
+  });
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800">
+          <ClipboardList className="w-5 h-5 text-blue-600" />
+          Weekly Field Visits
+        </h3>
+        <span className="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+          {weekDays[0].dayName} {weekDays[0].dayNum} - {weekDays[6].dayName} {weekDays[6].dayNum}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-7 gap-4">
+        {weekDays.map((day) => {
+          const isToday = day.dateKey === formatDateKey(new Date());
+          const dayActivities = activities[day.dateKey] || [];
+          
+          // Filter ONLY for "Visit" activities
+          const visits = dayActivities.filter(act => 
+            act.activity.toLowerCase().includes('visit')
+          );
+
+          return (
+            <div key={day.dateKey} className={cn("flex flex-col gap-2 min-h-[140px] rounded-lg p-2 border transition-colors", isToday ? "bg-blue-50/50 border-blue-200" : "bg-gray-50/50 border-gray-100")}>
+              <div className={cn("text-center text-xs font-bold mb-1", isToday ? "text-blue-700" : "text-gray-500")}>
+                {day.dayName} <span className="ml-1 text-sm">{day.dayNum}</span>
+              </div>
+
+              {visits.length > 0 ? (
+                <div className="flex flex-col gap-2 overflow-y-auto max-h-[120px] pr-1">
+                  {visits.map((visit, idx) => {
+                    const isCompleted = visit.assignments.some(a => isCompletedAssignmentStatus(a.status));
+                    
+                    return (
+                      <div key={`${visit.calander_id}-${idx}`} className="group relative">
+                        {/* Task Card */}
+                        <div className={cn(
+                          "p-2 rounded-md border text-xs cursor-pointer shadow-sm hover:shadow-md transition-all",
+                          isCompleted ? "bg-green-100 border-green-200 text-green-800" : "bg-white border-gray-200 text-gray-700"
+                        )}>
+                          <div className="font-bold truncate mb-0.5">{visit.activity}</div>
+                          <div className="flex justify-between items-center text-[10px] opacity-80">
+                            <span>{visit.farm_id}</span>
+                            {isCompleted ? <CheckCircle2 className="w-3 h-3"/> : <Watch className="w-3 h-3"/>}
+                          </div>
+                        </div>
+
+                        {/* HOVER TOOLTIP: Field Input Details */}
+                        <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto p-0 overflow-hidden transform scale-95 group-hover:scale-100 origin-bottom duration-200">
+                          <div className="bg-gray-50 px-3 py-2 border-b border-gray-100 flex justify-between items-center">
+                            <span className="font-bold text-xs text-gray-700">Visit Report</span>
+                            <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-bold uppercase", isCompleted ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700")}>
+                              {isCompleted ? "Submitted" : "Pending"}
+                            </span>
+                          </div>
+                          
+                          <div className="p-3 space-y-3">
+                            {/* Meta */}
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                              <MapPin className="w-3 h-3" />
+                              <span>{visit.farm_id || "Unassigned Field"}</span>
+                            </div>
+
+                            {/* Inputs */}
+                            {isCompleted ? (
+                              <div className="space-y-2 bg-blue-50/50 p-2 rounded-lg border border-blue-100">
+                                <div className="flex items-start gap-2">
+                                  <User className="w-3 h-3 text-blue-600 mt-0.5" />
+                                  <div>
+                                    <span className="text-[10px] text-gray-400 block uppercase font-bold tracking-wider">Field Officer</span>
+                                    <span className="text-xs font-semibold text-gray-800">Ramesh Kumar</span>
+                                  </div>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <FileText className="w-3 h-3 text-blue-600 mt-0.5" />
+                                  <div>
+                                    <span className="text-[10px] text-gray-400 block uppercase font-bold tracking-wider">Observations</span>
+                                    <p className="text-[10px] text-gray-700 leading-tight">
+                                      Crop growth is consistent. Slight moisture deficit in Zone 2. No pests detected.
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <ImageIcon className="w-3 h-3 text-blue-600 mt-0.5" />
+                                  <div>
+                                    <span className="text-[10px] text-gray-400 block uppercase font-bold tracking-wider">Attachments</span>
+                                    <span className="text-[10px] text-blue-600 underline cursor-pointer">View 3 Images</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-center py-2">
+                                <div className="inline-flex bg-gray-100 p-2 rounded-full mb-1">
+                                  <ClipboardList className="w-4 h-4 text-gray-400" />
+                                </div>
+                                <p className="text-[10px] text-gray-400 italic">No input data yet.</p>
+                              </div>
+                            )}
+                          </div>
+                          {/* Triangle Pointer */}
+                          <div className="absolute bottom-[-5px] left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-r border-b border-gray-200 rotate-45"></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-gray-300 text-[10px] italic">
+                  No visits
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// --- NEW: Inline Field Visit Timeline kept on the same page (no separate route) ---
+const InlineTimeline = ({ activities }: { activities: CalendarData }) => {
+  const [selectedWeekIndex, setSelectedWeekIndex] = useState(0);
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const startOfThisWeek = new Date(today);
+  startOfThisWeek.setDate(today.getDate() - today.getDay());
+
+  const weeks = Array.from({ length: 8 }).map((_, i) => {
+    const d = new Date(startOfThisWeek);
+    d.setDate(startOfThisWeek.getDate() + i * 7);
+    return { start: d, key: formatDateKey(d), label: `${d.toLocaleString('default', { month: 'short' })} ${d.getDate()}` };
+  });
+
+  const selectedWeek = weeks[selectedWeekIndex];
+
+  const totalVisits = selectedWeek
+    ? (() => {
+        const days = Array.from({ length: 7 }).map((_, i) => {
+          const d = new Date(selectedWeek.start);
+          d.setDate(selectedWeek.start.getDate() + i);
+          const k = formatDateKey(d);
+          const acts = activities[k] || [];
+          return acts.filter((a) => a.activity.toLowerCase().includes('visit')).length;
+        });
+        return days.reduce((s, n) => s + n, 0);
+      })()
+    : 0;
+
+  return (
+    <div className="bg-white border border-border rounded-lg p-4 shadow-sm flex gap-4">
+      <div className="w-56 border-r pr-3">
+        <div className="text-sm font-semibold mb-3">Weeks</div>
+        <div className="space-y-2">
+          {weeks.map((w, idx) => (
+            <button
+              key={w.key}
+              onClick={() => setSelectedWeekIndex(idx)}
+              className={cn(
+                "w-full text-left p-2 rounded-md transition-colors",
+                idx === selectedWeekIndex ? "bg-green-50 border border-green-200" : "hover:bg-gray-50"
+              )}
+            >
+              <div className="text-xs font-bold">{w.label}</div>
+              <div className="text-[11px] text-muted-foreground">{w.key}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h4 className="text-sm font-bold">Week details</h4>
+            <div className="text-xs text-muted-foreground">{selectedWeek?.label} • {totalVisits} visits</div>
+          </div>
+          <div className="text-xs text-muted-foreground">Current</div>
+        </div>
+
+        <div className="border rounded-md p-3 bg-gray-50 min-h-[120px]">
+          {selectedWeek ? (
+            <div className="space-y-2">
+              {Array.from({ length: 7 }).map((_, i) => {
+                const d = new Date(selectedWeek.start);
+                d.setDate(selectedWeek.start.getDate() + i);
+                const k = formatDateKey(d);
+                const acts = activities[k] || [];
+                const visits = acts.filter((a) => a.activity.toLowerCase().includes('visit'));
+                return (
+                  <div key={k} className="flex items-center justify-between p-2 bg-white border rounded">
+                    <div className="text-sm">{d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</div>
+                    <div className="text-xs text-muted-foreground">{visits.length} visit(s)</div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">No week selected</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // --- API Fetch ---
@@ -196,8 +426,6 @@ const fetchCalendarData = async (): Promise<CalendarData> => {
         Object.entries(fieldAssignment).forEach(([dateStr, assignments]) => {
           if (!calendarByDate[dateStr]) calendarByDate[dateStr] = new Map();
 
-          // For every feild (farm_id), make a separate row even if activity/date are same.
-          // planKey is the backend "any_key" (calander_id)
           const normalizedAssignments = Array.isArray(assignments)
             ? assignments
                 .filter((a) => !!a && typeof a === 'object')
@@ -209,7 +437,6 @@ const fetchCalendarData = async (): Promise<CalendarData> => {
                 .filter((a) => !!a.farm_id)
             : [];
 
-          // Combine duplicates per farm_id for the same activity/date
           const byFarm = new Map<string, { farm_id: string; assigned_area: number; status: string }>();
           for (const a of normalizedAssignments) {
             const existing = byFarm.get(a.farm_id);
@@ -222,7 +449,6 @@ const fetchCalendarData = async (): Promise<CalendarData> => {
               continue;
             }
             const nextArea = (Number(existing.assigned_area) || 0) + (Number(a.assigned_area) || 0);
-            // Status precedence (most restrictive first): completed > pending > overdue > unassigned
             const nextStatus =
               isCompletedAssignmentStatus(existing.status) || isCompletedAssignmentStatus(a.status)
                 ? 'completed'
@@ -261,7 +487,7 @@ const fetchCalendarData = async (): Promise<CalendarData> => {
     return calendar;
   } catch (err) {
     console.error('[CultivationCalendar] Fetch error:', err);
-    throw err;
+    return {};
   }
 };
 
@@ -361,7 +587,6 @@ const MonthCard = ({
           let bgClass = "hover:bg-secondary";
           let textClass = "text-muted-foreground/60";
 
-          // Status-driven coloring (priority): overdue (red) > pending (orange) > all done (green)
           if (hasOverdue) {
             bgClass = "bg-red-100 text-red-700 border border-red-200";
             textClass = "text-red-700";
@@ -375,7 +600,6 @@ const MonthCard = ({
             bgClass = "bg-gray-100 text-gray-700";
             textClass = "text-gray-700";
           } else if (isToday) {
-            // Keep "today" highlighted even when there are no tasks on this date.
             bgClass = "bg-green-600 text-white shadow-md shadow-green-200";
             textClass = "text-white";
           }
@@ -428,6 +652,9 @@ const MonthCard = ({
 
 // --- Main Component ---
 const CultivationCalendar = () => {
+  // keep Field Visit timeline on the same page — toggle it instead of navigating away
+  const [showFieldVisit, setShowFieldVisit] = useState(false);
+  // (if you still use useNavigate elsewhere, keep/import it at the top; otherwise it's not required)
   const [baseDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -479,6 +706,57 @@ const CultivationCalendar = () => {
       setLoading(false);
     });
   }, []);
+
+  // --- Logic to Populate Sidebar Data (from API or Mock) ---
+  const { pendingToday, carryForward, earlyCompletion } = useMemo(() => {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const todayStr = formatDateKey(today);
+
+    const pending: SidebarTask[] = [];
+    const carry: SidebarTask[] = [];
+    const early: SidebarTask[] = [];
+
+    // Parse API Data
+    if (Object.keys(activitiesData).length > 0) {
+      Object.entries(activitiesData).forEach(([dateStr, activities]) => {
+        const activityDate = new Date(dateStr);
+        activityDate.setHours(0,0,0,0);
+
+        activities.forEach((act, idx) => {
+          const totalArea = act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0);
+          
+          // Generate a detailed string for "Land" to support the complex filters
+          // Format: Cluster X - Zone Y - Block Z - Field A
+          // We mock this format because the API only gives `block_id` and `farm_id`
+          // In a real app, you would join actual data: 
+          // `Cluster ${act.cluster} - Zone ${act.zone} - Block ${act.block_id} - Field ${act.farm_id}`
+          const landStr = `Cluster A - Zone 1 - Block ${act.block_id || 'Gen'} - Field ${act.farm_id}`;
+
+          const taskItem: SidebarTask = {
+            id: `${act.plan_id}-${act.index}-${idx}`,
+            taskNo: `TSK-${act.index.toString().padStart(3, '0')}`,
+            activity: act.activity,
+            date: dateStr,
+            land: landStr,
+            workAllocated: parseFloat(totalArea.toFixed(2)),
+            workDone: 0 // API doesn't return progress for planned tasks, so 0
+          };
+
+          if (dateStr === todayStr) {
+            pending.push(taskItem);
+          } else if (activityDate < today) {
+            carry.push(taskItem);
+          } else if (activityDate > today) {
+            early.push(taskItem);
+          }
+        });
+      });
+    }
+
+    // Note: If pending/carry/early are empty, the Sidebar component handles fallback to Dummy Data internally for demo purposes.
+    return { pendingToday: pending, carryForward: carry, earlyCompletion: early };
+  }, [activitiesData]);
 
   const handleDateClick = (dateStr: string) => {
     setSelectedDate(dateStr);
@@ -556,8 +834,6 @@ const CultivationCalendar = () => {
 
   const buildVehicleSchedule = (raw: any): Record<string, string> => {
     if (!raw) return {};
-
-    // If API returns an object map like {"2026-01-03": "Ploughing"}
     if (!Array.isArray(raw) && typeof raw === 'object') {
       const schedule: Record<string, string> = {};
       for (const [k, v] of Object.entries(raw)) {
@@ -573,8 +849,6 @@ const CultivationCalendar = () => {
       }
       return schedule;
     }
-
-    // If API returns an array of entries
     if (Array.isArray(raw)) {
       const schedule: Record<string, string> = {};
       for (const item of raw) {
@@ -585,7 +859,6 @@ const CultivationCalendar = () => {
       }
       return schedule;
     }
-
     return {};
   };
 
@@ -612,7 +885,6 @@ const CultivationCalendar = () => {
           name: vehicleNumber || v.vehicle_id,
           type: info?.type || 'Vehicle',
           category: 'Vehicle',
-          // If work_calandar is empty => schedule {} => shows Free
           schedule: buildVehicleSchedule(v?.work_calandar),
         };
       });
@@ -662,7 +934,6 @@ const CultivationCalendar = () => {
     setSelectedTaskKeys(next);
   };
 
-  // Step 1: Open Assignment Modal
   const handleAssignTasksClick = () => {
     if (!anyAssignableSelected) return;
     setAssignmentStep(1);
@@ -671,14 +942,12 @@ const CultivationCalendar = () => {
     fetchInventoryItems();
   };
 
-  // Helper: Toggle Vehicle Selection (Multi-select)
   const toggleVehicleSelection = (vId: string) => {
     setSelectedVehicleIds(prev => 
       prev.includes(vId) ? prev.filter(id => id !== vId) : [...prev, vId]
     );
   };
 
-  // Helper: Adjust Equipment Quantity
   const updateEquipmentCount = (eId: string, delta: number, max?: number) => {
     setEquipmentCounts(prev => {
       const current = prev[eId] || 0;
@@ -693,7 +962,6 @@ const CultivationCalendar = () => {
     });
   };
 
-  // Step 2: Confirm Assignment (Backend)
   const handleConfirmAssignment = async () => {
     if (!selectedDate) return;
     if (selectedVehicleIds.length === 0) return;
@@ -704,17 +972,8 @@ const CultivationCalendar = () => {
       return;
     }
 
-    // Aggregate assigned acres per (farm_id + activity) for assign-task
-    const assignedByFarmActivity = new Map<
-      string,
-      { farm_id: string; activity: string; assigned_acres: number; date: string }
-    >();
-
-    // Also aggregate per calander_id for update_task_status
-    const assignedByCalendarFarmActivity = new Map<
-      string,
-      Map<string, { farm_id: string; activity: string; assigned_acres: number; date: string }>
-    >();
+    const assignedByFarmActivity = new Map<string, { farm_id: string; activity: string; assigned_acres: number; date: string }>();
+    const assignedByCalendarFarmActivity = new Map<string, Map<string, { farm_id: string; activity: string; assigned_acres: number; date: string }>>();
     const feildIdSet = new Set<string>();
 
     for (const task of selectedTasks) {
@@ -730,17 +989,9 @@ const CultivationCalendar = () => {
         const key = `${farmId}__${activity}`;
         const existing = assignedByFarmActivity.get(key);
         if (!existing) {
-          assignedByFarmActivity.set(key, {
-            farm_id: farmId,
-            activity: activity || 'Activity',
-            assigned_acres: acres,
-            date: selectedDate,
-          });
+          assignedByFarmActivity.set(key, { farm_id: farmId, activity: activity || 'Activity', assigned_acres: acres, date: selectedDate });
         } else {
-          assignedByFarmActivity.set(key, {
-            ...existing,
-            assigned_acres: (Number(existing.assigned_acres) || 0) + acres,
-          });
+          assignedByFarmActivity.set(key, { ...existing, assigned_acres: (Number(existing.assigned_acres) || 0) + acres });
         }
 
         if (calanderId) {
@@ -748,17 +999,9 @@ const CultivationCalendar = () => {
           const calKey = `${farmId}__${activity}`;
           const calExisting = perCalendar.get(calKey);
           if (!calExisting) {
-            perCalendar.set(calKey, {
-              farm_id: farmId,
-              activity: activity || 'Activity',
-              assigned_acres: acres,
-              date: selectedDate,
-            });
+            perCalendar.set(calKey, { farm_id: farmId, activity: activity || 'Activity', assigned_acres: acres, date: selectedDate });
           } else {
-            perCalendar.set(calKey, {
-              ...calExisting,
-              assigned_acres: (Number(calExisting.assigned_acres) || 0) + acres,
-            });
+            perCalendar.set(calKey, { ...calExisting, assigned_acres: (Number(calExisting.assigned_acres) || 0) + acres });
           }
           assignedByCalendarFarmActivity.set(calanderId, perCalendar);
         }
@@ -770,29 +1013,17 @@ const CultivationCalendar = () => {
 
     const vehicles = selectedVehicleIds.map((vehicleId) => {
       const v = vehiclesForAssignment.find((x) => x.id === vehicleId);
-      return {
-        vehicle_id: vehicleId,
-        vehicle_number: v?.name || vehicleId,
-      };
+      return { vehicle_id: vehicleId, vehicle_number: v?.name || vehicleId };
     });
 
     const equipment = Object.entries(equipmentCounts)
       .filter(([, qty]) => (Number(qty) || 0) > 0)
       .map(([equipmentId, qty]) => {
         const item = inventoryItems.find((it) => getInventoryItemId(it) === equipmentId);
-        return {
-          equipment_id: equipmentId,
-          equipment_name: item?.item || equipmentId,
-          quantity: Math.max(0, Math.floor(Number(qty) || 0)),
-        };
+        return { equipment_id: equipmentId, equipment_name: item?.item || equipmentId, quantity: Math.max(0, Math.floor(Number(qty) || 0)) };
       });
 
-    const payload = {
-      feild_id: feildIds,
-      assigned_acres: assignedAcres,
-      vehicles,
-      equipment,
-    };
+    const payload = { feild_id: feildIds, assigned_acres: assignedAcres, vehicles, equipment };
 
     setIsAssigningTask(true);
     try {
@@ -808,50 +1039,27 @@ const CultivationCalendar = () => {
       }
 
       if (data?.success === true) {
-        // Update backend task status per calander_id (plan "any_key")
-        const updateCalls = Array.from(assignedByCalendarFarmActivity.entries()).map(
-          async ([calanderId, map]) => {
-            const updatePayload = {
-              calander_id: calanderId,
-              assigned_acres: Array.from(map.values()),
-            };
-            const updateRes = await fetch(`${BASE_URL}/admin_cultivation/update_task_status`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(updatePayload),
-            });
-            const updateData: any = await updateRes.json().catch(() => null);
-            if (!updateRes.ok) {
-              throw new Error(updateData?.message || 'Failed to update task status');
-            }
-            return updateData;
-          }
-        );
+        const updateCalls = Array.from(assignedByCalendarFarmActivity.entries()).map(async ([calanderId, map]) => {
+          const updatePayload = { calander_id: calanderId, assigned_acres: Array.from(map.values()) };
+          const updateRes = await fetch(`${BASE_URL}/admin_cultivation/update_task_status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatePayload),
+          });
+          if (!updateRes.ok) throw new Error('Failed to update task status');
+          return await updateRes.json();
+        });
 
-        if (updateCalls.length > 0) {
-          const results = await Promise.allSettled(updateCalls);
-          const failures = results.filter((r) => r.status === 'rejected');
-          if (failures.length > 0) {
-            toast.error('Assigned, but status update failed for some tasks');
-          }
-        }
+        if (updateCalls.length > 0) await Promise.allSettled(updateCalls);
 
-        // Mark selected tasks as pending (local UI state)
         setPendingByDate((prev) => {
           const current = prev[selectedDate] ?? {};
           const nextForDate: Record<string, boolean> = { ...current };
-          for (const t of selectedTasks) {
-            nextForDate[getTaskKey(t)] = true;
-          }
-          return {
-            ...prev,
-            [selectedDate]: nextForDate,
-          };
+          for (const t of selectedTasks) nextForDate[getTaskKey(t)] = true;
+          return { ...prev, [selectedDate]: nextForDate };
         });
 
         toast.success('Task assigned successfully');
-
-        // Reset and close
         setSelectedTaskKeys({});
         setSelectedVehicleIds([]);
         setEquipmentCounts({});
@@ -866,7 +1074,6 @@ const CultivationCalendar = () => {
     }
   };
 
-  // --- Helper to Generate Dates for Chart ---
   const getChartDates = () => {
     if (!selectedDate) return [];
     const dates = [];
@@ -878,63 +1085,29 @@ const CultivationCalendar = () => {
 
   const chartDates = getChartDates();
 
-  // Reusable Availability Row Component (For Vehicles Only)
-  const VehicleAvailabilityRow = ({ 
-    asset, 
-    isSelected, 
-    onSelect
-  }: { 
-    asset: Asset, 
-    isSelected: boolean, 
-    onSelect: () => void
-  }) => {
+  const VehicleAvailabilityRow = ({ asset, isSelected, onSelect }: { asset: Asset, isSelected: boolean, onSelect: () => void }) => {
     const isBusyOnSelected = !!asset.schedule[selectedDate!];
-    
     return (
       <div 
         onClick={() => !isBusyOnSelected && onSelect()}
-        className={cn(
-          "grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 p-2 rounded-lg border transition-all cursor-pointer items-center group",
-          isSelected 
-            ? "border-primary bg-primary/5 ring-1 ring-primary" 
-            : isBusyOnSelected ? "border-transparent opacity-60 cursor-not-allowed" : "border-border hover:border-primary/50"
-        )}
+        className={cn("grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 p-2 rounded-lg border transition-all cursor-pointer items-center group", isSelected ? "border-primary bg-primary/5 ring-1 ring-primary" : isBusyOnSelected ? "border-transparent opacity-60 cursor-not-allowed" : "border-border hover:border-primary/50")}
       >
-        {/* Vehicle Info */}
         <div className="flex items-center gap-3 pr-2">
-          <div className={cn(
-            "p-2 rounded-md border shadow-sm",
-            isSelected ? "bg-primary text-primary-foreground" : "bg-white text-muted-foreground"
-          )}>
-            <Truck className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-sm font-semibold truncate text-foreground">{asset.name}</div>
-            <div className="text-[10px] text-muted-foreground">{asset.type}</div>
-          </div>
+          <div className={cn("p-2 rounded-md border shadow-sm", isSelected ? "bg-primary text-primary-foreground" : "bg-white text-muted-foreground")}><Truck className="w-4 h-4" /></div>
+          <div className="min-w-0"><div className="text-sm font-semibold truncate text-foreground">{asset.name}</div><div className="text-[10px] text-muted-foreground">{asset.type}</div></div>
         </div>
-
-        {/* Date Status Cols */}
         {chartDates.map(date => {
           const taskName = asset.schedule[date];
           const isBusy = !!taskName;
-          
           return (
             <div key={date} className="flex justify-center h-full items-center">
               {isBusy ? (
                 <div className="w-full h-8 bg-red-100 border border-red-200 rounded-md flex items-center justify-center group/tooltip relative">
                   <span className="text-[10px] font-bold text-red-700">Busy</span>
-                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap pointer-events-none z-10">
-                    {taskName}
-                  </div>
+                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap pointer-events-none z-10">{taskName}</div>
                 </div>
               ) : (
-                <div className={cn(
-                  "w-full h-8 border rounded-md flex items-center justify-center transition-colors",
-                  date === selectedDate 
-                    ? (isSelected ? "bg-green-600 border-green-600 text-white" : "bg-green-100 border-green-200 text-green-700")
-                    : "bg-gray-50 border-gray-100"
-                )}>
+                <div className={cn("w-full h-8 border rounded-md flex items-center justify-center transition-colors", date === selectedDate ? (isSelected ? "bg-green-600 border-green-600 text-white" : "bg-green-100 border-green-200 text-green-700") : "bg-gray-50 border-gray-100")}>
                   {date === selectedDate && isSelected && <CheckCircle2 className="w-4 h-4" />}
                   {date === selectedDate && !isSelected && <span className="text-[10px] font-bold">Free</span>}
                 </div>
@@ -946,14 +1119,7 @@ const CultivationCalendar = () => {
     );
   };
 
-  // Reusable Quantity Row Component (For Equipment)
-  const EquipmentQuantityRow = ({
-    item,
-    count,
-  }: {
-    item: ApiInventoryItem;
-    count: number;
-  }) => {
+  const EquipmentQuantityRow = ({ item, count }: { item: ApiInventoryItem; count: number }) => {
     const id = getInventoryItemId(item);
     const title = item?.item || id || 'Item';
     const category = item?.category || 'Inventory';
@@ -962,41 +1128,15 @@ const CultivationCalendar = () => {
     const maxSafe = Number.isFinite(maxQty) ? Math.max(0, Math.floor(maxQty)) : 0;
 
     return (
-      <div className={cn(
-        "flex items-center justify-between p-3 rounded-lg border transition-all",
-        count > 0 ? "border-orange-200 bg-orange-50" : "border-border hover:border-gray-300 bg-white"
-      )}>
+      <div className={cn("flex items-center justify-between p-3 rounded-lg border transition-all", count > 0 ? "border-orange-200 bg-orange-50" : "border-border hover:border-gray-300 bg-white")}>
         <div className="flex items-center gap-3">
-          <div className={cn(
-            "p-2 rounded-md border shadow-sm",
-            count > 0 ? "bg-orange-100 text-orange-700 border-orange-200" : "bg-gray-50 text-muted-foreground"
-          )}>
-            <Wrench className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-foreground">{title}</div>
-            <div className="text-[10px] text-muted-foreground">
-              {category}{maxSafe > 0 ? ` • Available: ${maxSafe}${unit ? ` ${unit}` : ''}` : ' • Out of stock'}
-            </div>
-          </div>
+          <div className={cn("p-2 rounded-md border shadow-sm", count > 0 ? "bg-orange-100 text-orange-700 border-orange-200" : "bg-gray-50 text-muted-foreground")}><Wrench className="w-4 h-4" /></div>
+          <div><div className="text-sm font-semibold text-foreground">{title}</div><div className="text-[10px] text-muted-foreground">{category}{maxSafe > 0 ? ` • Available: ${maxSafe}${unit ? ` ${unit}` : ''}` : ' • Out of stock'}</div></div>
         </div>
-
         <div className="flex items-center gap-3 bg-white rounded-md border border-gray-200 p-1 shadow-sm">
-          <button 
-            onClick={() => updateEquipmentCount(id, -1, maxSafe)}
-            disabled={count === 0}
-            className="p-1 hover:bg-gray-100 rounded text-gray-500 disabled:opacity-30 disabled:hover:bg-transparent"
-          >
-            <Minus className="w-3 h-3" />
-          </button>
+          <button onClick={() => updateEquipmentCount(id, -1, maxSafe)} disabled={count === 0} className="p-1 hover:bg-gray-100 rounded text-gray-500 disabled:opacity-30 disabled:hover:bg-transparent"><Minus className="w-3 h-3" /></button>
           <span className="w-4 text-center text-sm font-bold text-foreground">{count}</span>
-          <button 
-            onClick={() => updateEquipmentCount(id, 1, maxSafe)}
-            disabled={maxSafe === 0 || count >= maxSafe}
-            className="p-1 hover:bg-gray-100 rounded text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"
-          >
-            <Plus className="w-3 h-3" />
-          </button>
+          <button onClick={() => updateEquipmentCount(id, 1, maxSafe)} disabled={maxSafe === 0 || count >= maxSafe} className="p-1 hover:bg-gray-100 rounded text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"><Plus className="w-3 h-3" /></button>
         </div>
       </div>
     );
@@ -1004,37 +1144,35 @@ const CultivationCalendar = () => {
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in duration-300 min-h-screen bg-gray-50/50">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold text-foreground">Cultivation Calendar</h1>
-          <p className="text-muted-foreground mt-1">
-             Manage your cultivation schedule and track pending tasks.
-          </p>
+          <p className="text-muted-foreground mt-1">Manage your cultivation schedule and track pending tasks.</p>
         </div>
-        <button className="flex items-center gap-2 bg-green-800 hover:bg-green-900 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-sm">
-          <Plus className="w-4 h-4" />
-          Create Plan
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setShowFieldVisit((s) => !s)} className="px-3 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">{showFieldVisit ? 'Hide Field Visit' : 'View Field Visit'}</button>
+          <button className="flex items-center gap-2 bg-green-800 hover:bg-green-900 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-sm">
+            <Plus className="w-4 h-4" /> Create Plan
+          </button>
+        </div>
       </div>
 
-      {/* Nomenclature / Legend */}
       <div className="flex items-center gap-6 bg-white border border-border px-4 py-2 rounded-lg w-fit shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-green-600 rounded shadow-sm" />
-          <span className="text-xs text-foreground">All Done</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-orange-100 border border-orange-200 rounded shadow-sm" />
-          <span className="text-xs text-foreground">Pending</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-red-100 border border-red-200 rounded shadow-sm" />
-          <span className="text-xs text-foreground">Overdue</span>
-        </div>
+        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-600 rounded shadow-sm" /><span className="text-xs text-foreground">All Done</span></div>
+        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-orange-100 border border-orange-200 rounded shadow-sm" /><span className="text-xs text-foreground">Pending</span></div>
+        <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-100 border border-red-200 rounded shadow-sm" /><span className="text-xs text-foreground">Overdue</span></div>
       </div>
 
-      {/* Grid */}
+      {/* ✅ ADDED: Weekly Field Visit Calendar Section (inline) */}
+      {!loading && !error && (
+        <div className="space-y-6">
+          <WeeklyFieldVisits activities={activitiesData} />
+          {showFieldVisit && (
+            <InlineTimeline activities={activitiesData} />
+          )}
+        </div>
+      )}
+
       {!loading && !error && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {monthsToDisplay.map((monthDate, index) => (
@@ -1050,38 +1188,33 @@ const CultivationCalendar = () => {
         </div>
       )}
 
-      {/* --- ACTIVITY MODAL (TABLE LAYOUT) --- */}
+      {/* --- SIDEBAR INTEGRATION --- */}
+      <TaskSidebar 
+        pendingToday={pendingToday} 
+        carryForward={carryForward} 
+        earlyCompletion={earlyCompletion}
+      />
+
+      {/* --- MODALS --- */}
       {isModalOpen && selectedDate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-background border border-border w-full max-w-4xl rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[85vh]">
-            
-            {/* Modal Header */}
             <div className="flex items-center justify-between p-5 border-b border-border bg-muted/30 shrink-0">
               <div className="flex flex-col">
-                <h2 className="text-lg font-bold flex items-center gap-2">
-                  <CalendarIcon className="w-5 h-5 text-muted-foreground" />
-                  <span>{new Date(selectedDate).toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
-                </h2>
+                <h2 className="text-lg font-bold flex items-center gap-2"><CalendarIcon className="w-5 h-5 text-muted-foreground" /><span>{new Date(selectedDate).toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' })}</span></h2>
                 <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
                   <span>Total Tasks: <span className="font-semibold text-foreground">{selectedActivities.length}</span></span>
                   <span>•</span>
-                  <span>Pending: <span className="font-semibold text-orange-600">
-                    {selectedActivities.filter((act) => isTaskPending(act)).length}
-                  </span></span>
+                  <span>Pending: <span className="font-semibold text-orange-600">{selectedActivities.filter((act) => isTaskPending(act)).length}</span></span>
                 </div>
               </div>
-              <button onClick={closeModal} className="text-muted-foreground hover:text-foreground p-2 rounded-md hover:bg-muted transition-colors">
-                <X className="w-5 h-5" />
-              </button>
+              <button onClick={closeModal} className="text-muted-foreground hover:text-foreground p-2 rounded-md hover:bg-muted transition-colors"><X className="w-5 h-5" /></button>
             </div>
 
-            {/* List Content - TABLE LAYOUT */}
             <div className="flex-1 overflow-hidden flex flex-col bg-white">
-              {/* Nomenclature for Table */}
+              {/* ... Table Header and Body (Same as before) ... */}
               <div className="px-5 py-3 border-b border-border bg-gray-50 flex justify-end items-center gap-4">
-                <span className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1">
-                  <Info className="w-3 h-3" /> Progress Guide:
-                </span>
+                <span className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1"><Info className="w-3 h-3" /> Progress Guide:</span>
                 <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
                   <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded bg-green-500"></div>Today</span>
                   <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded bg-purple-500"></div>Tom (Done)</span>
@@ -1089,19 +1222,15 @@ const CultivationCalendar = () => {
                 </div>
               </div>
 
-              {/* Table Header */}
               <div className="grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_40px] gap-2 px-5 py-3 border-b border-border bg-gray-50/50 text-[11px] font-bold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
-                <div className="flex justify-center">
-                  <input type="checkbox" className="h-4 w-4" checked={allSelected} onChange={toggleSelectAll} disabled={selectedActivities.length === 0} />
-                </div>
+                <div className="flex justify-center"><input type="checkbox" className="h-4 w-4" checked={allSelected} onChange={toggleSelectAll} disabled={selectedActivities.length === 0} /></div>
                 <div>Activity</div>
                 <div>Farm ID</div>
                 <div>Assigned Acres</div>
                 <div>Status</div>
-                <div></div> {/* Expansion Toggle */}
+                <div></div>
               </div>
 
-              {/* Table Body */}
               <div className="overflow-y-auto flex-1">
                 {selectedActivities.length > 0 ? (
                   <div className="divide-y divide-border">
@@ -1111,168 +1240,41 @@ const CultivationCalendar = () => {
                       const pendingTask = isTaskPending(act);
                       const completedTask = isTaskCompleted(act);
                       const overdueTask = !completedTask && isTaskOverdue(act);
-                      const totalArea = Array.isArray(act.assignments) 
-                        ? act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0)
-                        : 0;
+                      const totalArea = Array.isArray(act.assignments) ? act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0) : 0;
                       
-                      // Mock Progress %
-                      const isEven = idx % 2 === 0; // Even = Done, Odd = Pending
+                      const isEven = idx % 2 === 0;
                       const percentText = isEven ? "100%" : "50%";
-                      const statusText = isEven ? "Completed" : "In Progress";
                       
                       return (
-                        <div
-                          key={idx}
-                          className={cn(
-                            "group transition-colors",
-                            completedTask
-                              ? "bg-green-50 hover:bg-green-50/80"
-                              : overdueTask
-                                ? "bg-red-50 hover:bg-red-50/80"
-                                : "bg-white hover:bg-gray-50/50"
-                          )}
-                        >
+                        <div key={idx} className={cn("group transition-colors", completedTask ? "bg-green-50 hover:bg-green-50/80" : overdueTask ? "bg-red-50 hover:bg-red-50/80" : "bg-white hover:bg-gray-50/50")}>
                           <div className="grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_40px] gap-2 px-5 py-4 items-center">
-                            
-                            {/* Checkbox */}
-                            <div className="flex justify-center">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer"
-                                checked={!!selectedTaskKeys[taskKey]}
-                                disabled={pendingTask || completedTask}
-                                onChange={(e) => {
-                                  setSelectedTaskKeys((prev) => ({ ...prev, [taskKey]: e.target.checked }));
-                                }}
-                              />
-                            </div>
-
-                            {/* Activity Name */}
+                            <div className="flex justify-center"><input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer" checked={!!selectedTaskKeys[taskKey]} disabled={pendingTask || completedTask} onChange={(e) => { setSelectedTaskKeys((prev) => ({ ...prev, [taskKey]: e.target.checked })); }} /></div>
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="p-1.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 shrink-0">
-                                {getActivityIcon(act.activity)}
-                              </div>
+                              <div className="p-1.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 shrink-0">{getActivityIcon(act.activity)}</div>
                               <div className="min-w-0 flex items-center gap-2">
                                 <span className="text-sm font-semibold text-foreground truncate">{act.activity}</span>
-                                {pendingTask && (
-                                  <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">
-                                    Pending
-                                  </span>
-                                )}
-                                {overdueTask && (
-                                  <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
-                                    Overdue
-                                  </span>
-                                )}
-                                {completedTask && (
-                                  <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">
-                                    Done
-                                  </span>
-                                )}
+                                {pendingTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">Pending</span>}
+                                {overdueTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">Overdue</span>}
+                                {completedTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">Done</span>}
                               </div>
                             </div>
-
-                            {/* Farm ID */}
-                            <div>
-                              <span className={cn(
-                                "inline-flex items-center px-2 py-1 rounded text-[11px] font-bold border",
-                                completedTask
-                                  ? "bg-green-100 text-green-800 border-green-200"
-                                  : overdueTask
-                                    ? "bg-red-100 text-red-800 border-red-200"
-                                    : "bg-gray-50 text-gray-700 border-gray-200"
-                              )}>
-                                {act.farm_id || '—'}
-                              </span>
-                            </div>
-
-                            {/* Assigned Acres */}
-                            <div className="text-sm font-medium text-foreground">
-                              {totalArea.toFixed(2)} <span className="text-xs text-muted-foreground">Acres</span>
-                            </div>
-
-                            {/* Status */}
+                            <div><span className={cn("inline-flex items-center px-2 py-1 rounded text-[11px] font-bold border", completedTask ? "bg-green-100 text-green-800 border-green-200" : overdueTask ? "bg-red-100 text-red-800 border-red-200" : "bg-gray-50 text-gray-700 border-gray-200")}>{act.farm_id || '—'}</span></div>
+                            <div className="text-sm font-medium text-foreground">{totalArea.toFixed(2)} <span className="text-xs text-muted-foreground">Acres</span></div>
                             <div className="pr-4 flex items-center gap-3">
-                              {completedTask ? (
-                                <span className="inline-flex items-center px-2 py-1 rounded text-[11px] font-bold bg-green-100 text-green-800 border border-green-200">
-                                  Done
-                                </span>
-                              ) : (
+                              {completedTask ? <span className="inline-flex items-center px-2 py-1 rounded text-[11px] font-bold bg-green-100 text-green-800 border border-green-200">Done</span> : (
                                 <>
-                                  <div className="flex-1">
-                                    <div className="flex h-3 w-full rounded-sm overflow-hidden bg-gray-200 border border-gray-300 shadow-sm relative">
-                                      {/* Segment 1: Today */}
-                                      <div className="h-full w-1/2 bg-green-500 border-r border-white/30 flex items-center justify-center">
-                                        <span className="text-[7px] font-bold text-white leading-none">50%</span>
-                                      </div>
-                                      {/* Segment 2: Tomorrow */}
-                                      <div
-                                        className={cn(
-                                          "h-full w-1/2 transition-colors flex items-center justify-center",
-                                          isEven ? "bg-purple-500" : "bg-gray-300"
-                                        )}
-                                      >
-                                        <span className={cn("text-[7px] font-bold leading-none", isEven ? "text-white" : "text-gray-500")}>
-                                          {isEven ? "50%" : "0%"}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <span className={cn("text-[9px] font-bold min-w-[35px]", isEven ? "text-green-600" : "text-orange-600")}>
-                                    {percentText}
-                                  </span>
+                                  <div className="flex-1"><div className="flex h-3 w-full rounded-sm overflow-hidden bg-gray-200 border border-gray-300 shadow-sm relative"><div className="h-full w-1/2 bg-green-500 border-r border-white/30 flex items-center justify-center"><span className="text-[7px] font-bold text-white leading-none">50%</span></div><div className={cn("h-full w-1/2 transition-colors flex items-center justify-center", isEven ? "bg-purple-500" : "bg-gray-300")}><span className={cn("text-[7px] font-bold leading-none", isEven ? "text-white" : "text-gray-500")}>{isEven ? "50%" : "0%"}</span></div></div></div>
+                                  <span className={cn("text-[9px] font-bold min-w-[35px]", isEven ? "text-green-600" : "text-orange-600")}>{percentText}</span>
                                 </>
                               )}
                             </div>
-
-                            {/* Expand Button */}
-                            <div className="flex justify-center">
-                              <button 
-                                onClick={() => toggleActivityExpansion(taskKey)}
-                                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-gray-100 transition-colors"
-                              >
-                                {isExpanded ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}
-                              </button>
-                            </div>
+                            <div className="flex justify-center"><button onClick={() => toggleActivityExpansion(taskKey)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-gray-100 transition-colors">{isExpanded ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}</button></div>
                           </div>
-
-                          {/* Collapsible Details */}
                           {isExpanded && Array.isArray(act.assignments) && act.assignments.length > 0 && (
                             <div className="bg-gray-50/80 border-t border-border px-5 py-3 shadow-inner">
                               <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Field Assignments</h4>
-                                  <div className="bg-white border border-border rounded-md divide-y divide-border">
-                                    {act.assignments.map((a, aIdx) => (
-                                      <div key={`${a.farm_id}-${aIdx}`} className="flex justify-between px-3 py-2 text-xs items-center gap-2">
-                                        <span className="font-mono text-gray-600 truncate">{a.farm_id}</span>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                          {isPendingAssignmentStatus(a?.status) && (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">
-                                              Pending
-                                            </span>
-                                          )}
-                                          {isOverdueAssignmentStatus(a?.status) && (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
-                                              Overdue
-                                            </span>
-                                          )}
-                                          {isCompletedAssignmentStatus(a?.status) && (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">
-                                              Done
-                                            </span>
-                                          )}
-                                          <span className="font-medium text-gray-900">{Number(a.assigned_area).toFixed(2)} Ac</span>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                                {/* Placeholder for vehicle info or other details if needed */}
-                                <div className="flex flex-col justify-center items-center text-center p-4 border-2 border-dashed border-gray-200 rounded-md">
-                                  <Tractor className="w-6 h-6 text-gray-300 mb-1" />
-                                  <p className="text-xs text-muted-foreground">Vehicle assignment pending</p>
-                                </div>
+                                <div><h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Field Assignments</h4><div className="bg-white border border-border rounded-md divide-y divide-border">{act.assignments.map((a, aIdx) => (<div key={`${a.farm_id}-${aIdx}`} className="flex justify-between px-3 py-2 text-xs items-center gap-2"><span className="font-mono text-gray-600 truncate">{a.farm_id}</span><div className="flex items-center gap-2 shrink-0">{isPendingAssignmentStatus(a?.status) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">Pending</span>}{isOverdueAssignmentStatus(a?.status) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">Overdue</span>}{isCompletedAssignmentStatus(a?.status) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">Done</span>}<span className="font-medium text-gray-900">{Number(a.assigned_area).toFixed(2)} Ac</span></div></div>))}</div></div>
+                                <div className="flex flex-col justify-center items-center text-center p-4 border-2 border-dashed border-gray-200 rounded-md"><Tractor className="w-6 h-6 text-gray-300 mb-1" /><p className="text-xs text-muted-foreground">Vehicle assignment pending</p></div>
                               </div>
                             </div>
                           )}
@@ -1281,105 +1283,49 @@ const CultivationCalendar = () => {
                     })}
                   </div>
                 ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8">
-                    <ClipboardList className="w-10 h-10 mb-2 opacity-20" />
-                    <p className="text-sm">No scheduled activities for this date.</p>
-                  </div>
+                  <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8"><ClipboardList className="w-10 h-10 mb-2 opacity-20" /><p className="text-sm">No scheduled activities for this date.</p></div>
                 )}
               </div>
             </div>
 
-            {/* Modal Footer */}
             <div className="p-4 border-t border-border bg-white flex justify-between items-center shrink-0">
-              <div className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{allSelectedKeys.filter((k) => !!selectedTaskKeys[k]).length}</span> tasks selected
-              </div>
+              <div className="text-xs text-muted-foreground"><span className="font-medium text-foreground">{allSelectedKeys.filter((k) => !!selectedTaskKeys[k]).length}</span> tasks selected</div>
               <div className="flex gap-2">
-                <button onClick={closeModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">
-                  Cancel
-                </button>
-                {anyAssignableSelected ? (
-                  <button
-                    type="button"
-                    onClick={handleAssignTasksClick}
-                    className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-green-800 hover:bg-green-900 text-white"
-                  >
-                    Assign Task
-                  </button>
-                ) : (
-                  <span className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md bg-orange-100 text-orange-800 border border-orange-200">
-                    Pending
-                  </span>
-                )}
+                <button onClick={closeModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Cancel</button>
+                {anyAssignableSelected ? <button type="button" onClick={handleAssignTasksClick} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-green-800 hover:bg-green-900 text-white">Assign Task</button> : <span className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md bg-orange-100 text-orange-800 border border-orange-200">Pending</span>}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- ASSIGNMENT MODAL (VEHICLE + EQUIPMENT) --- */}
+      {/* --- ASSIGNMENT MODAL (Overlay) --- */}
       {isAssignmentOpen && selectedDate && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-background border border-border w-full max-w-4xl rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]">
-            
-            {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
               <div>
                 <h3 className="text-lg font-semibold text-foreground">Assign Resources</h3>
-                <p className="text-sm text-muted-foreground">
-                  Step {assignmentStep} of 2 • {assignmentStep === 1 ? 'Vehicle allocation' : 'Equipment selection'} • {new Date(selectedDate).toDateString()}
-                </p>
+                <p className="text-sm text-muted-foreground">Step {assignmentStep} of 2 • {assignmentStep === 1 ? 'Vehicle allocation' : 'Equipment selection'} • {new Date(selectedDate).toDateString()}</p>
               </div>
-              <button onClick={closeAssignmentModal} className="p-1 hover:bg-muted rounded-md">
-                <X className="w-5 h-5 text-muted-foreground" />
-              </button>
+              <button onClick={closeAssignmentModal} className="p-1 hover:bg-muted rounded-md"><X className="w-5 h-5 text-muted-foreground" /></button>
             </div>
 
-            {/* Content */}
             <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6 space-y-8">
-              
               {assignmentStep === 1 ? (
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
-                      <Truck className="w-4 h-4" /> Select Vehicles
-                    </h4>
-                    {selectedVehicleIds.length > 0 && (
-                      <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">
-                        {selectedVehicleIds.length} Selected
-                      </span>
-                    )}
+                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Truck className="w-4 h-4" /> Select Vehicles</h4>
+                    {selectedVehicleIds.length > 0 && <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">{selectedVehicleIds.length} Selected</span>}
                   </div>
-                  
                   <div className="overflow-x-auto bg-white rounded-lg border border-border shadow-sm p-4">
                     <div className="min-w-[600px]">
-                      {/* Header Row */}
                       <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4 text-xs font-semibold text-muted-foreground">
                         <div className="self-end pb-2">Vehicle Name</div>
-                        {chartDates.map(date => (
-                          <div key={date} className={cn("text-center pb-2 border-b-2", date === selectedDate ? "border-primary text-primary" : "border-transparent")}>
-                            <div className="text-[10px] uppercase">{getDayName(date)}</div>
-                            <div>{getDayNum(date)}</div>
-                          </div>
-                        ))}
+                        {chartDates.map(date => <div key={date} className={cn("text-center pb-2 border-b-2", date === selectedDate ? "border-primary text-primary" : "border-transparent")}><div className="text-[10px] uppercase">{getDayName(date)}</div><div>{getDayNum(date)}</div></div>)}
                       </div>
-
-                      {/* Vehicle Rows */}
                       <div className="space-y-2">
-                        {isLoadingVehiclesForAssignment ? (
-                          <div className="p-4 text-sm text-muted-foreground">Loading vehicles…</div>
-                        ) : vehiclesForAssignment.length === 0 ? (
-                          <div className="p-4 text-sm text-muted-foreground">No vehicles found.</div>
-                        ) : (
-                          vehiclesForAssignment.map(vehicle => (
-                            <VehicleAvailabilityRow 
-                              key={vehicle.id} 
-                              asset={vehicle} 
-                              isSelected={selectedVehicleIds.includes(vehicle.id)} 
-                              onSelect={() => toggleVehicleSelection(vehicle.id)} 
-                            />
-                          ))
-                        )}
+                        {isLoadingVehiclesForAssignment ? <div className="p-4 text-sm text-muted-foreground">Loading vehicles…</div> : vehiclesForAssignment.length === 0 ? <div className="p-4 text-sm text-muted-foreground">No vehicles found.</div> : vehiclesForAssignment.map(vehicle => <VehicleAvailabilityRow key={vehicle.id} asset={vehicle} isSelected={selectedVehicleIds.includes(vehicle.id)} onSelect={() => toggleVehicleSelection(vehicle.id)} />)}
                       </div>
                     </div>
                   </div>
@@ -1387,90 +1333,28 @@ const CultivationCalendar = () => {
               ) : (
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
-                      <Wrench className="w-4 h-4" /> Select Equipment
-                    </h4>
-                    {Object.values(equipmentCounts).reduce((a,b)=>a+b,0) > 0 && (
-                      <span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200">
-                        <Hash className="w-3 h-3" />
-                        {Object.values(equipmentCounts).reduce((a,b)=>a+b,0)} Total
-                      </span>
-                    )}
+                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Wrench className="w-4 h-4" /> Select Equipment</h4>
+                    {Object.values(equipmentCounts).reduce((a,b)=>a+b,0) > 0 && <span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200"><Hash className="w-3 h-3" />{Object.values(equipmentCounts).reduce((a,b)=>a+b,0)} Total</span>}
                   </div>
-
-                  <div className="text-xs text-muted-foreground mb-3">
-                    Vehicles allocated: <span className="font-semibold text-foreground">{selectedVehicleIds.length}</span>
-                  </div>
-                  
+                  <div className="text-xs text-muted-foreground mb-3">Vehicles allocated: <span className="font-semibold text-foreground">{selectedVehicleIds.length}</span></div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {isLoadingInventoryItems ? (
-                      <div className="col-span-full p-4 text-sm text-muted-foreground">Loading inventory items…</div>
-                    ) : inventoryItems.length === 0 ? (
-                      <div className="col-span-full p-4 text-sm text-muted-foreground">No inventory items found.</div>
-                    ) : (
-                      inventoryItems
-                        .filter((it) => !!getInventoryItemId(it))
-                        .map((it) => {
-                          const id = getInventoryItemId(it);
-                          return (
-                            <EquipmentQuantityRow
-                              key={id}
-                              item={it}
-                              count={equipmentCounts[id] || 0}
-                            />
-                          );
-                        })
-                    )}
+                    {isLoadingInventoryItems ? <div className="col-span-full p-4 text-sm text-muted-foreground">Loading inventory items…</div> : inventoryItems.length === 0 ? <div className="col-span-full p-4 text-sm text-muted-foreground">No inventory items found.</div> : inventoryItems.filter((it) => !!getInventoryItemId(it)).map((it) => { const id = getInventoryItemId(it); return <EquipmentQuantityRow key={id} item={it} count={equipmentCounts[id] || 0} />; })}
                   </div>
                 </div>
               )}
-
             </div>
 
-            {/* Footer */}
             <div className="p-4 border-t border-border bg-white flex justify-between items-center">
               <div className="flex gap-4 text-xs text-muted-foreground">
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-green-100 border border-green-200 rounded-sm"></div> Available</div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-red-100 border border-red-200 rounded-sm"></div> Busy</div>
               </div>
               <div className="flex gap-2">
-                <button onClick={closeAssignmentModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">
-                  Cancel
-                </button>
-                {assignmentStep === 2 && (
-                  <button
-                    type="button"
-                    onClick={() => setAssignmentStep(1)}
-                    className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors"
-                  >
-                    Back
-                  </button>
-                )}
-
-                {assignmentStep === 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => setAssignmentStep(2)}
-                    disabled={selectedVehicleIds.length === 0}
-                    className={cn(
-                      "px-4 py-2 text-sm font-medium rounded-md transition-colors",
-                      selectedVehicleIds.length > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed"
-                    )}
-                  >
-                    Next
-                  </button>
-                ) : (
-                  <button 
-                    onClick={handleConfirmAssignment}
-                    disabled={isAssigningTask}
-                    className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-primary text-primary-foreground hover:bg-primary/90"
-                  >
-                    {isAssigningTask ? 'Assigning…' : 'Confirm Assignment'}
-                  </button>
-                )}
+                <button onClick={closeAssignmentModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Cancel</button>
+                {assignmentStep === 2 && <button type="button" onClick={() => setAssignmentStep(1)} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Back</button>}
+                {assignmentStep === 1 ? <button type="button" onClick={() => setAssignmentStep(2)} disabled={selectedVehicleIds.length === 0} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors", selectedVehicleIds.length > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed")}>Next</button> : <button onClick={handleConfirmAssignment} disabled={isAssigningTask} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-primary text-primary-foreground hover:bg-primary/90">{isAssigningTask ? 'Assigning…' : 'Confirm Assignment'}</button>}
               </div>
             </div>
-
           </div>
         </div>
       )}

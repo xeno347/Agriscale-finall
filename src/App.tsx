@@ -23,6 +23,9 @@ import TasksBeta from "./pages/TasksBeta";
 // New Import
 import VehicleManagement from "./pages/VehicleManagement";
 
+// Field Visit page (new route)
+// FieldVisit page removed until ./pages/FieldVisit is added
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -43,6 +46,9 @@ const App = () => (
           <Route path="/cultivation-master/*" element={<AppLayout><CultivationMaster /></AppLayout>} />
           <Route path="/cultivation-plan" element={<AppLayout><CultivationPlan /></AppLayout>} />
           <Route path="/cultivation-plan/create" element={<AppLayout><CreateCultivationPlan /></AppLayout>} />
+
+          {/* Field Visit (not in sidenav) */}
+          {/* Route removed until ./pages/FieldVisit exists */}
 
           {/* Harvest Management */}
           <Route path="/harvest-planning" element={<AppLayout><HarvestPlanning /></AppLayout>} />
