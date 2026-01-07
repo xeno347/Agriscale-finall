@@ -277,6 +277,7 @@ const TasksBeta = () => {
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [isUpdatingTask, setIsUpdatingTask] = useState(false);
   const [isFieldVisitOpen, setIsFieldVisitOpen] = useState(true);
+  const [isOtherTasksOpen, setIsOtherTasksOpen] = useState(true);
 
   const isFieldVisitTask = (task: Task) => String(task?.activity || "").toLowerCase().includes("visit");
   const { fieldVisitTasks, otherTasks } = useMemo(() => {
@@ -583,9 +584,30 @@ const TasksBeta = () => {
       {/* Section 2: Other Tasks */}
       <div className="bg-white rounded-xl border overflow-hidden">
         <div className="px-6 py-4 border-b bg-white">
-          <h2 className="text-sm font-bold text-foreground">Other Tasks</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-bold text-foreground">Other Tasks</h2>
+            <button
+              type="button"
+              onClick={() => setIsOtherTasksOpen((v) => !v)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+              aria-expanded={isOtherTasksOpen}
+              aria-controls="other-tasks-table"
+            >
+              {isOtherTasksOpen ? (
+                <>
+                  <ChevronDown className="w-4 h-4" /> Collapse
+                </>
+              ) : (
+                <>
+                  <ChevronRight className="w-4 h-4" /> Expand
+                </>
+              )}
+            </button>
+          </div>
         </div>
-        <table className="w-full text-sm">
+
+        {isOtherTasksOpen && (
+        <table id="other-tasks-table" className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
             <tr>
               <th className="px-6 py-3 text-left">Task</th>
@@ -659,6 +681,7 @@ const TasksBeta = () => {
             )}
           </tbody>
         </table>
+        )}
       </div>
 
       {isModalOpen && selectedTask && (
