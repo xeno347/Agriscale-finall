@@ -492,11 +492,11 @@ const TasksBeta = () => {
             >
               {isFieldVisitOpen ? (
                 <>
-                  <ChevronDown className="w-4 h-4" /> Collapse
+                  <ChevronDown className="w-4 h-4" /> collapse
                 </>
               ) : (
                 <>
-                  <ChevronRight className="w-4 h-4" /> Expand
+                  <ChevronRight className="w-4 h-4" /> expand
                 </>
               )}
             </button>
