@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 
 // ✅ Import the Sidebar
 import { TaskSidebar, SidebarTask } from '@/components/cultivation/TaskSidebar';
+import { InlineTimeline } from '@/components/cultivation/InlineTimeline';
 
 // --- Types ---
 interface ApiActivity {
@@ -288,13 +289,15 @@ monthDate,
 activities,
 onDateClick,
 currentDateKey,
-pendingByDate
+pendingByDate,
+onFieldVisitClick,
 }: {
 monthDate: Date;
 activities: CalendarData;
 onDateClick: (dateStr: string) => void;
 currentDateKey: string;
 pendingByDate: PendingByDate;
+onFieldVisitClick: (monthDate: Date) => void;
 }) => {
 const year = monthDate.getFullYear();
 const month = monthDate.getMonth();
@@ -328,10 +331,67 @@ return dayActs.every(
 );
 };
 
+const monthVisitStats = useMemo(() => {
+let total = 0;
+let done = 0;
+
+for (let d = 1; d <= daysInMonth; d++) {
+const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const dayActs = activities[dateStr];
+if (!Array.isArray(dayActs) || dayActs.length === 0) continue;
+
+const visitActs = dayActs.filter((a) => String(a?.activity || '').toLowerCase().includes('visit'));
+for (const act of visitActs) {
+const assignments = Array.isArray(act.assignments) ? act.assignments : [];
+for (const a of assignments) {
+const acres = Number(a?.assigned_area) || 0;
+total += acres;
+if (isCompletedAssignmentStatus(a?.status)) done += acres;
+}
+}
+}
+
+const progress = total > 0 ? Math.max(0, Math.min(1, done / total)) : 0;
+return { total, done, progress };
+}, [activities, daysInMonth, month, year]);
+
+const progressPct = Math.round(monthVisitStats.progress * 100);
+const r = 10;
+const c = 2 * Math.PI * r;
+const dash = monthVisitStats.progress * c;
+const gap = c - dash;
+
 return (
 <div className="bg-card border border-border rounded-xl p-4 flex flex-col h-full bg-white shadow-sm hover:shadow-md transition-shadow">
-<div className="text-center mb-6 pt-2">
+<div className="flex items-start justify-between mb-6 pt-2 gap-3">
 <h3 className="text-sm font-medium text-foreground/80">{monthName} {year}</h3>
+
+<button
+type="button"
+onClick={() => onFieldVisitClick(monthDate)}
+title="View field visit weeks"
+aria-label="View field visit weeks"
+className="relative shrink-0 w-11 h-11 rounded-full bg-background border border-border hover:bg-muted transition-colors"
+>
+<svg viewBox="0 0 28 28" className="absolute inset-1 w-auto h-auto pointer-events-none">
+<circle cx="14" cy="14" r={r} fill="none" stroke="currentColor" strokeWidth="4" className="text-muted-foreground/25" />
+<circle
+cx="14"
+cy="14"
+r={r}
+fill="none"
+stroke="currentColor"
+strokeWidth="4"
+strokeLinecap="round"
+strokeDasharray={`${dash} ${gap}`}
+transform="rotate(-90 14 14)"
+className="text-green-600"
+/>
+</svg>
+<span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-foreground leading-none">
+{progressPct}%
+</span>
+</button>
 </div>
 <div className="grid grid-cols-7 mb-4">
 {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
@@ -423,94 +483,9 @@ textClass
 );
 };
 
-// --- NEW: Inline Field Visit Timeline kept on the same page (no separate route) ---
-const InlineTimeline = ({ activities }: { activities: CalendarData }) => {
-const [selectedWeekIndex, setSelectedWeekIndex] = useState(0);
-const today = new Date();
-today.setHours(0,0,0,0);
-const startOfThisWeek = new Date(today);
-startOfThisWeek.setDate(today.getDate() - today.getDay());
-
-const weeks = Array.from({ length: 8 }).map((_, i) => {
-const d = new Date(startOfThisWeek);
-d.setDate(startOfThisWeek.getDate() + i * 7);
-return { start: d, key: formatDateKey(d), label: `${d.toLocaleString('default', { month: 'short' })} ${d.getDate()}` };
-});
-
-const selectedWeek = weeks[selectedWeekIndex];
-
-const totalVisits = selectedWeek
-? (() => {
-const days = Array.from({ length: 7 }).map((_, i) => {
-const d = new Date(selectedWeek.start);
-d.setDate(selectedWeek.start.getDate() + i);
-const k = formatDateKey(d);
-const acts = activities[k] || [];
-return acts.filter((a) => a.activity.toLowerCase().includes('visit')).length;
-});
-return days.reduce((s, n) => s + n, 0);
-})()
-: 0;
-
-return (
-<div className="bg-white border border-border rounded-lg p-4 shadow-sm flex gap-4">
-<div className="w-56 border-r pr-3">
-<div className="text-sm font-semibold mb-3">Weeks</div>
-<div className="space-y-2">
-{weeks.map((w, idx) => (
-<button
-key={w.key}
-onClick={() => setSelectedWeekIndex(idx)}
-className={cn(
-"w-full text-left p-2 rounded-md transition-colors",
-idx === selectedWeekIndex ? "bg-green-50 border border-green-200" : "hover:bg-gray-50"
-)}
->
-<div className="text-xs font-bold">{w.label}</div>
-<div className="text-[11px] text-muted-foreground">{w.key}</div>
-</button>
-))}
-</div>
-</div>
-
-<div className="flex-1">
-<div className="flex items-center justify-between mb-2">
-<div>
-<h4 className="text-sm font-bold">Week details</h4>
-<div className="text-xs text-muted-foreground">{selectedWeek?.label} • {totalVisits} visits</div>
-</div>
-<div className="text-xs text-muted-foreground">Current</div>
-</div>
-
-<div className="border rounded-md p-3 bg-gray-50 min-h-[120px]">
-{selectedWeek ? (
-<div className="space-y-2">
-{Array.from({ length: 7 }).map((_, i) => {
-const d = new Date(selectedWeek.start);
-d.setDate(selectedWeek.start.getDate() + i);
-const k = formatDateKey(d);
-const acts = activities[k] || [];
-const visits = acts.filter((a) => a.activity.toLowerCase().includes('visit'));
-return (
-<div key={k} className="flex items-center justify-between p-2 bg-white border rounded">
-<div className="text-sm">{d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</div>
-<div className="text-xs text-muted-foreground">{visits.length} visit(s)</div>
-</div>
-);
-})}
-</div>
-) : (
-<div className="text-sm text-muted-foreground">No week selected</div>
-)}
-</div>
-</div>
-</div>
-);
-};
-
 // --- Main Component ---
 const CultivationCalendar = () => {
-const [showFieldVisit, setShowFieldVisit] = useState(false);
+const [timelineMonth, setTimelineMonth] = useState<Date | null>(null);
 const [baseDate] = useState(new Date());
 const [selectedDate, setSelectedDate] = useState<string | null>(null);
 const [isModalOpen, setIsModalOpen] = useState(false);
@@ -990,7 +965,6 @@ return (
 <p className="text-muted-foreground mt-1">Manage your cultivation schedule and track pending tasks.</p>
 </div>
 <div className="flex items-center gap-3">
-<button onClick={() => setShowFieldVisit((s) => !s)} className="px-3 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">{showFieldVisit ? 'Hide Field Visit' : 'View Field Visit'}</button>
 <button className="flex items-center gap-2 bg-green-800 hover:bg-green-900 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-sm">
 <Plus className="w-4 h-4" /> Create Plan
 </button>
@@ -1004,9 +978,13 @@ return (
 </div>
 
 {/* ✅ REMOVED: Weekly Field Visit Calendar Section (Horizontal Strip) */}
-{/* Inline Timeline List is displayed if toggled */}
-{!loading && !error && showFieldVisit && (
-<InlineTimeline activities={activitiesData} />
+{/* Inline Timeline is displayed when month progress is clicked */}
+{!loading && !error && timelineMonth && (
+<InlineTimeline
+activities={activitiesData}
+monthDate={timelineMonth}
+onClose={() => setTimelineMonth(null)}
+/>
 )}
 
 {!loading && !error && (
@@ -1019,6 +997,12 @@ activities={activitiesData}
 onDateClick={handleDateClick}
 currentDateKey={currentDateKey}
 pendingByDate={pendingByDate}
+onFieldVisitClick={(m) =>
+setTimelineMonth((prev) => {
+if (prev && prev.getFullYear() === m.getFullYear() && prev.getMonth() === m.getMonth()) return null;
+return new Date(m);
+})
+}
 />
 ))}
 </div>
@@ -1029,6 +1013,7 @@ pendingByDate={pendingByDate}
 pendingToday={pendingToday}
 carryForward={carryForward}
 earlyCompletion={earlyCompletion}
+showPending={false}
 />
 
 {/* --- MODALS --- */}

@@ -354,14 +354,26 @@ const DraggablePanel = ({
   );
 };
 
-export const TaskSidebar = ({ pendingToday, carryForward, earlyCompletion }: { pendingToday: SidebarTask[], carryForward: SidebarTask[], earlyCompletion?: SidebarTask[] }) => {
+export const TaskSidebar = ({
+  pendingToday,
+  carryForward,
+  earlyCompletion,
+  showPending = true,
+}: {
+  pendingToday: SidebarTask[];
+  carryForward: SidebarTask[];
+  earlyCompletion?: SidebarTask[];
+  showPending?: boolean;
+}) => {
   const displayPending = pendingToday.length > 0 ? pendingToday : DUMMY_PENDING;
   const displayCarry = carryForward.length > 0 ? carryForward : DUMMY_CARRY_FORWARD;
   const displayEarly = (earlyCompletion && earlyCompletion.length > 0) ? earlyCompletion : DUMMY_EARLY;
 
   return (
     <>
-      <DraggablePanel title="Pending Tasks" tasks={displayPending} colorTheme="orange" initialTop="120px" icon={Clock} showAssign={true} />
+      {showPending && (
+        <DraggablePanel title="Pending Tasks" tasks={displayPending} colorTheme="orange" initialTop="120px" icon={Clock} showAssign={true} />
+      )}
       <DraggablePanel title="Carry Forward" tasks={displayCarry} colorTheme="red" initialTop="200px" icon={AlertCircle} showAssign={true} />
       <DraggablePanel title="Early Completion" tasks={displayEarly} colorTheme="green" initialTop="280px" icon={FastForward} showAssign={false} />
     </>
