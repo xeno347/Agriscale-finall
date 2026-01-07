@@ -469,7 +469,18 @@ const CreateCultivationPlan: React.FC = () => {
 
   // Plan metadata state and loading
   const [planMetaLoading, setPlanMetaLoading] = useState(false);
-  const [planMeta, setPlanMeta] = useState<{ average_work_quantity_per_day: number; total_area: number; day_per_task: number } | null>(null);
+  type DayPerTaskMap = Record<string, { days_needed: number; day_offset: number; work_quantity: number }>;
+  const [planMeta, setPlanMeta] = useState<{ day_per_task: DayPerTaskMap; average_work_quantity: number } | null>(null);
+
+  const workQtyByActivity = useMemo(() => {
+    const map = new Map<string, number>();
+    const src = planMeta?.day_per_task;
+    if (!src) return map;
+    for (const [name, meta] of Object.entries(src)) {
+      map.set(String(name).trim().toLowerCase(), Number((meta as any)?.work_quantity) || 0);
+    }
+    return map;
+  }, [planMeta?.day_per_task]);
 
   const navigate = useNavigate();
 
@@ -522,13 +533,21 @@ const CreateCultivationPlan: React.FC = () => {
     return apiMasterPlans.find((p) => p.id === masterPlanId) || null;
   }, [apiMasterPlans, masterPlanId]);
 
-  // Calculate average work quantity for all activities in the selected API master plan
-  const avgWorkQty = useMemo(() => {
+  // Fallback: calculate average work quantity from master plan (if API meta isn't available)
+  const avgWorkQtyFallback = useMemo(() => {
     if (!selectedApiMasterPlan || !selectedApiMasterPlan.plan_list || !selectedApiMasterPlan.plan_list.length) return null;
     // Try to find a numeric workQty property in each activity
     const total = selectedApiMasterPlan.plan_list.reduce((sum: number, act: any) => sum + (Number(act.workQty) || 0), 0);
     return (total / selectedApiMasterPlan.plan_list.length).toFixed(2);
   }, [selectedApiMasterPlan]);
+
+  const avgWorkQtyDisplay = useMemo(() => {
+    if (planMetaLoading) return 'Loading...';
+    if (typeof planMeta?.average_work_quantity === 'number') {
+      return planMeta.average_work_quantity.toFixed(2);
+    }
+    return avgWorkQtyFallback ?? '--';
+  }, [avgWorkQtyFallback, planMeta?.average_work_quantity, planMetaLoading]);
 
   // Helper to get selected master plan's activities for highlighting (local logic)
   const getHighlights = (baseDate: Date | null, planId: string | null) => {
@@ -667,16 +686,21 @@ const CreateCultivationPlan: React.FC = () => {
           body: JSON.stringify({
             day_0_date: format(date, 'yyyy-MM-dd'),
             master_cultivation_plan_id: masterPlanId,
-            day_per_task: planMeta?.day_per_task ?? 1,
+            day_per_task: planMeta?.day_per_task ?? {},
           }),
         });
         if (!response.ok) throw new Error('Failed to fetch date mapping');
         const data = await response.json();
         if (data && Array.isArray(data.date_mapping)) {
-          setRawMappedData(data.date_mapping);
+          const enriched = data.date_mapping.map((item: any) => {
+            const activityName = String(item?.activity || '').trim();
+            const work_quantity = workQtyByActivity.get(activityName.toLowerCase()) ?? 0;
+            return { ...item, work_quantity };
+          });
+          setRawMappedData(enriched);
           const highlights: { [date: string]: string } = {};
           const counts: { [date: string]: number } = {};
-          data.date_mapping.forEach((item: any) => {
+          enriched.forEach((item: any) => {
             if (!item || !item.date || !item.activity) return;
             const dates = Array.isArray(item.date) ? item.date : [item.date];
             dates.forEach((d: string) => {
@@ -767,7 +791,7 @@ const CreateCultivationPlan: React.FC = () => {
         </div>
         <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow p-5 flex items-center justify-between">
           <span className="text-lg font-medium text-gray-700">Average Work Quantity:</span>
-          <span className="text-2xl font-bold text-blue-700">{planMetaLoading ? 'Loading...' : (avgWorkQty !== null ? avgWorkQty : '--')}</span>
+          <span className="text-2xl font-bold text-blue-700">{avgWorkQtyDisplay}</span>
         </div>
       </div>
 

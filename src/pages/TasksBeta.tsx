@@ -4,6 +4,8 @@ import {
   Calendar as CalendarIcon,
   MapPin,
   Tractor,
+  ChevronDown,
+  ChevronRight,
   X,
   Save,
   AlertCircle,
@@ -274,6 +276,16 @@ const TasksBeta = () => {
   const [inputAcres, setInputAcres] = useState("");
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [isUpdatingTask, setIsUpdatingTask] = useState(false);
+  const [isFieldVisitOpen, setIsFieldVisitOpen] = useState(true);
+
+  const isFieldVisitTask = (task: Task) => String(task?.activity || "").toLowerCase().includes("visit");
+  const { fieldVisitTasks, otherTasks } = useMemo(() => {
+    const list = Array.isArray(tasks) ? tasks : [];
+    return {
+      fieldVisitTasks: list.filter(isFieldVisitTask),
+      otherTasks: list.filter((t) => !isFieldVisitTask(t)),
+    };
+  }, [tasks]);
 
   const BASE_URL = useMemo(() => getBaseUrl().replace(/\/$/, ""), []);
   const wsRef = useRef<WebSocket | null>(null);
@@ -465,7 +477,114 @@ const TasksBeta = () => {
         <p className="text-sm font-semibold">{new Date().toDateString()}</p>
       </div>
 
+      {/* Section 1: Field Visit Tasks */}
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="px-6 py-4 border-b bg-white">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-bold text-foreground">Field Visit Tasks</h2>
+            <button
+              type="button"
+              onClick={() => setIsFieldVisitOpen((v) => !v)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+              aria-expanded={isFieldVisitOpen}
+              aria-controls="field-visit-tasks-table"
+            >
+              {isFieldVisitOpen ? (
+                <>
+                  <ChevronDown className="w-4 h-4" /> Collapse
+                </>
+              ) : (
+                <>
+                  <ChevronRight className="w-4 h-4" /> Expand
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {isFieldVisitOpen && (
+        <table id="field-visit-tasks-table" className="w-full text-sm">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th className="px-6 py-3 text-left">Task</th>
+              <th className="px-6 py-3">Activity</th>
+              <th className="px-6 py-3">Land</th>
+              <th className="px-6 py-3">Progress</th>
+              <th className="px-6 py-3">Allocated</th>
+              <th className="px-6 py-3">Done</th>
+              <th className="px-6 py-3">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoadingTasks ? (
+              <tr className="border-t">
+                <td className="px-6 py-6 text-sm text-muted-foreground" colSpan={7}>
+                  Loading tasks…
+                </td>
+              </tr>
+            ) : fieldVisitTasks.length === 0 ? (
+              <tr className="border-t">
+                <td className="px-6 py-6 text-sm text-muted-foreground" colSpan={7}>
+                  No field visit tasks found.
+                </td>
+              </tr>
+            ) : (
+              fieldVisitTasks.map((task) => (
+                <tr key={task.id} className="border-t">
+                  <td className="px-6 py-3 font-mono">{task.task_no}</td>
+                  <td className="px-6 py-3 flex items-center gap-2">
+                    <Tractor className="w-4 h-4 text-gray-400" />
+                    {task.activity}
+                  </td>
+                  <td className="px-6 py-3">
+                    <MapPin className="inline w-3 h-3 mr-1" />
+                    {task.farm_id}
+                  </td>
+                  <td className="px-6 py-3">
+                    <div className="w-full bg-gray-200 h-2 rounded">
+                      <div
+                        className={cn(
+                          "h-2 rounded",
+                          task.status === "Completed" ? "bg-green-500" : "bg-blue-500"
+                        )}
+                        style={{
+                          width: `${Math.max(
+                            0,
+                            Math.min(
+                              100,
+                              task.work_allocated > 0
+                                ? (task.work_done / task.work_allocated) * 100
+                                : 0
+                            )
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </td>
+                  <td className="px-6 py-3 text-right">{task.work_allocated} Ac</td>
+                  <td className="px-6 py-3 text-right font-bold">{task.work_done} Ac</td>
+                  <td className="px-6 py-3 text-center">
+                    <button
+                      disabled={task.status === "Completed"}
+                      onClick={() => handleMarkDoneClick(task)}
+                      className="px-3 py-1 border rounded text-xs hover:bg-gray-900 hover:text-white disabled:opacity-50"
+                    >
+                      {task.status === "Completed" ? "Completed" : "Update"}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+        )}
+      </div>
+
+      {/* Section 2: Other Tasks */}
+      <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="px-6 py-4 border-b bg-white">
+          <h2 className="text-sm font-bold text-foreground">Other Tasks</h2>
+        </div>
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
             <tr>
@@ -485,58 +604,56 @@ const TasksBeta = () => {
                   Loading tasks…
                 </td>
               </tr>
-            ) : tasks.length === 0 ? (
+            ) : otherTasks.length === 0 ? (
               <tr className="border-t">
                 <td className="px-6 py-6 text-sm text-muted-foreground" colSpan={7}>
-                  No tasks found.
+                  No other tasks found.
                 </td>
               </tr>
             ) : (
-              tasks.map((task) => (
+              otherTasks.map((task) => (
                 <tr key={task.id} className="border-t">
-                <td className="px-6 py-3 font-mono">{task.task_no}</td>
-                <td className="px-6 py-3 flex items-center gap-2">
-                  <Tractor className="w-4 h-4 text-gray-400" />
-                  {task.activity}
-                </td>
-                <td className="px-6 py-3">
-                  <MapPin className="inline w-3 h-3 mr-1" />
-                  {task.farm_id}
-                </td>
-                <td className="px-6 py-3">
-                  <div className="w-full bg-gray-200 h-2 rounded">
-                    <div
-                      className={cn(
-                        "h-2 rounded",
-                        task.status === "Completed"
-                          ? "bg-green-500"
-                          : "bg-blue-500"
-                      )}
-                      style={{
-                        width: `${Math.max(
-                          0,
-                          Math.min(
-                            100,
-                            task.work_allocated > 0
-                              ? (task.work_done / task.work_allocated) * 100
-                              : 0
-                          )
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                </td>
-                <td className="px-6 py-3 text-right">{task.work_allocated} Ac</td>
-                <td className="px-6 py-3 text-right font-bold">{task.work_done} Ac</td>
-                <td className="px-6 py-3 text-center">
-                  <button
-                    disabled={task.status === "Completed"}
-                    onClick={() => handleMarkDoneClick(task)}
-                    className="px-3 py-1 border rounded text-xs hover:bg-gray-900 hover:text-white disabled:opacity-50"
-                  >
-                    {task.status === "Completed" ? "Completed" : "Update"}
-                  </button>
-                </td>
+                  <td className="px-6 py-3 font-mono">{task.task_no}</td>
+                  <td className="px-6 py-3 flex items-center gap-2">
+                    <Tractor className="w-4 h-4 text-gray-400" />
+                    {task.activity}
+                  </td>
+                  <td className="px-6 py-3">
+                    <MapPin className="inline w-3 h-3 mr-1" />
+                    {task.farm_id}
+                  </td>
+                  <td className="px-6 py-3">
+                    <div className="w-full bg-gray-200 h-2 rounded">
+                      <div
+                        className={cn(
+                          "h-2 rounded",
+                          task.status === "Completed" ? "bg-green-500" : "bg-blue-500"
+                        )}
+                        style={{
+                          width: `${Math.max(
+                            0,
+                            Math.min(
+                              100,
+                              task.work_allocated > 0
+                                ? (task.work_done / task.work_allocated) * 100
+                                : 0
+                            )
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </td>
+                  <td className="px-6 py-3 text-right">{task.work_allocated} Ac</td>
+                  <td className="px-6 py-3 text-right font-bold">{task.work_done} Ac</td>
+                  <td className="px-6 py-3 text-center">
+                    <button
+                      disabled={task.status === "Completed"}
+                      onClick={() => handleMarkDoneClick(task)}
+                      className="px-3 py-1 border rounded text-xs hover:bg-gray-900 hover:text-white disabled:opacity-50"
+                    >
+                      {task.status === "Completed" ? "Completed" : "Update"}
+                    </button>
+                  </td>
                 </tr>
               ))
             )}

@@ -98,7 +98,7 @@ id: string;
 name: string;
 type: string;
 category: 'Vehicle' | 'Equipment';
-schedule: Record<string, string>;
+schedule: Record<string, number>;
 }
 
 type ApiVehicle = {
@@ -654,30 +654,30 @@ setIsLoadingInventoryItems(false);
 }
 };
 
-const buildVehicleSchedule = (raw: any): Record<string, string> => {
+const buildVehicleSchedule = (raw: any): Record<string, number> => {
 if (!raw) return {};
 if (!Array.isArray(raw) && typeof raw === 'object') {
-const schedule: Record<string, string> = {};
+const schedule: Record<string, number> = {};
 for (const [k, v] of Object.entries(raw)) {
 if (!k) continue;
 if (typeof v === 'string') {
-schedule[k] = v;
+schedule[k] = 0;
 } else if (v && typeof v === 'object') {
-const task = (v as any)?.activity || (v as any)?.activity_type || (v as any)?.task || (v as any)?.type;
-schedule[k] = String(task || 'Busy');
+const acres = Number((v as any)?.acres_covered);
+schedule[k] = Number.isFinite(acres) ? acres : 0;
 } else {
-schedule[k] = 'Busy';
+schedule[k] = 0;
 }
 }
 return schedule;
 }
 if (Array.isArray(raw)) {
-const schedule: Record<string, string> = {};
+const schedule: Record<string, number> = {};
 for (const item of raw) {
 const date = item?.date || item?.day || item?.created_at;
 if (!date) continue;
-const task = item?.activity || item?.activity_type || item?.task || item?.type;
-schedule[String(date).slice(0, 10)] = String(task || 'Busy');
+const acres = Number(item?.acres_covered);
+schedule[String(date).slice(0, 10)] = Number.isFinite(acres) ? acres : 0;
 }
 return schedule;
 }
@@ -840,6 +840,24 @@ return { equipment_id: equipmentId, equipment_name: item?.item || equipmentId, q
 
 const payload = { feild_id: feildIds, assigned_acres: assignedAcres, vehicles, equipment };
 
+const totalAssignedAcres = assignedAcres.reduce((sum, x) => sum + (Number(x.assigned_acres) || 0), 0);
+
+const updateVehicleCalendar = async (vehicleId: string, acresCovered: number) => {
+const res = await fetch(`${BASE_URL}/admin_vehicles/update_vehicle_calander`, {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({
+date: selectedDate,
+acres_covered: acresCovered,
+vehicle_id: vehicleId,
+}),
+});
+const data: any = await res.json().catch(() => null);
+if (!res.ok) throw new Error(data?.message || 'Failed to update vehicle calendar');
+if (data?.success !== true) throw new Error(data?.message || 'Vehicle calendar did not return success');
+return data;
+};
+
 setIsAssigningTask(true);
 try {
 const res = await fetch(`${BASE_URL}/admin_cultivation/assign-task`, {
@@ -866,6 +884,21 @@ return await updateRes.json();
 });
 
 if (updateCalls.length > 0) await Promise.allSettled(updateCalls);
+
+// Update vehicle calendars for the selected vehicles
+const vehiclesCount = Math.max(1, vehicles.length);
+const acresPerVehicle = vehiclesCount > 0 ? totalAssignedAcres / vehiclesCount : 0;
+const vehicleCalendarCalls = vehicles.map((v) =>
+updateVehicleCalendar(String(v.vehicle_id), Number.isFinite(acresPerVehicle) ? acresPerVehicle : 0)
+);
+
+if (vehicleCalendarCalls.length > 0) {
+const results = await Promise.allSettled(vehicleCalendarCalls);
+const failed = results.filter((r) => r.status === 'rejected');
+if (failed.length > 0) {
+toast.error(`Vehicle calendar update failed for ${failed.length} vehicle(s)`);
+}
+}
 
 setPendingByDate((prev) => {
 const current = prev[selectedDate] ?? {};
@@ -901,25 +934,27 @@ return dates;
 const chartDates = getChartDates();
 
 const VehicleAvailabilityRow = ({ asset, isSelected, onSelect }: { asset: Asset, isSelected: boolean, onSelect: () => void }) => {
-const isBusyOnSelected = !!asset.schedule[selectedDate!];
 return (
 <div
-onClick={() => !isBusyOnSelected && onSelect()}
-className={cn("grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 p-2 rounded-lg border transition-all cursor-pointer items-center group", isSelected ? "border-primary bg-primary/5 ring-1 ring-primary" : isBusyOnSelected ? "border-transparent opacity-60 cursor-not-allowed" : "border-border hover:border-primary/50")}
+onClick={onSelect}
+className={cn(
+"grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 p-2 rounded-lg border transition-all cursor-pointer items-center group",
+isSelected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/50"
+)}
 >
 <div className="flex items-center gap-3 pr-2">
 <div className={cn("p-2 rounded-md border shadow-sm", isSelected ? "bg-primary text-primary-foreground" : "bg-white text-muted-foreground")}><Truck className="w-4 h-4" /></div>
 <div className="min-w-0"><div className="text-sm font-semibold truncate text-foreground">{asset.name}</div><div className="text-[10px] text-muted-foreground">{asset.type}</div></div>
 </div>
 {chartDates.map(date => {
-const taskName = asset.schedule[date];
-const isBusy = !!taskName;
+const acresCovered = asset.schedule[date];
+const isBusy = acresCovered !== undefined;
 return (
 <div key={date} className="flex justify-center h-full items-center">
 {isBusy ? (
 <div className="w-full h-8 bg-red-100 border border-red-200 rounded-md flex items-center justify-center group/tooltip relative">
-<span className="text-[10px] font-bold text-red-700">Busy</span>
-<div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap pointer-events-none z-10">{taskName}</div>
+<span className="text-[10px] font-bold text-red-700">{Number(acresCovered || 0).toFixed(0)} ac</span>
+<div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap pointer-events-none z-10">Acres covered: {Number(acresCovered || 0).toFixed(2)}</div>
 </div>
 ) : (
 <div className={cn("w-full h-8 border rounded-md flex items-center justify-center transition-colors", date === selectedDate ? (isSelected ? "bg-green-600 border-green-600 text-white" : "bg-green-100 border-green-200 text-green-700") : "bg-gray-50 border-gray-100")}>
