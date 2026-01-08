@@ -14,6 +14,7 @@ import {
   Layers,
   CheckSquare,
   Box,
+  Wrench // ✅ Added for Resource Management
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -148,7 +149,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
   return (
     <aside
       className={cn(
-        "sticky top-0 h-screen bg-white flex flex-col border-r border-gray-200 transition-all",
+        "sticky top-0 h-screen bg-white flex flex-col border-r border-gray-200 transition-all z-50",
         isCollapsed ? "w-[80px]" : "w-72"
       )}
     >
@@ -160,18 +161,25 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         )}
       >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow">
+          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow border border-gray-100">
             <img
-              src="/3f-logo.png"
-              alt="3F Logo"
+              src="/3f-logo.png" 
+              alt="Logo"
               className="w-7 h-7 object-contain"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                if(e.currentTarget.parentElement) {
+                    e.currentTarget.parentElement.innerText = 'FC';
+                    e.currentTarget.parentElement.classList.add('text-green-700', 'font-bold');
+                }
+              }}
             />
           </div>
 
           {!isCollapsed && (
             <div>
-              <h1 className="font-bold text-lg text-[#1e293b]">
-                SaiBioresources Pvt Ltd
+              <h1 className="font-bold text-lg text-[#1e293b] leading-tight">
+                SaiBioresources
               </h1>
               <p className="text-xs text-gray-500 font-medium">
                 Farm Connect
@@ -183,7 +191,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         {!isCollapsed && (
           <button
             onClick={() => setIsCollapsed(true)}
-            className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100"
+            className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
@@ -191,10 +199,10 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
       </div>
 
       {isCollapsed && (
-        <div className="flex justify-center py-3 border-b">
+        <div className="flex justify-center py-3 border-b border-gray-50">
           <button
             onClick={() => setIsCollapsed(false)}
-            className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100"
+            className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 transition-colors"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
@@ -202,7 +210,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
       )}
 
       {/* Navigation */}
-      <nav className="flex-1 p-3 space-y-2 overflow-y-auto">
+      <nav className="flex-1 p-3 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
         {/* Farm Management */}
         <NavGroup label="Farm Management" isSidebarCollapsed={isCollapsed}>
           <NavItem
@@ -224,9 +232,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             icon={UserCheck}
             label="Farmers"
           />
-        
-
-        <NavItem
+          <NavItem
             isSidebarCollapsed={isCollapsed}
             to="/blocks"
             icon={Layers}
@@ -264,11 +270,18 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             icon={Truck}
             label="Logistics"
           />
+          {/* ✅ Added Resource Management Page */}
+          <NavItem
+            isSidebarCollapsed={isCollapsed}
+            to="/resource-management"
+            icon={Wrench}
+            label="Resource Mgmt"
+          />
           <NavItem
             isSidebarCollapsed={isCollapsed}
             to="/vehicle-management"
             icon={Car}
-            label="Vehicle Management"
+            label="Vehicle List"
           />
           <NavItem
             isSidebarCollapsed={isCollapsed}
