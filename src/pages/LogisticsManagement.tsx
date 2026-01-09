@@ -1,430 +1,571 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { 
-  Truck, Upload, Search, Filter, 
-  MapPin, Clock, CheckCircle2, 
-  AlertCircle, Package, X 
+  Truck, MapPin, Calendar as CalendarIcon, 
+  Plus, CheckCircle2, 
+  Trash2, X, User, Check, 
+  ArrowLeft, Save, LayoutList, Download, 
+  ShieldCheck, AlertTriangle, FileText, Activity, MoreHorizontal, Clock,
+  ChevronRight, Fuel, Navigation
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // --- TYPES ---
-type TripStatus = 'scheduled' | 'loading' | 'in_transit' | 'unloading' | 'completed';
 
-interface Vehicle {
+type LocationType = 'Plant' | 'Field' | 'Hub' | 'Deposit';
+type PlanStatus = 'Draft' | 'Live' | 'Completed';
+type TripStep = 1 | 2 | 3; // Step 1: Info, Step 2: Timeline/Checks, Step 3: Finalize
+
+interface ChecklistItem {
   id: string;
-  registrationNumber: string;
-  type: 'Truck' | 'Tractor' | 'Pickup';
-  driverName: string;
-  driverPhone: string;
-  status: 'Available' | 'On Trip' | 'Maintenance';
-  currentTrip?: {
-    id: string;
-    from: string;
-    to: string;
-    startTime: string;
-    eta: string;
-    cargo: string;
-    status: TripStatus;
-    progress: number; // 0 to 100
+  label: string;
+  checked: boolean;
+}
+
+interface RouteStop {
+  id: string;
+  date: string;
+  type: LocationType;
+  locationName: string;
+  isReached: boolean;
+  // Inspection is only for resting stops (Hub/Plant)
+  inspection?: {
+    completed: boolean;
+    items: ChecklistItem[];
   };
 }
 
-// --- INITIAL MOCK DATA ---
-const INITIAL_VEHICLES: Vehicle[] = [
-  {
-    id: 'v1',
-    registrationNumber: 'MH-12-AB-1234',
-    type: 'Truck',
-    driverName: 'Raju Singh',
-    driverPhone: '+91 98765 00001',
-    status: 'On Trip',
-    currentTrip: {
-      id: 'TR-101',
-      from: 'Farm L001 (Nashik)',
-      to: 'Central Mill (Pune)',
-      startTime: '10:00 AM',
-      eta: '04:00 PM',
-      cargo: 'Sugarcane (15 Tons)',
-      status: 'in_transit',
-      progress: 60,
-    }
-  },
-  {
-    id: 'v2',
-    registrationNumber: 'MH-14-XY-9876',
-    type: 'Tractor',
-    driverName: 'Sham Lal',
-    driverPhone: '+91 98765 00002',
-    status: 'On Trip',
-    currentTrip: {
-      id: 'TR-102',
-      from: 'Warehouse A',
-      to: 'Farm L005',
-      startTime: '01:00 PM',
-      eta: '02:30 PM',
-      cargo: 'Fertilizers',
-      status: 'loading',
-      progress: 25,
-    }
-  },
-  {
-    id: 'v3',
-    registrationNumber: 'MH-12-ZZ-5555',
-    type: 'Pickup',
-    driverName: 'Vikram Rao',
-    driverPhone: '+91 98765 00003',
-    status: 'Available',
-  },
-];
-
-// Tracking Steps Configuration
-const TRACKING_STEPS = [
-  { id: 'scheduled', label: 'Scheduled' },
-  { id: 'loading', label: 'Loading' },
-  { id: 'in_transit', label: 'In Transit' },
-  { id: 'unloading', label: 'Unloading' },
-  { id: 'completed', label: 'Completed' },
-];
-
-const LogisticsManagement = () => {
-  // State
-  const [vehicles, setVehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isAssignTaskOpen, setIsAssignTaskOpen] = useState(false);
+interface LogisticsPlan {
+  id: string;
+  vehicleId: string;
+  vehicleReg: string;
+  vehicleType: string;
+  driverName: string;
+  driverPhone: string;
+  stops: RouteStop[];
+  status: PlanStatus;
+  currentStep: TripStep; // 1, 2, or 3
+  createdAt: string;
   
-  // Ref for hidden file input
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Final Data
+  finalData?: {
+    finalChecklist: ChecklistItem[];
+    vehicleDropLocation: string;
+    equipmentDropLocation: string;
+    fuelConsumed: string;
+    totalDistance: string;
+    completedAt: string;
+  };
+}
 
-  // Stats (Dynamic calculation based on state)
-  const stats = {
-    total: vehicles.length,
-    onTrip: vehicles.filter(v => v.status === 'On Trip').length,
-    available: vehicles.filter(v => v.status === 'Available').length,
-    maintenance: vehicles.filter(v => v.status === 'Maintenance').length,
+// --- MOCK DATA ---
+
+const AVAILABLE_VEHICLES = [
+  { id: 'v1', reg: 'MH-12-AB-1234', driver: 'Raju Singh', phone: '+91 98765 43210', type: 'Truck (10 Ton)' },
+  { id: 'v2', reg: 'MH-14-XY-9999', driver: 'Sham Lal', phone: '+91 90000 11111', type: 'Tractor' },
+  { id: 'v3', reg: 'MH-04-DL-5555', driver: 'Vikram Rao', phone: '+91 99887 77665', type: 'Pickup Van' },
+];
+
+const STANDARD_CHECKS = [
+  { id: 'c1', label: 'No Fresh Dents/Scratches', checked: false },
+  { id: 'c2', label: 'Tires & Pressure OK', checked: false },
+  { id: 'c3', label: 'Lights/Indicators Working', checked: false },
+];
+
+// --- PDF GENERATOR ---
+const generateTripSheetPDF = (plan: LogisticsPlan) => {
+  const doc = new jsPDF();
+  doc.text(`TRIP SHEET: ${plan.id}`, 14, 20);
+  doc.save(`TripSheet_${plan.id}.pdf`);
+  toast.success("Trip Sheet PDF Downloaded");
+};
+
+// --- COMPONENTS ---
+
+// 1. PLANNING TAB (Create New)
+const PlanningTab = ({ onCreate }: { onCreate: (p: LogisticsPlan) => void }) => {
+  const [vehicleId, setVehicleId] = useState('');
+  const [stops, setStops] = useState<RouteStop[]>([]);
+
+  // AUTO-POPULATE LOGIC
+  const handleVehicleSelect = (id: string) => {
+    setVehicleId(id);
+    if (!id) { setStops([]); return; }
+    
+    // Simulate fetching schedule: Generate 5 days starting today
+    const today = new Date();
+    const newStops: RouteStop[] = Array.from({ length: 5 }).map((_, i) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      let type: LocationType = 'Field';
+      if (i === 0) type = 'Plant';
+      if (i === 2) type = 'Hub'; 
+      if (i === 4) type = 'Deposit';
+
+      return {
+        id: `s-${Date.now()}-${i}`,
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        type: type,
+        locationName: '', 
+        isReached: false
+      };
+    });
+    setStops(newStops);
   };
 
-  // --- ACTIONS ---
-
-  const triggerFileUpload = () => {
-    fileInputRef.current?.click();
+  const updateStopLocation = (id: string, val: string) => {
+    setStops(stops.map(s => s.id === id ? { ...s, locationName: val } : s));
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleSubmit = () => {
+    if (!vehicleId || stops.some(s => !s.locationName)) {
+      toast.error("Please fill in all Resting Locations");
+      return;
+    }
+    const vehicle = AVAILABLE_VEHICLES.find(v => v.id === vehicleId);
+    if (!vehicle) return;
 
-    // Simulate backend processing time
-    toast.promise(
-      new Promise((resolve) => setTimeout(resolve, 1500)),
-      {
-        loading: 'Parsing bulk upload file...',
-        success: () => {
-          // Simulate adding new data from the "file"
-          const newVehicles: Vehicle[] = [
-            {
-              id: `v-bulk-${Date.now()}-1`,
-              registrationNumber: 'MH-04-BK-9999',
-              type: 'Truck',
-              driverName: 'Amit Verma (Bulk)',
-              driverPhone: '+91 90000 11111',
-              status: 'Available',
-            },
-            {
-              id: `v-bulk-${Date.now()}-2`,
-              registrationNumber: 'MH-12-UP-8888',
-              type: 'Pickup',
-              driverName: 'Sunil Jadhav (Bulk)',
-              driverPhone: '+91 90000 22222',
-              status: 'On Trip',
-              currentTrip: {
-                 id: `TR-BLK-${Date.now()}`,
-                 from: 'Nagpur',
-                 to: 'Mumbai',
-                 startTime: '08:00 AM',
-                 eta: '08:00 PM',
-                 cargo: 'Oranges (Bulk Upload)',
-                 status: 'in_transit',
-                 progress: 45
-              }
-            }
-          ];
-          
-          setVehicles(prev => [...prev, ...newVehicles]);
-          
-          // Reset input
-          if (fileInputRef.current) fileInputRef.current.value = '';
-          
-          return 'Successfully uploaded 2 new vehicles!';
-        },
-        error: 'Failed to process file'
-      }
-    );
+    // Attach inspection objects to 'Hub' stops
+    const processedStops = stops.map(s => ({
+      ...s,
+      inspection: (s.type === 'Hub') ? { completed: false, items: STANDARD_CHECKS.map(c => ({...c})) } : undefined
+    }));
+
+    onCreate({
+      id: `TRIP-${Math.floor(Math.random() * 10000)}`,
+      vehicleId: vehicle.id,
+      vehicleReg: vehicle.reg,
+      vehicleType: vehicle.type,
+      driverName: vehicle.driver,
+      driverPhone: vehicle.phone,
+      stops: processedStops,
+      status: 'Live',
+      currentStep: 1, // Start at Step 1
+      createdAt: new Date().toLocaleDateString(),
+    });
+    toast.success("Trip Created!");
   };
-
-  const handleTaskSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsAssignTaskOpen(false);
-    toast.success("Logistics task assigned successfully");
-  };
-
-  // Helper to determine step status
-  const getStepStatus = (currentStatus: TripStatus, stepId: string) => {
-    const statusOrder = ['scheduled', 'loading', 'in_transit', 'unloading', 'completed'];
-    const currentIndex = statusOrder.indexOf(currentStatus);
-    const stepIndex = statusOrder.indexOf(stepId);
-
-    if (stepIndex < currentIndex) return 'completed';
-    if (stepIndex === currentIndex) return 'current';
-    return 'pending';
-  };
-
-  // Filter Logic
-  const filteredVehicles = vehicles.filter(v => 
-    v.registrationNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    v.driverName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   return (
-    <div className="p-8 space-y-8 animate-in fade-in duration-300 relative">
-      
-      {/* --- HEADER --- */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-display font-bold text-foreground">Logistics Management</h1>
-          <p className="text-muted-foreground mt-1">Track fleet, assign tasks, and monitor deliveries.</p>
-        </div>
-        <div className="flex gap-3">
-          {/* Hidden File Input */}
-          <input 
-            type="file" 
-            ref={fileInputRef}
-            className="hidden" 
-            accept=".csv,.xlsx" 
-            onChange={handleFileUpload}
-          />
-          
-          <button 
-            onClick={triggerFileUpload}
-            className="flex items-center gap-2 border border-border bg-white text-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            <Upload className="w-4 h-4" />
-            Bulk Upload
-          </button>
-          <button 
-            onClick={() => setIsAssignTaskOpen(true)}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm"
-          >
-            <Package className="w-4 h-4" />
-            Assign Task
-          </button>
-        </div>
+    <div className="max-w-4xl mx-auto bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden animate-in fade-in">
+      <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+        <h2 className="text-lg font-bold text-gray-900">Create New Trip</h2>
+        <p className="text-sm text-gray-500">Select vehicle to auto-generate schedule.</p>
       </div>
-
-      {/* --- STATS CARDS --- */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Total Fleet</p>
-          <div className="flex justify-between items-center">
-            <h3 className="text-2xl font-bold">{stats.total}</h3>
-            <div className="p-2 bg-gray-100 rounded-lg text-gray-600"><Truck className="w-5 h-5"/></div>
-          </div>
+      <div className="p-8 space-y-8">
+        <div className="max-w-md">
+          <label className="block text-xs font-bold uppercase text-gray-500 mb-2">1. Select Vehicle</label>
+          <select className="w-full p-3 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-[#2F5233] outline-none"
+            value={vehicleId} onChange={e => handleVehicleSelect(e.target.value)}>
+            <option value="">-- Choose from Fleet --</option>
+            {AVAILABLE_VEHICLES.map(v => <option key={v.id} value={v.id}>{v.reg} — {v.driver}</option>)}
+          </select>
         </div>
-        <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">On Route</p>
-          <div className="flex justify-between items-center">
-            <h3 className="text-2xl font-bold text-blue-600">{stats.onTrip}</h3>
-            <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><MapPin className="w-5 h-5"/></div>
-          </div>
-        </div>
-        <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Available</p>
-          <div className="flex justify-between items-center">
-            <h3 className="text-2xl font-bold text-green-600">{stats.available}</h3>
-            <div className="p-2 bg-green-50 rounded-lg text-green-600"><CheckCircle2 className="w-5 h-5"/></div>
-          </div>
-        </div>
-        <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">In Maintenance</p>
-          <div className="flex justify-between items-center">
-            <h3 className="text-2xl font-bold text-orange-600">{stats.maintenance}</h3>
-            <div className="p-2 bg-orange-50 rounded-lg text-orange-600"><AlertCircle className="w-5 h-5"/></div>
-          </div>
-        </div>
-      </div>
-
-      {/* --- FILTER BAR --- */}
-      <div className="flex gap-4 items-center bg-card border border-border p-3 rounded-lg shadow-sm">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search vehicle no, driver..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 pr-4 py-2 w-full text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background"
-          />
-        </div>
-        <button className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground px-3 py-2 rounded-md hover:bg-muted transition-colors">
-          <Filter className="w-4 h-4" />
-          Filter Status
-        </button>
-      </div>
-
-      {/* --- VEHICLE LIST WITH TRACKING --- */}
-      <div className="space-y-4">
-        {filteredVehicles.map((vehicle) => (
-          <div key={vehicle.id} className="bg-white border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-            
-            {/* Top Row: Vehicle Info */}
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center text-primary">
-                  <Truck className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-foreground">{vehicle.registrationNumber}</h3>
-                  <p className="text-sm text-muted-foreground">{vehicle.type} • {vehicle.driverName}</p>
-                  <span className={cn(
-                    "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium mt-2",
-                    vehicle.status === 'On Trip' ? "bg-blue-50 text-blue-700" : 
-                    vehicle.status === 'Available' ? "bg-green-50 text-green-700" : "bg-orange-50 text-orange-700"
-                  )}>
-                    <span className={cn("w-1.5 h-1.5 rounded-full", 
-                      vehicle.status === 'On Trip' ? "bg-blue-600" : 
-                      vehicle.status === 'Available' ? "bg-green-600" : "bg-orange-600"
-                    )}/>
-                    {vehicle.status}
-                  </span>
-                </div>
-              </div>
-
-              {vehicle.currentTrip && (
-                <div className="text-right">
-                  <p className="text-sm font-medium text-foreground flex items-center justify-end gap-2">
-                    <Package className="w-4 h-4 text-muted-foreground" />
-                    {vehicle.currentTrip.cargo}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">Trip ID: {vehicle.currentTrip.id}</p>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground justify-end">
-                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> ETA: {vehicle.currentTrip.eta}</span>
-                  </div>
-                </div>
-              )}
+        {stops.length > 0 && (
+          <div className="animate-in slide-in-from-bottom-4">
+            <label className="block text-xs font-bold uppercase text-gray-500 mb-2">2. Define Resting Locations</label>
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-50 border-b border-gray-100 text-gray-500">
+                  <tr>
+                    <th className="p-3 font-medium pl-6">Date (Auto)</th>
+                    <th className="p-3 font-medium">Type</th>
+                    <th className="p-3 font-medium">Resting Location Name</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {stops.map((stop) => (
+                    <tr key={stop.id} className="group hover:bg-gray-50/50">
+                      <td className="p-3 pl-6 text-gray-500 font-mono bg-gray-50/30">{stop.date}</td>
+                      <td className="p-3">
+                         <span className={cn("px-2 py-1 rounded text-xs font-bold uppercase", stop.type === 'Hub' ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600")}>{stop.type}</span>
+                      </td>
+                      <td className="p-3">
+                        <input type="text" placeholder="Enter Location Name" className="bg-white border border-gray-200 rounded p-2 w-full focus:ring-1 focus:ring-[#2F5233] outline-none" 
+                          value={stop.locationName} onChange={e => updateStopLocation(stop.id, e.target.value)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          </div>
+        )}
+        <div className="pt-4 flex justify-end border-t border-gray-100">
+          <button onClick={handleSubmit} disabled={stops.length === 0} className="bg-[#2F5233] disabled:opacity-50 text-white px-8 py-3 rounded-lg text-sm font-bold hover:bg-[#1a331d] shadow-sm flex items-center gap-2">
+            <Save className="w-4 h-4" /> Create Plan
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
-            {/* Tracking Bar Section (Only if On Trip) */}
-            {vehicle.status === 'On Trip' && vehicle.currentTrip && (
-              <div className="mt-4 pt-4 border-t border-dashed border-gray-200">
-                <div className="flex justify-between items-center mb-6 px-2">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    <span className="block text-foreground font-bold mb-0.5">From</span>
-                    {vehicle.currentTrip.from}
-                  </div>
-                  <div className="text-xs font-medium text-muted-foreground text-right">
-                    <span className="block text-foreground font-bold mb-0.5">To</span>
-                    {vehicle.currentTrip.to}
+// --- TRIP EXECUTION MODAL (THE 3-STEP FLOW) ---
+const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, onClose: () => void, onUpdate: (p: LogisticsPlan) => void }) => {
+  // Step 3 Local State
+  const [finalLocs, setFinalLocs] = useState({ vDrop: '', eDrop: '', fuel: '', dist: '' });
+
+  // -- Handlers --
+  const handleStartTrip = () => {
+    onUpdate({ ...plan, currentStep: 2 });
+    toast.success("Trip Started! Moving to Timeline.");
+  };
+
+  const handleStopReach = (idx: number) => {
+    if (idx > 0 && !plan.stops[idx - 1].isReached) return toast.error("Complete previous stops first");
+    const newStops = [...plan.stops];
+    newStops[idx].isReached = !newStops[idx].isReached;
+    
+    // Check if all stops reached to allow moving to Step 3? 
+    // Usually user clicks a button to go to Step 3
+    onUpdate({ ...plan, stops: newStops });
+  };
+
+  const handleChecklistToggle = (stopIdx: number, itemId: string) => {
+    const newStops = [...plan.stops];
+    const stop = newStops[stopIdx];
+    if (stop.inspection) {
+      stop.inspection.items = stop.inspection.items.map(i => i.id === itemId ? { ...i, checked: !i.checked } : i);
+      stop.inspection.completed = stop.inspection.items.every(i => i.checked);
+      onUpdate({ ...plan, stops: newStops });
+    }
+  };
+
+  const handleGoToFinalize = () => {
+    const allReached = plan.stops.every(s => s.isReached);
+    if (!allReached) return toast.error("Please mark all stops as Reached first.");
+    onUpdate({ ...plan, currentStep: 3 });
+  };
+
+  const handleSubmitFinal = () => {
+    if (!finalLocs.vDrop || !finalLocs.fuel) return toast.error("Please fill all fields");
+    const completed = {
+      ...plan,
+      status: 'Completed' as PlanStatus,
+      finalData: {
+        finalChecklist: [], // Simplified for this view
+        vehicleDropLocation: finalLocs.vDrop,
+        equipmentDropLocation: finalLocs.eDrop,
+        fuelConsumed: finalLocs.fuel,
+        totalDistance: finalLocs.dist,
+        completedAt: new Date().toLocaleString()
+      }
+    };
+    onUpdate(completed);
+    generateTripSheetPDF(completed);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-5xl h-[85vh] rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95">
+        
+        {/* Header with Steps Indicator */}
+        <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <h2 className="font-bold text-xl text-gray-900">Trip Execution</h2>
+            <div className="flex items-center gap-2 text-sm">
+              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 1 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>1. Info</span>
+              <ChevronRight className="w-4 h-4 text-gray-300" />
+              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 2 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>2. Timeline</span>
+              <ChevronRight className="w-4 h-4 text-gray-300" />
+              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 3 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>3. Finalize</span>
+            </div>
+          </div>
+          <button onClick={onClose}><X className="w-6 h-6 text-gray-400 hover:text-gray-600" /></button>
+        </div>
+
+        {/* Content Area */}
+        <div className="flex-1 overflow-y-auto p-8 bg-gray-50/30">
+          
+          {/* STEP 1: PRE-TRIP INFO (Diagram Step 1) */}
+          {plan.currentStep === 1 && (
+            <div className="flex flex-col h-full justify-center max-w-4xl mx-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                {/* Box 1: Vehicle & Driver */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <h3 className="text-sm font-bold uppercase text-gray-400 mb-4">Vehicle Details & Driver Info</h3>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Truck className="w-6 h-6" /></div>
+                      <div>
+                        <div className="text-xl font-bold text-gray-900">{plan.vehicleReg}</div>
+                        <div className="text-sm text-gray-500">{plan.vehicleType}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center text-green-600"><User className="w-6 h-6" /></div>
+                      <div>
+                        <div className="text-lg font-bold text-gray-900">{plan.driverName}</div>
+                        <div className="text-sm text-gray-500">{plan.driverPhone}</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                {/* The Tracking Bar Component */}
-                <div className="relative px-4">
-                  {/* Progress Line Background */}
-                  <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-100 -translate-y-1/2 rounded-full" />
-                  
-                  {/* Active Progress Line */}
-                  <div 
-                    className="absolute top-1/2 left-0 h-1 bg-primary -translate-y-1/2 rounded-full transition-all duration-500" 
-                    style={{ width: `${(TRACKING_STEPS.findIndex(s => s.id === vehicle.currentTrip!.status) / (TRACKING_STEPS.length - 1)) * 100}%` }}
-                  />
-
-                  {/* Steps */}
-                  <div className="relative flex justify-between w-full">
-                    {TRACKING_STEPS.map((step, index) => {
-                      const status = getStepStatus(vehicle.currentTrip!.status, step.id);
-                      return (
-                        <div key={step.id} className="flex flex-col items-center group">
-                          <div className={cn(
-                            "w-4 h-4 rounded-full border-2 z-10 transition-colors duration-300 flex items-center justify-center",
-                            status === 'completed' ? "bg-primary border-primary" :
-                            status === 'current' ? "bg-white border-primary ring-4 ring-primary/20" :
-                            "bg-white border-gray-300"
-                          )}>
-                            {status === 'completed' && <CheckCircle2 className="w-3 h-3 text-white" />}
-                          </div>
-                          <span className={cn(
-                            "absolute top-6 text-[10px] font-medium transition-colors duration-300 w-20 text-center",
-                            status === 'current' ? "text-primary font-bold" : 
-                            status === 'completed' ? "text-foreground" : "text-muted-foreground"
-                          )}>
-                            {step.label}
-                          </span>
-                        </div>
-                      );
-                    })}
+                {/* Box 2: Field Info */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <h3 className="text-sm font-bold uppercase text-gray-400 mb-4">Route Info</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between border-b pb-2">
+                      <span className="text-gray-500">Start Point</span>
+                      <span className="font-medium">{plan.stops[0].locationName}</span>
+                    </div>
+                    <div className="flex justify-between border-b pb-2">
+                      <span className="text-gray-500">End Point</span>
+                      <span className="font-medium">{plan.stops[plan.stops.length-1].locationName}</span>
+                    </div>
+                    <div className="flex justify-between border-b pb-2">
+                      <span className="text-gray-500">Total Stops</span>
+                      <span className="font-medium">{plan.stops.length}</span>
+                    </div>
                   </div>
                 </div>
-                {/* Spacer for labels */}
-                <div className="h-6" />
               </div>
-            )}
 
-            {/* Empty State for Available Vehicles */}
-            {vehicle.status === 'Available' && (
-              <div className="mt-4 pt-4 border-t border-dashed border-gray-200 text-center">
-                <p className="text-sm text-muted-foreground">Vehicle is parked and ready for assignment.</p>
-                <button 
-                  onClick={() => setIsAssignTaskOpen(true)}
-                  className="mt-2 text-xs font-medium text-primary hover:underline"
-                >
-                  Assign Task Now
+              {/* Checkpoints Summary */}
+              <div className="bg-orange-50 border border-orange-100 p-4 rounded-xl flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-orange-600" />
+                  <span className="font-bold text-orange-800">Pre-Trip Checkpoints</span>
+                </div>
+                <span className="text-sm text-orange-700">Vehicle & Equipment Verification Required</span>
+              </div>
+
+              <button 
+                onClick={handleStartTrip}
+                className="w-full bg-black text-white py-4 rounded-xl text-lg font-bold hover:bg-gray-800 shadow-lg flex items-center justify-center gap-2"
+              >
+                Start Trip <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+
+          {/* STEP 2: TIMELINE / CHECKLIST (Diagram Step 2) */}
+          {plan.currentStep === 2 && (
+            <div className="max-w-3xl mx-auto">
+              <div className="mb-6 flex justify-between items-center">
+                <h3 className="font-bold text-xl">Journey Timeline</h3>
+                <button onClick={handleGoToFinalize} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700">
+                  Next: Finalize
                 </button>
               </div>
-            )}
-          </div>
-        ))}
-      </div>
 
-      {/* --- ASSIGN TASK MODAL --- */}
-      {isAssignTaskOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-background w-full max-w-lg rounded-xl shadow-lg border border-border p-6 animate-in zoom-in-95">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-lg">Assign Logistics Task</h3>
-              <button onClick={() => setIsAssignTaskOpen(false)}><X className="w-5 h-5 text-muted-foreground"/></button>
+              <div className="relative border-l-2 border-gray-200 ml-6 space-y-10 py-4">
+                {plan.stops.map((stop, idx) => (
+                  <div key={stop.id} className="pl-10 relative">
+                    {/* Node */}
+                    <button 
+                      onClick={() => handleStopReach(idx)}
+                      className={cn(
+                        "absolute left-[-9px] top-1 w-6 h-6 rounded-full border-4 transition-all z-10",
+                        stop.isReached ? "bg-white border-green-500" : "bg-white border-gray-300"
+                      )}
+                    />
+                    
+                    <div className={cn("p-4 rounded-xl border transition-all", stop.isReached ? "bg-white border-green-200 shadow-sm" : "bg-gray-50 border-gray-100 opacity-70")}>
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                           <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase mb-1">
+                             <CalendarIcon className="w-3 h-3" /> {stop.date} • {stop.type}
+                           </div>
+                           <h4 className="text-lg font-bold text-gray-900">{stop.locationName}</h4>
+                        </div>
+                        {stop.isReached && <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">REACHED</span>}
+                      </div>
+
+                      {/* RESTING CHECKLIST (The 'Checks' part of diagram) */}
+                      {stop.type === 'Hub' && stop.inspection && (
+                        <div className="mt-4 bg-orange-50 border border-orange-100 rounded-lg p-4">
+                          <h5 className="text-sm font-bold text-orange-800 mb-3 flex items-center gap-2">
+                            <ShieldCheck className="w-4 h-4" /> Physical Damage Check
+                          </h5>
+                          <div className="space-y-2">
+                            {stop.inspection.items.map(item => (
+                              <label key={item.id} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-orange-100/50 rounded transition-colors">
+                                <input 
+                                  type="checkbox" 
+                                  className="w-5 h-5 rounded text-orange-600 focus:ring-orange-500"
+                                  checked={item.checked}
+                                  onChange={() => handleChecklistToggle(idx, item.id)}
+                                />
+                                <span className={cn("text-sm", item.checked ? "text-gray-900 font-medium" : "text-gray-500")}>{item.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <form onSubmit={handleTaskSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Select Vehicle</label>
-                <select className="w-full px-3 py-2 border rounded-md text-sm bg-background">
-                  <option>MH-12-ZZ-5555 (Available)</option>
-                  {vehicles.filter(v => v.status === 'Available').map(v => (
-                    <option key={v.id}>{v.registrationNumber} - {v.type}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">From</label>
-                  <input required className="w-full px-3 py-2 border rounded-md text-sm bg-background" placeholder="Origin" />
+          )}
+
+          {/* STEP 3: FINALIZE (Diagram Step 3) */}
+          {plan.currentStep === 3 && (
+            <div className="max-w-2xl mx-auto flex flex-col h-full justify-center">
+              <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-6">Final Trip Data</h3>
+                
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Vehicle's Last Location</label>
+                    <div className="relative">
+                      <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                      <input 
+                        className="w-full pl-10 p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black"
+                        placeholder="Enter location..."
+                        value={finalLocs.vDrop} onChange={e => setFinalLocs({...finalLocs, vDrop: e.target.value})}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Equipment's Last Location</label>
+                    <div className="relative">
+                      <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                      <input 
+                        className="w-full pl-10 p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black"
+                        placeholder="Enter location..."
+                        value={finalLocs.eDrop} onChange={e => setFinalLocs({...finalLocs, eDrop: e.target.value})}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">Fuel Consumed</label>
+                      <div className="relative">
+                        <Fuel className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                        <input 
+                          className="w-full pl-10 p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black"
+                          placeholder="e.g. 45 L"
+                          value={finalLocs.fuel} onChange={e => setFinalLocs({...finalLocs, fuel: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">Total Distance</label>
+                      <div className="relative">
+                        <Navigation className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                        <input 
+                          className="w-full pl-10 p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black"
+                          placeholder="e.g. 300 KM"
+                          value={finalLocs.dist} onChange={e => setFinalLocs({...finalLocs, dist: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={handleSubmitFinal}
+                    className="w-full mt-4 bg-black text-white py-4 rounded-xl text-lg font-bold hover:bg-gray-800 shadow-lg flex items-center justify-center gap-2"
+                  >
+                    SUBMIT & DOWNLOAD PDF <Download className="w-5 h-5" />
+                  </button>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">To</label>
-                  <input required className="w-full px-3 py-2 border rounded-md text-sm bg-background" placeholder="Destination" />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+// 2. MONITOR TAB (The Grid View)
+const MonitorTab = ({ plans, onUpdate }: { plans: LogisticsPlan[], onUpdate: (p: LogisticsPlan) => void }) => {
+  const [activePlan, setActivePlan] = useState<LogisticsPlan | null>(null);
+
+  return (
+    <div>
+      {/* Grid */}
+      {plans.length === 0 ? (
+        <div className="text-center py-20 text-gray-400">No active trips. Go to Planning tab to create one.</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {plans.map(plan => (
+            <div key={plan.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col h-full">
+              <div className="flex items-start gap-4 mb-3">
+                <div className="mt-1"><Truck className="w-5 h-5 text-[#2F5233]" /></div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{plan.vehicleReg}</h3>
+                  <p className="text-xs text-gray-500 mt-1">{plan.stops.length} stops • {plan.createdAt}</p>
                 </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Cargo Details</label>
-                <input required className="w-full px-3 py-2 border rounded-md text-sm bg-background" placeholder="e.g. Fertilizer Bags (500kg)" />
+              <div className="mt-2 mb-6 text-sm text-gray-600 space-y-1">
+                <p className="flex items-center gap-2"><User className="w-3 h-3 text-gray-400" /> Driver: {plan.driverName}</p>
+                <p className="flex items-center gap-2">
+                  <Activity className="w-3 h-3 text-gray-400" /> Status: <span className={cn("font-medium", plan.status === 'Completed' ? "text-blue-600" : "text-green-600")}>{plan.status}</span>
+                </p>
               </div>
-              <div className="pt-2 flex justify-end gap-2">
-                <button type="button" onClick={() => setIsAssignTaskOpen(false)} className="px-4 py-2 text-sm border rounded-md hover:bg-muted">Cancel</button>
-                <button type="submit" className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90">Assign Task</button>
+              
+              <div className="mt-auto">
+                {plan.status === 'Completed' ? (
+                  <button onClick={() => generateTripSheetPDF(plan)} className="w-full border border-gray-200 rounded-lg py-2 flex items-center justify-center gap-2 text-sm font-medium text-purple-700 hover:bg-purple-50">
+                    <Download className="w-4 h-4" /> Download PDF
+                  </button>
+                ) : (
+                  <button onClick={() => setActivePlan(plan)} className="w-full border border-gray-200 rounded-lg py-2 flex items-center justify-center gap-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                    <LayoutList className="w-4 h-4" /> Trip Timeline / Execute
+                  </button>
+                )}
               </div>
-            </form>
-          </div>
+            </div>
+          ))}
         </div>
       )}
 
+      {/* RENDER THE MODAL IF ACTIVE */}
+      {activePlan && (
+        <TripExecutionModal 
+          plan={activePlan} 
+          onClose={() => setActivePlan(null)} 
+          onUpdate={(p) => { onUpdate(p); setActivePlan(p); }} 
+        />
+      )}
+    </div>
+  );
+};
+
+// --- MAIN LAYOUT ---
+
+const LogisticsManagement = () => {
+  const [activeTab, setActiveTab] = useState<'planning' | 'monitor'>('planning');
+  const [plans, setPlans] = useState<LogisticsPlan[]>([]);
+
+  const handleCreate = (p: LogisticsPlan) => {
+    setPlans([...plans, p]);
+    setActiveTab('monitor');
+  };
+
+  const handleUpdate = (p: LogisticsPlan) => setPlans(plans.map(plan => plan.id === p.id ? p : plan));
+
+  return (
+    <div className="min-h-screen bg-[#FDFDFD] p-8 font-sans text-slate-900">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-[#1a1a1a] tracking-tight">Logistics Master</h1>
+            <p className="text-gray-500 mt-1">Unified Fleet Management System</p>
+          </div>
+          <div className="bg-white p-1 rounded-lg border border-gray-200 shadow-sm flex">
+            <button onClick={() => setActiveTab('planning')} className={cn("px-6 py-2.5 text-sm font-bold rounded-md transition-all flex items-center gap-2", activeTab === 'planning' ? "bg-gray-100 text-gray-900" : "text-gray-500 hover:text-gray-700")}>
+              <Plus className="w-4 h-4" /> Create Plan
+            </button>
+            <button onClick={() => setActiveTab('monitor')} className={cn("px-6 py-2.5 text-sm font-bold rounded-md transition-all flex items-center gap-2", activeTab === 'monitor' ? "bg-gray-100 text-gray-900" : "text-gray-500 hover:text-gray-700")}>
+              <Activity className="w-4 h-4" /> Monitor
+            </button>
+          </div>
+        </div>
+        {activeTab === 'planning' && <PlanningTab onCreate={handleCreate} />}
+        {activeTab === 'monitor' && <MonitorTab plans={plans} onUpdate={handleUpdate} />}
+      </div>
     </div>
   );
 };
