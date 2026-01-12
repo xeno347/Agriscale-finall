@@ -14,12 +14,14 @@ import {
   Layers,
   CheckSquare,
   Box,
-  Wrench // ✅ Added for Resource Management
+  Wrench,
+  Scale,
+  Tractor // Required for Rental Directory
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
-/* ---------------- NAV ITEM ---------------- */
+/* ---------------- NAV ITEM COMPONENT ---------------- */
 
 interface NavItemProps {
   to: string;
@@ -81,7 +83,7 @@ const NavItem = ({
   );
 };
 
-/* ---------------- NAV GROUP ---------------- */
+/* ---------------- NAV GROUP COMPONENT ---------------- */
 
 interface NavGroupProps {
   label: string;
@@ -133,7 +135,7 @@ const NavGroup = ({
   );
 };
 
-/* ---------------- SIDEBAR ---------------- */
+/* ---------------- MAIN SIDEBAR COMPONENT ---------------- */
 
 interface AppSidebarProps {
   leadsComplete: boolean;
@@ -153,7 +155,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         isCollapsed ? "w-[80px]" : "w-72"
       )}
     >
-      {/* Header */}
+      {/* Header with Logo */}
       <div
         className={cn(
           "h-20 flex items-center border-b border-gray-100 px-5",
@@ -161,16 +163,19 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         )}
       >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow border border-gray-100">
+          {/* Logo Container */}
+          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm border border-gray-100 overflow-hidden relative">
             <img
               src="/3f-logo.png" 
               alt="Logo"
-              className="w-7 h-7 object-contain"
+              className="w-full h-full object-contain p-1"
               onError={(e) => {
                 e.currentTarget.style.display = 'none';
                 if(e.currentTarget.parentElement) {
-                    e.currentTarget.parentElement.innerText = 'FC';
-                    e.currentTarget.parentElement.classList.add('text-green-700', 'font-bold');
+                    const fallbackSpan = document.createElement('span');
+                    fallbackSpan.innerText = 'FC';
+                    fallbackSpan.className = 'text-green-700 font-bold text-sm';
+                    e.currentTarget.parentElement.appendChild(fallbackSpan);
                 }
               }}
             />
@@ -188,6 +193,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           )}
         </div>
 
+        {/* Collapse Button */}
         {!isCollapsed && (
           <button
             onClick={() => setIsCollapsed(true)}
@@ -198,6 +204,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         )}
       </div>
 
+      {/* Expand Button */}
       {isCollapsed && (
         <div className="flex justify-center py-3 border-b border-gray-50">
           <button
@@ -209,109 +216,48 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         </div>
       )}
 
-      {/* Navigation */}
+      {/* Navigation Links */}
       <nav className="flex-1 p-3 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
-        {/* Farm Management */}
+        
+        {/* Group 1: Farm Management */}
         <NavGroup label="Farm Management" isSidebarCollapsed={isCollapsed}>
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/tasks-beta"
-            icon={CheckSquare}
-            label="Tasks (Beta)"
+          <NavItem to="/tasks-beta" icon={CheckSquare} label="Tasks (Beta)" isSidebarCollapsed={isCollapsed} />
+          <NavItem 
+            to="/leads" 
+            icon={Users} 
+            label="Leads" 
+            isSidebarCollapsed={isCollapsed} 
+            notificationStatus={leadsComplete ? "success" : "warning"} 
           />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/leads"
-            icon={Users}
-            label="Leads"
-            notificationStatus={leadsComplete ? "success" : "warning"}
-          />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/farmers"
-            icon={UserCheck}
-            label="Farmers"
-          />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/blocks"
-            icon={Layers}
-            label="Blocks"
-          />
+          <NavItem to="/farmers" icon={UserCheck} label="Farmers" isSidebarCollapsed={isCollapsed} />
+          {/* ✅ Rental Directory Moved Here */}
+          <NavItem to="/rental-directory" icon={Tractor} label="Rental Directory" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/blocks" icon={Layers} label="Blocks" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
-        {/* Harvest Management */}
+        {/* Group 2: Harvest Management */}
         <NavGroup label="Harvest Management" isSidebarCollapsed={isCollapsed}>
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/harvest-planning"
-            icon={Sprout}
-            label="Harvest Planning"
-          />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/harvest-orders"
-            icon={Package}
-            label="Harvest Orders"
-          />
+          <NavItem to="/harvest-planning" icon={Sprout} label="Harvest Planning" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/harvest-orders" icon={Package} label="Harvest Orders" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/weighment" icon={Scale} label="Weighment & QC" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
-        {/* Management */}
+        {/* Group 3: Management */}
         <NavGroup label="Management" isSidebarCollapsed={isCollapsed}>
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/inventory"
-            icon={Box}
-            label="Inventory"
-          />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/logistics"
-            icon={Truck}
-            label="Logistics"
-          />
-          {/* ✅ Added Resource Management Page */}
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/resource-management"
-            icon={Wrench}
-            label="Resource Mgmt"
-          />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/vehicle-management"
-            icon={Car}
-            label="Vehicle List"
-          />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/staff-onboarding"
-            icon={UserPlus}
-            label="Staff Onboarding"
-          />
+          <NavItem to="/inventory" icon={Box} label="Inventory" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/logistics" icon={Truck} label="Logistics" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/resource-management" icon={Wrench} label="Resource Mgmt" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/vehicle-management" icon={Car} label="Vehicle List" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/staff-onboarding" icon={UserPlus} label="Staff Onboarding" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
-        {/* Operations */}
+        {/* Group 4: Operations */}
         <NavGroup label="Operation" isSidebarCollapsed={isCollapsed}>
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/cultivation-calendar"
-            icon={Calendar}
-            label="Cultivation Calendar"
-          />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/cultivation-master"
-            icon={Sprout}
-            label="Cultivation Master"
-          />
-          <NavItem
-            isSidebarCollapsed={isCollapsed}
-            to="/cultivation-plan"
-            icon={Layers}
-            label="Cultivation Plan"
-          />
+          <NavItem to="/cultivation-calendar" icon={Calendar} label="Cultivation Calendar" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/cultivation-master" icon={Sprout} label="Cultivation Master" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/cultivation-plan" icon={Layers} label="Cultivation Plan" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
+
       </nav>
     </aside>
   );

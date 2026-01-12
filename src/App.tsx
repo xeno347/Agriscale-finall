@@ -20,9 +20,8 @@ import LogisticsManagement from "./pages/LogisticsManagement";
 import Blocks from "./pages/Blocks";
 import TasksBeta from "./pages/TasksBeta";
 import VehicleManagement from "./pages/VehicleManagement";
-
-// ✅ Import the new Resource Management Page
-import ResourceManagement from "./pages/ResourceManagement";
+import WeighmentQC from "./pages/WeighmentQC";
+import RentalDirectory from "./pages/RentalDirectory"; // ✅ Imported
 
 const queryClient = new QueryClient();
 
@@ -45,16 +44,17 @@ const App = () => (
           <Route path="/cultivation-plan" element={<AppLayout><CultivationPlan /></AppLayout>} />
           <Route path="/cultivation-plan/create" element={<AppLayout><CreateCultivationPlan /></AppLayout>} />
 
-          {/* Harvest Management */}
+          {/* Harvest & Weighment */}
           <Route path="/harvest-planning" element={<AppLayout><HarvestPlanning /></AppLayout>} />
           <Route path="/harvest-orders" element={<AppLayout><HarvestOrders /></AppLayout>} />
+          <Route path="/weighment" element={<AppLayout><WeighmentQC /></AppLayout>} />
 
           {/* Management */}
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
           <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
           
-          {/* ✅ Added Route for Resource Management */}
-          <Route path="/resource-management" element={<AppLayout><ResourceManagement /></AppLayout>} />
+          {/* ✅ New Rental Route */}
+          <Route path="/rental-directory" element={<AppLayout><RentalDirectory /></AppLayout>} />
           
           <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
           <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />

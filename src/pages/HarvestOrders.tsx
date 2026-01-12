@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
 import { 
-  Package, Plus, Search, Filter, 
-  Truck, Scale, FileText, ClipboardCheck,
-  X, CheckCircle2, AlertCircle, TrendingUp 
+  Package, Plus, Truck, 
+  CheckCircle2, X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -28,25 +27,6 @@ interface TripSheet {
   status: 'dispatched' | 'arrived' | 'completed';
 }
 
-interface Weighment {
-  id: string;
-  slip_no: string;
-  trip_ref: string; // Links to Trip
-  gross: number;
-  tare: number;
-  net: number;
-  time: string;
-}
-
-interface QCRecord {
-  id: string;
-  trip_ref: string;
-  quality_score: 'A' | 'B' | 'C';
-  brix: number; // e.g., for sugarcane
-  trash_percent: number;
-  status: 'passed' | 'rejected';
-}
-
 // --- MOCK DATA ---
 const MOCK_ORDERS: HarvestOrder[] = [
   { id: 'ho1', ho_no: 'HO-001', farming_model: 'own_lease', land_id: 'L001', farmer: 'Ramesh P', date: '2024-12-20', status: 'in_progress' },
@@ -58,46 +38,31 @@ const MOCK_TRIPS: TripSheet[] = [
   { id: 't2', trip_no: 'TR-102', order_ref: 'HO-001', vehicle: 'MH-14-XY-9876', driver: 'Sham', status: 'dispatched' },
 ];
 
-const MOCK_WEIGHMENTS: Weighment[] = [
-  { id: 'w1', slip_no: 'WS-5001', trip_ref: 'TR-101', gross: 25000, tare: 8000, net: 17000, time: '10:30 AM' },
-];
-
-const MOCK_QC: QCRecord[] = [
-  { id: 'qc1', trip_ref: 'TR-101', quality_score: 'A', brix: 19.5, trash_percent: 2.1, status: 'passed' },
-];
-
 // --- MAIN COMPONENT ---
 const HarvestOrders = () => {
   // Tabs State
-  const [activeTab, setActiveTab] = useState<'orders' | 'trips' | 'weighment' | 'qc'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'trips'>('orders');
   
   // Modals State
   const [isOrderModalOpen, setOrderModalOpen] = useState(false);
   const [isTripModalOpen, setTripModalOpen] = useState(false);
-  const [isWeighModalOpen, setWeighModalOpen] = useState(false);
-  const [isQCModalOpen, setQCModalOpen] = useState(false);
 
-  // Stats for the top cards (Dynamic based on logic)
+  // Stats for the top cards
   const stats = {
     active_orders: MOCK_ORDERS.filter(o => o.status === 'in_progress').length,
     trips_transit: MOCK_TRIPS.filter(t => t.status === 'dispatched').length,
-    pending_qc: MOCK_TRIPS.filter(t => t.status === 'arrived').length, // Trips arrived but maybe not QC'd
-    completed_today: 12
+    completed_today: 5 // Mock value
   };
 
   // --- ACTIONS ---
   const handleMainAction = () => {
     if (activeTab === 'orders') setOrderModalOpen(true);
     if (activeTab === 'trips') setTripModalOpen(true);
-    if (activeTab === 'weighment') setWeighModalOpen(true);
-    if (activeTab === 'qc') setQCModalOpen(true);
   };
 
   const closeModal = () => {
     setOrderModalOpen(false);
     setTripModalOpen(false);
-    setWeighModalOpen(false);
-    setQCModalOpen(false);
   };
 
   const handleFormSubmit = (e: React.FormEvent, type: string) => {
@@ -114,7 +79,7 @@ const HarvestOrders = () => {
         <div>
           <h1 className="text-3xl font-display font-bold text-foreground">Harvest Operations</h1>
           <p className="text-muted-foreground mt-1">
-            Manage the full lifecycle: Order → Trip → Weighment → QC
+            Manage Harvest Orders and Trip Logistics
           </p>
         </div>
         <button 
@@ -124,27 +89,30 @@ const HarvestOrders = () => {
           <Plus className="w-4 h-4" />
           {activeTab === 'orders' && "Create Order"}
           {activeTab === 'trips' && "Dispatch Trip"}
-          {activeTab === 'weighment' && "Record Weight"}
-          {activeTab === 'qc' && "Add QC Record"}
         </button>
       </div>
 
       {/* --- OVERVIEW CARDS --- */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white border border-border p-4 rounded-xl shadow-sm flex justify-between items-center">
-          <div><p className="text-xs text-muted-foreground uppercase font-bold">Active Orders</p><h3 className="text-2xl font-bold text-blue-600">{stats.active_orders}</h3></div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase font-bold">Active Orders</p>
+            <h3 className="text-2xl font-bold text-blue-600">{stats.active_orders}</h3>
+          </div>
           <div className="p-2 bg-blue-50 rounded-lg"><Package className="w-5 h-5 text-blue-600"/></div>
         </div>
         <div className="bg-white border border-border p-4 rounded-xl shadow-sm flex justify-between items-center">
-          <div><p className="text-xs text-muted-foreground uppercase font-bold">Trips in Transit</p><h3 className="text-2xl font-bold text-orange-600">{stats.trips_transit}</h3></div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase font-bold">Trips in Transit</p>
+            <h3 className="text-2xl font-bold text-orange-600">{stats.trips_transit}</h3>
+          </div>
           <div className="p-2 bg-orange-50 rounded-lg"><Truck className="w-5 h-5 text-orange-600"/></div>
         </div>
         <div className="bg-white border border-border p-4 rounded-xl shadow-sm flex justify-between items-center">
-          <div><p className="text-xs text-muted-foreground uppercase font-bold">Pending QC</p><h3 className="text-2xl font-bold text-purple-600">{stats.pending_qc}</h3></div>
-          <div className="p-2 bg-purple-50 rounded-lg"><ClipboardCheck className="w-5 h-5 text-purple-600"/></div>
-        </div>
-        <div className="bg-white border border-border p-4 rounded-xl shadow-sm flex justify-between items-center">
-          <div><p className="text-xs text-muted-foreground uppercase font-bold">Completed Today</p><h3 className="text-2xl font-bold text-green-600">{stats.completed_today}</h3></div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase font-bold">Completed Today</p>
+            <h3 className="text-2xl font-bold text-green-600">{stats.completed_today}</h3>
+          </div>
           <div className="p-2 bg-green-50 rounded-lg"><CheckCircle2 className="w-5 h-5 text-green-600"/></div>
         </div>
       </div>
@@ -155,8 +123,6 @@ const HarvestOrders = () => {
           {[
             { id: 'orders', label: '1. Harvest Orders', icon: Package },
             { id: 'trips', label: '2. Trip Sheets', icon: Truck },
-            { id: 'weighment', label: '3. Weighment', icon: Scale },
-            { id: 'qc', label: '4. Quality Control', icon: ClipboardCheck },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -180,7 +146,7 @@ const HarvestOrders = () => {
         
         {/* 1. ORDERS TABLE */}
         {activeTab === 'orders' && (
-          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm animate-in fade-in slide-in-from-left-4">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 border-b border-border">
                 <tr>
@@ -221,7 +187,7 @@ const HarvestOrders = () => {
 
         {/* 2. TRIP SHEETS TABLE */}
         {activeTab === 'trips' && (
-          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm animate-in fade-in slide-in-from-right-4">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 border-b border-border">
                 <tr>
@@ -250,72 +216,6 @@ const HarvestOrders = () => {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button className="text-xs text-muted-foreground hover:text-foreground underline">View Slip</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* 3. WEIGHMENT TABLE */}
-        {activeTab === 'weighment' && (
-          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 border-b border-border">
-                <tr>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Slip No</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Trip Ref</th>
-                  <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Gross (kg)</th>
-                  <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Tare (kg)</th>
-                  <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Net (kg)</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Time</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {MOCK_WEIGHMENTS.map((w) => (
-                  <tr key={w.id} className="hover:bg-muted/20">
-                    <td className="px-6 py-4 font-medium">{w.slip_no}</td>
-                    <td className="px-6 py-4 text-primary">{w.trip_ref}</td>
-                    <td className="px-6 py-4 text-right text-muted-foreground">{w.gross}</td>
-                    <td className="px-6 py-4 text-right text-muted-foreground">{w.tare}</td>
-                    <td className="px-6 py-4 text-right font-bold text-foreground">{w.net}</td>
-                    <td className="px-6 py-4 text-muted-foreground">{w.time}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* 4. QC TABLE */}
-        {activeTab === 'qc' && (
-          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 border-b border-border">
-                <tr>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Trip Ref</th>
-                  <th className="px-6 py-4 text-center font-semibold text-muted-foreground">Quality Score</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Brix %</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Trash %</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {MOCK_QC.map((qc) => (
-                  <tr key={qc.id} className="hover:bg-muted/20">
-                    <td className="px-6 py-4 font-medium text-primary">{qc.trip_ref}</td>
-                    <td className="px-6 py-4 text-center">
-                      <span className="w-8 h-8 rounded-full bg-blue-50 text-blue-700 flex items-center justify-center font-bold mx-auto border border-blue-100">
-                        {qc.quality_score}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-muted-foreground">{qc.brix}%</td>
-                    <td className="px-6 py-4 text-muted-foreground">{qc.trash_percent}%</td>
-                    <td className="px-6 py-4">
-                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", qc.status === 'passed' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
-                        {qc.status.toUpperCase()}
-                      </span>
                     </td>
                   </tr>
                 ))}
@@ -379,69 +279,6 @@ const HarvestOrders = () => {
                 <input required className="w-full px-3 py-2 border rounded-md text-sm" placeholder="Driver Name" />
               </div>
               <button type="submit" className="w-full bg-primary text-primary-foreground py-2 rounded-md hover:bg-primary/90">Dispatch Trip</button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* 3. Add Weighment Modal */}
-      {isWeighModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-background w-full max-w-md rounded-xl shadow-lg border border-border p-6 animate-in zoom-in-95">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-lg">Record Weighment</h3>
-              <button onClick={closeModal}><X className="w-5 h-5 text-muted-foreground"/></button>
-            </div>
-            <form onSubmit={(e) => handleFormSubmit(e, 'Weighment')} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Trip Reference</label>
-                <input required className="w-full px-3 py-2 border rounded-md text-sm" placeholder="Scan Trip ID or Enter Manual" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Gross Weight (kg)</label>
-                  <input type="number" required className="w-full px-3 py-2 border rounded-md text-sm" placeholder="0" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Tare Weight (kg)</label>
-                  <input type="number" required className="w-full px-3 py-2 border rounded-md text-sm" placeholder="0" />
-                </div>
-              </div>
-              <button type="submit" className="w-full bg-primary text-primary-foreground py-2 rounded-md hover:bg-primary/90">Save Record</button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* 4. Add QC Modal */}
-      {isQCModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-background w-full max-w-md rounded-xl shadow-lg border border-border p-6 animate-in zoom-in-95">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-lg">Add QC Record</h3>
-              <button onClick={closeModal}><X className="w-5 h-5 text-muted-foreground"/></button>
-            </div>
-            <form onSubmit={(e) => handleFormSubmit(e, 'QC Record')} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Trip Reference</label>
-                <input required className="w-full px-3 py-2 border rounded-md text-sm" placeholder="Trip ID" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Brix %</label>
-                <input type="number" step="0.1" required className="w-full px-3 py-2 border rounded-md text-sm" placeholder="0.0" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Trash %</label>
-                <input type="number" step="0.1" required className="w-full px-3 py-2 border rounded-md text-sm" placeholder="0.0" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Overall Status</label>
-                <select className="w-full px-3 py-2 border rounded-md text-sm">
-                  <option value="passed">Passed</option>
-                  <option value="rejected">Rejected</option>
-                </select>
-              </div>
-              <button type="submit" className="w-full bg-primary text-primary-foreground py-2 rounded-md hover:bg-primary/90">Submit QC</button>
             </form>
           </div>
         </div>
