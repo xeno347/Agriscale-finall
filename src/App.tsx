@@ -21,7 +21,8 @@ import Blocks from "./pages/Blocks";
 import TasksBeta from "./pages/TasksBeta";
 import VehicleManagement from "./pages/VehicleManagement";
 import WeighmentQC from "./pages/WeighmentQC";
-import RentalDirectory from "./pages/RentalDirectory"; // ✅ Imported
+import RentalRateCard from "./pages/RentalRateCard";
+import ServiceRequest from "./pages/ServiceRequest";
 
 const queryClient = new QueryClient();
 
@@ -52,10 +53,11 @@ const App = () => (
           {/* Management */}
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
           <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
-          
-          {/* ✅ New Rental Route */}
-          <Route path="/rental-directory" element={<AppLayout><RentalDirectory /></AppLayout>} />
-          
+
+          {/* Lease & Asset Management */}
+          <Route path="/rental-rate-card" element={<AppLayout><RentalRateCard /></AppLayout>} />
+          <Route path="/service-requests" element={<AppLayout><ServiceRequest /></AppLayout>} />
+
           <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
           <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />
           <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />

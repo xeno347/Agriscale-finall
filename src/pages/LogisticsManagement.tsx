@@ -8,6 +8,7 @@ import {
   ChevronRight, Fuel, Navigation
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import VehicleBusyCalendar from '@/components/logistics/VehicleBusyCalendar';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -85,53 +86,136 @@ const generateTripSheetPDF = (plan: LogisticsPlan) => {
 // --- COMPONENTS ---
 
 // 1. PLANNING TAB (Create New)
+interface DayPlan {
+  id: string;
+  dayIndex: number;
+  date: string;
+  start: string; // Plant/Hub name
+  fieldId: string;
+  endHub: string;
+}
+
 const PlanningTab = ({ onCreate }: { onCreate: (p: LogisticsPlan) => void }) => {
   const [vehicleId, setVehicleId] = useState('');
   const [stops, setStops] = useState<RouteStop[]>([]);
+  const [dayPlans, setDayPlans] = useState<DayPlan[]>([]);
+
+  // Dummy selection (will be replaced with API-driven selection)
+  const selectedVehicle = AVAILABLE_VEHICLES[0];
+  const dummyDriverId = 'DRV-1023';
+
+  // Dummy busy dates for current month
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const makeDate = (d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
+  const busyDates = [3, 7, 12, 18, 25].map(makeDate);
 
   // AUTO-POPULATE LOGIC
   const handleVehicleSelect = (id: string) => {
     setVehicleId(id);
-    if (!id) { setStops([]); return; }
-    
-    // Simulate fetching schedule: Generate 5 days starting today
-    const today = new Date();
-    const newStops: RouteStop[] = Array.from({ length: 5 }).map((_, i) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() + i);
-      let type: LocationType = 'Field';
-      if (i === 0) type = 'Plant';
-      if (i === 2) type = 'Hub'; 
-      if (i === 4) type = 'Deposit';
+    if (!id) { setStops([]); setDayPlans([]); return; }
 
+    // Initialize a 3-day planning scaffold
+    const base = new Date();
+    const makeDateLabel = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const initialPlans: DayPlan[] = Array.from({ length: 3 }).map((_, i) => {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
       return {
-        id: `s-${Date.now()}-${i}`,
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        type: type,
-        locationName: '', 
-        isReached: false
+        id: `dp-${Date.now()}-${i}`,
+        dayIndex: i + 1,
+        date: makeDateLabel(d),
+        start: i === 0 ? 'Plant' : '',
+        fieldId: '',
+        endHub: ''
       };
     });
-    setStops(newStops);
+    setDayPlans(initialPlans);
   };
 
   const updateStopLocation = (id: string, val: string) => {
     setStops(stops.map(s => s.id === id ? { ...s, locationName: val } : s));
   };
 
+  // Update a day plan field and auto-carry next day's start
+  const updateDayPlan = (id: string, field: keyof DayPlan, value: string) => {
+    setDayPlans(prev => {
+      const next = prev.map(p => p.id === id ? { ...p, [field]: value } : p);
+      // Auto propagate start from previous day's endHub
+      for (let i = 1; i < next.length; i++) {
+        if (next[i - 1].endHub) next[i].start = next[i - 1].endHub;
+      }
+      return [...next];
+    });
+  };
+
+  const addDay = () => {
+    setDayPlans(prev => {
+      const last = prev[prev.length - 1];
+      const base = new Date();
+      const d = new Date(base);
+      d.setDate(base.getDate() + prev.length);
+      const makeDateLabel = (dt: Date) => dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const newItem: DayPlan = {
+        id: `dp-${Date.now()}-${prev.length}`,
+        dayIndex: prev.length + 1,
+        date: makeDateLabel(d),
+        start: last?.endHub || last?.start || 'Hub 1',
+        fieldId: '',
+        endHub: ''
+      };
+      return [...prev, newItem];
+    });
+  };
+
   const handleSubmit = () => {
-    if (!vehicleId || stops.some(s => !s.locationName)) {
-      toast.error("Please fill in all Resting Locations");
+    if (!vehicleId) {
+      toast.error('Please select a vehicle');
       return;
     }
+    if (dayPlans.length === 0) {
+      toast.error('Please add at least one day');
+      return;
+    }
+    if (dayPlans.some(p => !p.start || !p.fieldId || !p.endHub)) {
+      toast.error('Please fill Start, Field ID and End Hub for all days');
+      return;
+    }
+
     const vehicle = AVAILABLE_VEHICLES.find(v => v.id === vehicleId);
     if (!vehicle) return;
 
-    // Attach inspection objects to 'Hub' stops
-    const processedStops = stops.map(s => ({
-      ...s,
-      inspection: (s.type === 'Hub') ? { completed: false, items: STANDARD_CHECKS.map(c => ({...c})) } : undefined
-    }));
+    // Build stops from day plans: initial start, then Field and Hub for each day
+    const builtStops: RouteStop[] = [];
+    // Initial start
+    const first = dayPlans[0];
+    builtStops.push({
+      id: `s-${Date.now()}-start`,
+      date: first.date,
+      type: (first.start.toLowerCase().includes('hub') ? 'Hub' : 'Plant'),
+      locationName: first.start,
+      isReached: false
+    });
+
+    dayPlans.forEach((p, idx) => {
+      builtStops.push({
+        id: `s-${Date.now()}-${idx}-f`,
+        date: p.date,
+        type: 'Field',
+        locationName: `Field ${p.fieldId}`,
+        isReached: false
+      });
+      builtStops.push({
+        id: `s-${Date.now()}-${idx}-h`,
+        date: p.date,
+        type: 'Hub',
+        locationName: p.endHub,
+        isReached: false,
+        inspection: { completed: false, items: STANDARD_CHECKS.map(c => ({ ...c })) }
+      });
+    });
 
     onCreate({
       id: `TRIP-${Math.floor(Math.random() * 10000)}`,
@@ -140,7 +224,7 @@ const PlanningTab = ({ onCreate }: { onCreate: (p: LogisticsPlan) => void }) => 
       vehicleType: vehicle.type,
       driverName: vehicle.driver,
       driverPhone: vehicle.phone,
-      stops: processedStops,
+      stops: builtStops,
       status: 'Live',
       currentStep: 1, // Start at Step 1
       createdAt: new Date().toLocaleDateString(),
@@ -149,54 +233,169 @@ const PlanningTab = ({ onCreate }: { onCreate: (p: LogisticsPlan) => void }) => 
   };
 
   return (
-    <div className="max-w-4xl mx-auto bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden animate-in fade-in">
-      <div className="p-6 border-b border-gray-100 bg-gray-50/50">
-        <h2 className="text-lg font-bold text-gray-900">Create New Trip</h2>
-        <p className="text-sm text-gray-500">Select vehicle to auto-generate schedule.</p>
-      </div>
-      <div className="p-8 space-y-8">
-        <div className="max-w-md">
-          <label className="block text-xs font-bold uppercase text-gray-500 mb-2">1. Select Vehicle</label>
-          <select className="w-full p-3 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-[#2F5233] outline-none"
-            value={vehicleId} onChange={e => handleVehicleSelect(e.target.value)}>
-            <option value="">-- Choose from Fleet --</option>
-            {AVAILABLE_VEHICLES.map(v => <option key={v.id} value={v.id}>{v.reg} — {v.driver}</option>)}
-          </select>
-        </div>
-        {stops.length > 0 && (
-          <div className="animate-in slide-in-from-bottom-4">
-            <label className="block text-xs font-bold uppercase text-gray-500 mb-2">2. Define Resting Locations</label>
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <table className="w-full text-sm text-left">
-                <thead className="bg-gray-50 border-b border-gray-100 text-gray-500">
-                  <tr>
-                    <th className="p-3 font-medium pl-6">Date (Auto)</th>
-                    <th className="p-3 font-medium">Type</th>
-                    <th className="p-3 font-medium">Resting Location Name</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {stops.map((stop) => (
-                    <tr key={stop.id} className="group hover:bg-gray-50/50">
-                      <td className="p-3 pl-6 text-gray-500 font-mono bg-gray-50/30">{stop.date}</td>
-                      <td className="p-3">
-                         <span className={cn("px-2 py-1 rounded text-xs font-bold uppercase", stop.type === 'Hub' ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600")}>{stop.type}</span>
-                      </td>
-                      <td className="p-3">
-                        <input type="text" placeholder="Enter Location Name" className="bg-white border border-gray-200 rounded p-2 w-full focus:ring-1 focus:ring-[#2F5233] outline-none" 
-                          value={stop.locationName} onChange={e => updateStopLocation(stop.id, e.target.value)} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Left: Vehicle & Driver + Busy Calendar */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Truck className="w-6 h-6" /></div>
+            <div>
+              <div className="text-lg font-bold text-gray-900">{selectedVehicle.reg}</div>
+              <div className="text-sm text-gray-500">{selectedVehicle.type}</div>
             </div>
           </div>
-        )}
-        <div className="pt-4 flex justify-end border-t border-gray-100">
-          <button onClick={handleSubmit} disabled={stops.length === 0} className="bg-[#2F5233] disabled:opacity-50 text-white px-8 py-3 rounded-lg text-sm font-bold hover:bg-[#1a331d] shadow-sm flex items-center gap-2">
-            <Save className="w-4 h-4" /> Create Plan
-          </button>
+          <div className="text-right">
+            <div className="text-sm font-bold text-gray-900">{selectedVehicle.driver}</div>
+            <div className="text-xs text-gray-500">ID: {dummyDriverId}</div>
+            <div className="text-xs text-gray-500">Phone: {selectedVehicle.phone}</div>
+          </div>
+        </div>
+        <div className="p-6">
+          <VehicleBusyCalendar busyDates={busyDates} />
+
+          {/* Assignment Context (Dummy Data) */}
+          <div className="mt-6 space-y-4">
+            <div className="text-xs font-bold uppercase text-gray-500">Assignment Context</div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Field Activity */}
+              <div className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
+                <div className="text-xs font-bold uppercase text-gray-400 mb-2">Field Activity</div>
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-[#2F5233]" />
+                  <span className="text-sm font-medium text-gray-900">Ploughing</span>
+                </div>
+              </div>
+
+              {/* Farmer Name */}
+              <div className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
+                <div className="text-xs font-bold uppercase text-gray-400 mb-2">Farmer</div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <User className="w-4 h-4 text-[#2F5233]" />
+                    <span className="text-sm font-medium text-gray-900">Rahul Verma</span>
+                  </div>
+                  <span className="text-xs text-gray-500">Field ID: 123456</span>
+                </div>
+              </div>
+
+              {/* Map View Placeholder */}
+              <div className="md:col-span-2 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
+                  <div className="text-xs font-bold uppercase text-gray-400">Land Location</div>
+                  <div className="text-xs text-gray-500">Lat 19.0760, Lng 72.8777</div>
+                </div>
+                <div className="relative h-48 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,_#e5e7eb_1px,_transparent_0)] [background-size:24px_24px] opacity-60" />
+                  <div className="relative z-10 flex items-center gap-2 text-gray-600">
+                    <MapPin className="w-5 h-5 text-red-500" />
+                    <span className="text-sm font-medium">Map preview (placeholder)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Equipment Assigned */}
+              <div className="md:col-span-2 border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
+                <div className="text-xs font-bold uppercase text-gray-400 mb-2">Equipment Assigned</div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium bg-blue-50 text-blue-700 border-blue-200">Plough <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">x1</span></span>
+                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium bg-purple-50 text-purple-700 border-purple-200">Seeder <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">x1</span></span>
+                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium bg-amber-50 text-amber-700 border-amber-200">Diesel <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">20 L</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Create New Trip */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden animate-in fade-in">
+        <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Truck className="w-5 h-5 text-[#2F5233]" /> Tractor Trip Plan</h2>
+          <p className="text-sm text-gray-500">Define daily movements: Start → Field → Hub</p>
+        </div>
+        <div className="p-8 space-y-8">
+          <div className="max-w-md">
+            <label className="block text-xs font-bold uppercase text-gray-500 mb-2">1. Select Vehicle</label>
+            <select className="w-full p-3 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-[#2F5233] outline-none"
+              value={vehicleId} onChange={e => handleVehicleSelect(e.target.value)}>
+              <option value="">-- Choose from Fleet --</option>
+              {AVAILABLE_VEHICLES.map(v => <option key={v.id} value={v.id}>{v.reg} — {v.driver}</option>)}
+            </select>
+          </div>
+          {dayPlans.length > 0 && (
+            <div className="animate-in slide-in-from-bottom-4 space-y-4">
+              <label className="block text-xs font-bold uppercase text-gray-500">2. Daily Plan</label>
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-gray-50 border-b border-gray-100 text-gray-500">
+                    <tr>
+                      <th className="p-3 font-medium pl-6">Day</th>
+                      <th className="p-3 font-medium">Date</th>
+                      <th className="p-3 font-medium">Start</th>
+                      <th className="p-3 font-medium">Field ID</th>
+                      <th className="p-3 font-medium">End Hub</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {dayPlans.map((dp, idx) => (
+                      <tr key={dp.id} className="group">
+                        <td className="p-3 pl-6 text-gray-700 font-mono">Day {dp.dayIndex}</td>
+                        <td className="p-3 text-gray-500">{dp.date}</td>
+                        <td className="p-3">
+                          {idx === 0 ? (
+                            <select className="w-full p-2 border border-gray-200 rounded bg-white text-sm" value={dp.start} onChange={e => updateDayPlan(dp.id, 'start', e.target.value)}>
+                              <option value="Plant">Plant</option>
+                              <option value="Depot">Depot</option>
+                              <option value="Hub 1">Hub 1</option>
+                              <option value="Hub 2">Hub 2</option>
+                            </select>
+                          ) : (
+                            <div className="text-gray-700">{dp.start || '—'}</div>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <input className="w-full p-2 border border-gray-200 rounded bg-white text-sm" placeholder="e.g. 123456" value={dp.fieldId} onChange={e => updateDayPlan(dp.id, 'fieldId', e.target.value)} />
+                        </td>
+                        <td className="p-3">
+                          <input className="w-full p-2 border border-gray-200 rounded bg-white text-sm" placeholder="e.g. Hub 3" value={dp.endHub} onChange={e => updateDayPlan(dp.id, 'endHub', e.target.value)} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-between items-center">
+                <button type="button" onClick={addDay} className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">+ Add Day</button>
+                <div className="text-xs text-gray-500">Start auto-fills from previous day's hub</div>
+              </div>
+
+              {/* Visual Preview */}
+              <div className="mt-2 border border-gray-200 rounded-lg p-4 bg-gray-50/50">
+                <div className="text-xs font-bold uppercase text-gray-500 mb-3">Plan Preview</div>
+                <div className="space-y-3">
+                  {dayPlans.map((dp) => (
+                    <div key={`pv-${dp.id}`} className="flex items-center gap-2 text-sm">
+                      <span className="px-2 py-1 rounded bg-gray-100 text-gray-700 font-mono">Day {dp.dayIndex}</span>
+                      <span className="text-gray-500">{dp.date}</span>
+                      <div className="flex items-center gap-2 ml-2">
+                        <span className="px-2 py-1 rounded bg-blue-50 text-blue-700">{dp.start || '—'}</span>
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                        <span className="px-2 py-1 rounded bg-green-50 text-green-700">Field {dp.fieldId || '—'}</span>
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                        <span className="px-2 py-1 rounded bg-purple-50 text-purple-700">{dp.endHub || '—'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="pt-4 flex justify-end border-t border-gray-100">
+            <button onClick={handleSubmit} disabled={stops.length === 0} className="bg-[#2F5233] disabled:opacity-50 text-white px-8 py-3 rounded-lg text-sm font-bold hover:bg-[#1a331d] shadow-sm flex items-center gap-2">
+              <Save className="w-4 h-4" /> Create Plan
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -548,7 +747,7 @@ const LogisticsManagement = () => {
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] p-8 font-sans text-slate-900">
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="w-full space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-[#1a1a1a] tracking-tight">Logistics Master</h1>

@@ -445,7 +445,8 @@ className="flex items-center justify-center cursor-pointer group relative"
 {(isToday || hasActivity) ? (
 <div className={cn(
 "w-8 h-8 rounded-md flex flex-col items-center justify-center transition-all shadow-sm relative",
-bgClass
+bgClass,
+null
 )}>
 <span className={cn("text-xs font-medium leading-none", isToday && "font-bold")}>{day}</span>
 {hasHarvesting && (
@@ -470,7 +471,8 @@ isToday && "bg-white/90"
 ) : (
 <span className={cn(
 "text-xs hover:text-foreground hover:bg-secondary rounded-full w-7 h-7 flex items-center justify-center transition-colors",
-textClass
+textClass,
+null
 )}>
 {day}
 </span>
@@ -842,7 +844,7 @@ const payload = { feild_id: feildIds, assigned_acres: assignedAcres, vehicles, e
 
 const totalAssignedAcres = assignedAcres.reduce((sum, x) => sum + (Number(x.assigned_acres) || 0), 0);
 
-const updateVehicleCalendar = async (vehicleId: string, acresCovered: number) => {
+const updateVehicleCalendar = async (vehicleId: string, acresCovered: number, blockId: string, farmId: string, activity: string) => {
 const res = await fetch(`${BASE_URL}/admin_vehicles/update_vehicle_calander`, {
 method: 'POST',
 headers: { 'Content-Type': 'application/json' },
@@ -850,6 +852,9 @@ body: JSON.stringify({
 date: selectedDate,
 acres_covered: acresCovered,
 vehicle_id: vehicleId,
+block_id: blockId,
+farm_id: farmId,
+activity: activity,
 }),
 });
 const data: any = await res.json().catch(() => null);
@@ -888,8 +893,25 @@ if (updateCalls.length > 0) await Promise.allSettled(updateCalls);
 // Update vehicle calendars for the selected vehicles
 const vehiclesCount = Math.max(1, vehicles.length);
 const acresPerVehicle = vehiclesCount > 0 ? totalAssignedAcres / vehiclesCount : 0;
-const vehicleCalendarCalls = vehicles.map((v) =>
-updateVehicleCalendar(String(v.vehicle_id), Number.isFinite(acresPerVehicle) ? acresPerVehicle : 0)
+
+// Collect all unique block_id, farm_id, activity combinations from selected tasks
+const taskDetails = selectedTasks.map(t => ({
+blockId: t.block_id,
+farmId: t.farm_id,
+activity: t.activity
+}));
+
+// Create calendar update calls for each vehicle and task detail combination
+const vehicleCalendarCalls = vehicles.flatMap((v) =>
+taskDetails.map((detail) =>
+updateVehicleCalendar(
+String(v.vehicle_id),
+Number.isFinite(acresPerVehicle) ? acresPerVehicle : 0,
+detail.blockId,
+detail.farmId,
+detail.activity
+)
+)
 );
 
 if (vehicleCalendarCalls.length > 0) {
@@ -993,23 +1015,20 @@ return (
 };
 
 return (
-<div className="p-8 space-y-8 animate-in fade-in duration-300 min-h-screen bg-gray-50/50">
-<div className="flex items-center justify-between">
+<div className="p-8 space-y-8 animate-in fade-in duration-300 min-h-screen bg-gray-50/50 font-sans">
+<div className="flex items-center justify-between gap-4">
 <div>
-<h1 className="text-3xl font-display font-bold text-foreground">Cultivation Calendar</h1>
-<p className="text-muted-foreground mt-1">Manage your cultivation schedule and track pending tasks.</p>
-</div>
-<div className="flex items-center gap-3">
-<button className="flex items-center gap-2 bg-green-800 hover:bg-green-900 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-sm">
-<Plus className="w-4 h-4" /> Create Plan
-</button>
+<h1 className="text-3xl font-bold text-slate-900 tracking-tight">Cultivation Calendar</h1>
+<p className="text-slate-500 mt-1">Manage your cultivation schedule and track pending tasks.</p>
 </div>
 </div>
 
-<div className="flex items-center gap-6 bg-white border border-border px-4 py-2 rounded-lg w-fit shadow-sm">
-<div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-600 rounded shadow-sm" /><span className="text-xs text-foreground">All Done</span></div>
-<div className="flex items-center gap-2"><div className="w-4 h-4 bg-orange-100 border border-orange-200 rounded shadow-sm" /><span className="text-xs text-foreground">Pending</span></div>
-<div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-100 border border-red-200 rounded shadow-sm" /><span className="text-xs text-foreground">Overdue</span></div>
+<div className="flex flex-wrap items-center gap-3">
+<div className="flex items-center gap-6 bg-white border border-gray-200 px-4 py-2 rounded-xl w-fit shadow-sm">
+<div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-600 rounded shadow-sm" /><span className="text-xs font-bold text-slate-700">All Done</span></div>
+<div className="flex items-center gap-2"><div className="w-4 h-4 bg-orange-100 border border-orange-200 rounded shadow-sm" /><span className="text-xs font-bold text-slate-700">Pending</span></div>
+<div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-100 border border-red-200 rounded shadow-sm" /><span className="text-xs font-bold text-slate-700">Overdue</span></div>
+</div>
 </div>
 
 {/* ✅ REMOVED: Weekly Field Visit Calendar Section (Horizontal Strip) */}

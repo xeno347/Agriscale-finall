@@ -16,7 +16,8 @@ import {
   Box,
   Wrench,
   Scale,
-  Tractor // Required for Rental Directory
+  Tractor,
+  FileText
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -231,7 +232,6 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           />
           <NavItem to="/farmers" icon={UserCheck} label="Farmers" isSidebarCollapsed={isCollapsed} />
           {/* ✅ Rental Directory Moved Here */}
-          <NavItem to="/rental-directory" icon={Tractor} label="Rental Directory" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/blocks" icon={Layers} label="Blocks" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
@@ -251,7 +251,13 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavItem to="/staff-onboarding" icon={UserPlus} label="Staff Onboarding" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
-        {/* Group 4: Operations */}
+        {/* Group 4: Lease & Asset Management */}
+        <NavGroup label="Lease & Asset Management" isSidebarCollapsed={isCollapsed}>
+          <NavItem to="/rental-rate-card" icon={Tractor} label="Rental Rate Card" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/service-requests" icon={FileText} label="Service Request" isSidebarCollapsed={isCollapsed} />
+        </NavGroup>
+
+        {/* Group 5: Operations */}
         <NavGroup label="Operation" isSidebarCollapsed={isCollapsed}>
           <NavItem to="/cultivation-calendar" icon={Calendar} label="Cultivation Calendar" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/cultivation-master" icon={Sprout} label="Cultivation Master" isSidebarCollapsed={isCollapsed} />

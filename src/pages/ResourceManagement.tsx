@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Calendar as CalendarIcon,
   X,
   Truck,
   Wrench,
   Package,
-  Layers
+  Layers,
+  ClipboardList
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
@@ -105,6 +107,8 @@ const ResourcePopup = ({
   equipment: ApiInventoryItem[],
   tasksForDate?: { vehicles: Array<any>; equipment: Array<any> }
 }) => {
+  const navigate = useNavigate();
+  
   // If tasks provide explicit assignments for this date, prefer them
   const assignedVehicles = tasksForDate?.vehicles ?? [];
   const assignedEquipment = tasksForDate?.equipment ?? [];
@@ -140,9 +144,18 @@ const ResourcePopup = ({
             </h2>
             <p className="text-xs text-gray-500 mt-1">Resource allocation overview</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => navigate('/logistics')}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <ClipboardList className="w-4 h-4" />
+              Create Plan
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">

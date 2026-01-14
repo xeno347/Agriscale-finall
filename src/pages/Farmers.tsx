@@ -1,40 +1,52 @@
-import { useState, useEffect } from 'react';
-import { Search, Filter, Users, MapPin, Phone, MoreHorizontal, Tractor, X, Check, FileText, ShieldCheck, Map as MapIcon, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { useMemo, useState, useEffect } from 'react';
+import { Search, Filter, Users, MapPin, Phone, FileText, ShieldCheck, Map as MapIcon, NotebookText, Wallet } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Farmer } from '@/types/farm';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import CredentialsDialog, { type FarmerCredentials } from '@/components/farmers/CredentialsDialog';
 import getBaseUrl from '@/lib/config';
 import { useToast } from '@/hooks/use-toast';
-import { toast as sonnerToast } from 'sonner';
 
-// --- MOCK RENTAL HISTORY (To be replaced by API data) ---
-const MOCK_RENTAL_HISTORY = [
-  { id: 'r1', activity: 'Ploughing', date: '10 Jan 2026', cost: 5000, status: 'Completed' },
-  { id: 'r2', activity: 'Irrigation', date: '15 Dec 2025', cost: 1200, status: 'Completed' },
-];
+type FarmerRow = {
+  id: string;
+  fullName: string;
+  phoneNumber: string;
+  alternatePhone?: string | null;
+  village: string;
+  taluka?: string | null;
+  district: string;
+  state: string;
+  profileImageUrl?: string;
+  kyc?: { verified: boolean };
+  landMapping?: { totalArea: number; coordinates: unknown[] };
+  agreements: unknown[];
+  credentials?: FarmerCredentials | null;
+  blockAssigned?: string | null;
+  createdAt: Date;
+};
 
 const Farmers = () => {
   // --- Existing State & Logic ---
-  const [farmers, setFarmers] = useState<Farmer[]>([]);
+  const [farmers, setFarmers] = useState<FarmerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [credentialsDialogFarmerId, setCredentialsDialogFarmerId] = useState<string | null>(null);
   const { toast } = useToast();
-
-  // --- New Rental Feature State ---
-  const [isRentalModalOpen, setRentalModalOpen] = useState(false);
-  const [selectedFarmer, setSelectedFarmer] = useState<Farmer | null>(null);
-  const [rentalForm, setRentalForm] = useState({
-    activity: 'Inter-weeding',
-    rentalSet: 'Rental Set 1',
-    cost: ''
-  });
-
-  // --- UI State for Card Expansion ---
-  const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
-
-  const toggleHistory = (id: string) => {
-    setExpandedCardId(expandedCardId === id ? null : id);
-  };
 
   useEffect(() => {
     loadFarmers();
@@ -52,9 +64,12 @@ const Farmers = () => {
 
       const result = await resp.json();
 
-      const transformed: Farmer[] = (result.farmers || []).map((item: any) => {
+      const transformed: FarmerRow[] = (result.farmers || []).map((item: any) => {
         const fd = item.farmer_data || {};
         const kyc = item.kyc_data || null;
+        const rawCreds = item.credentials_data ?? item.credentials ?? fd.credentials ?? null;
+        const userId = rawCreds?.user_id ?? rawCreds?.userId ?? rawCreds?.username ?? null;
+        const password = rawCreds?.password ?? rawCreds?.pass ?? null;
 
         return {
           id: item.farmer_id,
@@ -71,8 +86,10 @@ const Farmers = () => {
             ? { totalArea: fd.estimated_land_area, coordinates: fd.land_coordinates || [] }
             : undefined,
           agreements: item.agreement_data || [],
+          credentials: userId != null || password != null ? { userId, password, saved: true } : null,
+          blockAssigned: fd.block_assigned ?? fd.block ?? fd.block_name ?? null,
           createdAt: item.created_at ? new Date(item.created_at) : new Date(),
-        } as Farmer;
+        };
       });
 
       setFarmers(transformed);
@@ -84,34 +101,66 @@ const Farmers = () => {
     }
   };
 
-  // --- Rental Actions ---
-  const openRentalModal = (farmer: Farmer) => {
-    setSelectedFarmer(farmer);
-    setRentalForm({ activity: 'Inter-weeding', rentalSet: 'Rental Set 1', cost: '' });
-    setRentalModalOpen(true);
-  };
-
-  const handleRentalSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if(!rentalForm.cost) {
-      sonnerToast.error("Please enter estimated cost");
-      return;
-    }
-    // API Call would go here
-    console.log("Saving Rental:", { ...rentalForm, farmerId: selectedFarmer?.id });
-    sonnerToast.success(`Rental added for ${selectedFarmer?.fullName}`);
-    setRentalModalOpen(false);
-  };
-
   // --- Filtering & Stats ---
-  const filteredFarmers = farmers.filter(farmer =>
-    farmer.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    farmer.village.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredFarmers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return farmers;
+
+    return farmers.filter(farmer =>
+      farmer.fullName.toLowerCase().includes(q) ||
+      farmer.village.toLowerCase().includes(q) ||
+      farmer.district.toLowerCase().includes(q)
+    );
+  }, [farmers, searchQuery]);
 
   const totalArea = farmers.reduce((acc, f) => acc + (f.landMapping?.totalArea || 0), 0);
   const verifiedKYC = farmers.filter(f => f.kyc?.verified).length;
   const totalAgreements = farmers.reduce((acc, f) => acc + f.agreements.length, 0);
+
+  const renderDialogBody = (data: unknown) => {
+    if (data == null) {
+      return <div className="min-h-8" />;
+    }
+
+    if (Array.isArray(data) && data.length === 0) {
+      return <div className="min-h-8" />;
+    }
+
+    return (
+      <pre className="max-h-80 overflow-auto rounded-md bg-muted/30 p-3 text-xs">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    );
+  };
+
+  const IconPopup = ({
+    title,
+    description,
+    icon,
+    data,
+  }: {
+    title: string;
+    description?: string;
+    icon: React.ReactNode;
+    data: unknown;
+  }) => {
+    return (
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-9 w-9">
+            {icon}
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            {description ? <DialogDescription>{description}</DialogDescription> : null}
+          </DialogHeader>
+          {renderDialogBody(data)}
+        </DialogContent>
+      </Dialog>
+    );
+  };
 
   return (
     <div className="p-8 space-y-6">
@@ -155,189 +204,111 @@ const Farmers = () => {
         </Button>
       </div>
 
-      {/* Cards Grid */}
+      {/* Rows / Table View */}
       {loading ? (
         <div className="flex items-center justify-center h-64">
           <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filteredFarmers.map((farmer, index) => (
-            // Replicating FarmerCard UI Structure exactly to inject button
-            <div 
-              key={farmer.id} 
-              className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200"
-              style={{ animationDelay: `${index * 100}ms` }}
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex gap-4">
-                  <div className="h-12 w-12 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold text-lg">
-                    {farmer.fullName.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-lg text-gray-900">{farmer.fullName}</h3>
-                    <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
-                      <Phone className="w-3 h-3" /> {farmer.phoneNumber}
+        <div className="rounded-xl border border-border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Farmer&apos;s name</TableHead>
+                <TableHead>Phone number</TableHead>
+                <TableHead>Location</TableHead>
+                <TableHead>Block assigned</TableHead>
+                <TableHead className="text-center">Land</TableHead>
+                <TableHead className="text-center">KYC</TableHead>
+                <TableHead className="text-center">Agreement</TableHead>
+                <TableHead className="text-center">Harvest Logs</TableHead>
+                <TableHead className="text-center">Payment</TableHead>
+                <TableHead className="text-center">Credential</TableHead>
+              </TableRow>
+            </TableHeader>
+
+            <TableBody>
+              {filteredFarmers.map((farmer) => (
+                <TableRow key={farmer.id}>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{farmer.id}</TableCell>
+                  <TableCell className="font-medium">{farmer.fullName}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      <span>{farmer.phoneNumber}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                      <MapPin className="w-3 h-3" /> {farmer.village}, {farmer.district}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      <span>
+                        {farmer.village}
+                        {farmer.district ? `, ${farmer.district}` : ''}
+                      </span>
                     </div>
-                  </div>
-                </div>
-                <button className="text-gray-400 hover:text-gray-600">
-                  <MoreHorizontal className="w-5 h-5" />
-                </button>
-              </div>
+                  </TableCell>
 
-              <div className="space-y-3 pt-2">
-                {/* Land Mapping Row */}
-                <div className="flex justify-between items-center py-2 border-t border-gray-50">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><MapIcon className="w-4 h-4"/></div>
-                    <span className="text-sm font-medium text-gray-700">Land Mapping</span>
-                  </div>
-                  <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs font-bold">
-                    {farmer.landMapping?.totalArea || 0} acres
-                  </span>
-                </div>
+                  <TableCell>{farmer.blockAssigned ?? ''}</TableCell>
 
-                {/* KYC Row */}
-                <div className="flex justify-between items-center py-2 border-t border-gray-50">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-green-50 rounded-lg text-green-600"><ShieldCheck className="w-4 h-4"/></div>
-                    <span className="text-sm font-medium text-gray-700">KYC</span>
-                  </div>
-                  {farmer.kyc?.verified ? (
-                    <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Verified</span>
-                  ) : (
-                    <span className="bg-gray-100 text-gray-500 px-2 py-1 rounded text-xs font-bold">Pending</span>
-                  )}
-                </div>
+                  <TableCell className="text-center">
+                    <IconPopup
+                      title="Land Mapping"
+                      description={farmer.landMapping?.totalArea != null ? `${farmer.landMapping.totalArea} acres` : undefined}
+                      icon={<MapIcon className="h-4 w-4" />}
+                      data={farmer.landMapping ?? null}
+                    />
+                  </TableCell>
 
-                {/* Agreements Row */}
-                <div className="flex justify-between items-center py-2 border-t border-gray-50">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-gray-100 rounded-lg text-gray-600"><FileText className="w-4 h-4"/></div>
-                    <span className="text-sm font-medium text-gray-700">Agreements</span>
-                  </div>
-                  <span className="bg-gray-100 text-gray-500 w-8 h-4 rounded block"></span>
-                </div>
-              </div>
+                  <TableCell className="text-center">
+                    <IconPopup
+                      title="KYC"
+                      description={farmer.kyc?.verified ? 'Verified' : undefined}
+                      icon={<ShieldCheck className="h-4 w-4" />}
+                      data={farmer.kyc ?? null}
+                    />
+                  </TableCell>
 
-              {/* RENTAL HISTORY SECTION (COLLAPSIBLE) */}
-              <div className="mt-2 border-t border-gray-100">
-                <button 
-                  onClick={() => toggleHistory(farmer.id)}
-                  className="w-full flex items-center justify-between py-3 text-sm font-bold text-gray-500 hover:text-gray-800 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <History className="w-4 h-4" /> Rental History
-                  </div>
-                  {expandedCardId === farmer.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
+                  <TableCell className="text-center">
+                    <IconPopup
+                      title="Agreements"
+                      description={farmer.agreements?.length ? `${farmer.agreements.length} agreement(s)` : undefined}
+                      icon={<FileText className="h-4 w-4" />}
+                      data={farmer.agreements ?? []}
+                    />
+                  </TableCell>
 
-                {expandedCardId === farmer.id && (
-                  <div className="bg-gray-50 rounded-lg p-3 mb-3 text-sm space-y-2 animate-in slide-in-from-top-2">
-                    {MOCK_RENTAL_HISTORY.length > 0 ? (
-                      MOCK_RENTAL_HISTORY.map((rental) => (
-                        <div key={rental.id} className="flex justify-between items-center border-b border-gray-200 last:border-0 pb-2 last:pb-0">
-                          <div>
-                            <p className="font-bold text-gray-800">{rental.activity}</p>
-                            <p className="text-xs text-gray-500">{rental.date}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-bold text-gray-800">₹{rental.cost}</p>
-                            <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold uppercase">{rental.status}</span>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-center text-gray-400 py-2">No history found.</p>
-                    )}
-                  </div>
-                )}
-              </div>
+                  <TableCell className="text-center">
+                    <IconPopup
+                      title="Harvest Logs"
+                      icon={<NotebookText className="h-4 w-4" />}
+                      data={null}
+                    />
+                  </TableCell>
 
-              {/* NEW ADDITION: Rental Button */}
-              <Button 
-                onClick={() => openRentalModal(farmer)}
-                className="w-full bg-slate-900 text-white hover:bg-slate-800"
-              >
-                <Tractor className="w-4 h-4 mr-2" /> Add Rental
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
+                  <TableCell className="text-center">
+                    <IconPopup
+                      title="Payments"
+                      icon={<Wallet className="h-4 w-4" />}
+                      data={null}
+                    />
+                  </TableCell>
 
-      {/* --- ADD RENTAL MODAL --- */}
-      {isRentalModalOpen && selectedFarmer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
-            
-            <div className="bg-slate-900 p-5 flex justify-between items-center text-white">
-              <div>
-                <h3 className="font-bold text-lg">Add Rental Activity</h3>
-                <p className="text-slate-400 text-xs mt-0.5">For {selectedFarmer.fullName} ({selectedFarmer.id})</p>
-              </div>
-              <button onClick={() => setRentalModalOpen(false)} className="bg-white/10 p-1.5 rounded-full hover:bg-white/20 transition-colors">
-                <X className="w-5 h-5"/>
-              </button>
-            </div>
-            
-            <form onSubmit={handleRentalSubmit} className="p-6 space-y-5">
-              
-              <div className="space-y-1.5">
-                <label className="text-sm font-bold text-gray-700">Activity Type</label>
-                <select 
-                  className="w-full p-3 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-slate-900 outline-none transition-shadow"
-                  value={rentalForm.activity}
-                  onChange={e => setRentalForm({...rentalForm, activity: e.target.value})}
-                >
-                  <option>Inter-weeding</option>
-                  <option>Mulching</option>
-                  <option>Irrigation</option>
-                  <option>Ploughing</option>
-                  <option>Harvesting</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-bold text-gray-700">Rental Set</label>
-                <select 
-                  className="w-full p-3 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-slate-900 outline-none transition-shadow"
-                  value={rentalForm.rentalSet}
-                  onChange={e => setRentalForm({...rentalForm, rentalSet: e.target.value})}
-                >
-                  <option>Rental Set 1</option>
-                  <option>Rental Set 2</option>
-                  <option>Rental Set 3</option>
-                  <option>Rental Set 4</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-bold text-gray-700">Estimated Cost (₹)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">₹</span>
-                  <input 
-                    type="number" 
-                    placeholder="e.g. 5000"
-                    className="w-full pl-8 pr-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-900 outline-none transition-shadow font-mono"
-                    value={rentalForm.cost}
-                    onChange={e => setRentalForm({...rentalForm, cost: e.target.value})}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button type="submit" className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2">
-                  <Check className="w-4 h-4" /> Save Rental Entry
-                </button>
-              </div>
-            </form>
-          </div>
+                  <TableCell className="text-center">
+                    <CredentialsDialog
+                      farmerId={farmer.id}
+                      credentials={farmer.credentials}
+                      open={credentialsDialogFarmerId === farmer.id}
+                      onOpenChange={(nextOpen) => setCredentialsDialogFarmerId(nextOpen ? farmer.id : null)}
+                      onSaved={(next) =>
+                        setFarmers(prev => prev.map(f => (f.id === farmer.id ? { ...f, credentials: next } : f)))
+                      }
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
