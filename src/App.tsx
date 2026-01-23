@@ -23,6 +23,7 @@ import VehicleManagement from "./pages/VehicleManagement";
 import WeighmentQC from "./pages/WeighmentQC";
 import RentalRateCard from "./pages/RentalRateCard";
 import ServiceRequest from "./pages/ServiceRequest";
+import FleetChart from "./pages/FleetChart";
 
 const queryClient = new QueryClient();
 
@@ -53,15 +54,18 @@ const App = () => (
           {/* Management */}
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
           <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
+          <Route path="/resource-management" element={<AppLayout><FleetChart /></AppLayout>} />
+          <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
+          <Route path="/fleet-chart" element={<AppLayout><FleetChart /></AppLayout>} />
+          <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />
+          
+          {/* Blocks */}
+          <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />
 
           {/* Lease & Asset Management */}
           <Route path="/rental-rate-card" element={<AppLayout><RentalRateCard /></AppLayout>} />
           <Route path="/service-requests" element={<AppLayout><ServiceRequest /></AppLayout>} />
 
-          <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
-          <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />
-          <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />
-          
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

@@ -14,10 +14,10 @@ import {
   Layers,
   CheckSquare,
   Box,
-  Wrench,
   Scale,
   Tractor,
-  FileText
+  FileText,
+  Map 
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -231,7 +231,6 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             notificationStatus={leadsComplete ? "success" : "warning"} 
           />
           <NavItem to="/farmers" icon={UserCheck} label="Farmers" isSidebarCollapsed={isCollapsed} />
-          {/* ✅ Rental Directory Moved Here */}
           <NavItem to="/blocks" icon={Layers} label="Blocks" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
@@ -246,8 +245,9 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         <NavGroup label="Management" isSidebarCollapsed={isCollapsed}>
           <NavItem to="/inventory" icon={Box} label="Inventory" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/logistics" icon={Truck} label="Logistics" isSidebarCollapsed={isCollapsed} />
-          <NavItem to="/resource-management" icon={Wrench} label="Resource Mgmt" isSidebarCollapsed={isCollapsed} />
+          {/* Resource Management removed here */}
           <NavItem to="/vehicle-management" icon={Car} label="Vehicle List" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/fleet-chart" icon={Map} label="Fleet Chart" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/staff-onboarding" icon={UserPlus} label="Staff Onboarding" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
