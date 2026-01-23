@@ -82,6 +82,12 @@ export interface Service {
   note: string;
   isLive: boolean;
   createdAt: Date;
+  timeline?: {
+    applicationStartDate?: Date;
+    applicationEndDate?: Date;
+    rentalStartDate?: Date;
+    rentalEndDate?: Date;
+  };
 }
 
 type RateCardApiItem = {
@@ -95,7 +101,27 @@ type RateCardApiItem = {
   status?: string;
   rental_id?: string;
   category?: string;
+  timeline?: Array<{
+    application_start_date?: string;
+    application_end_date?: string;
+    rental_start_date?: string;
+    rental_end_date?: string;
+  }>;
 };
+
+function parseDateOrUndefined(value: string | undefined): Date | undefined {
+  if (!value) return undefined;
+  const d = new Date(value);
+  if (!Number.isNaN(d.getTime())) return d;
+
+  // Fallback for strict YYYY-MM-DD parsing
+  const match = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (match) {
+    const d2 = new Date(`${value}T00:00:00`);
+    if (!Number.isNaN(d2.getTime())) return d2;
+  }
+  return undefined;
+}
 
 // ============================================
 // DUMMY DATA
@@ -290,6 +316,12 @@ interface ServiceCardProps {
 
 function ServiceCard({ service, onToggleLive }: ServiceCardProps) {
   const CategoryIcon = categoryIcons[service.category];
+  const timeline = service.timeline;
+  const hasTimeline =
+    Boolean(timeline?.applicationStartDate) ||
+    Boolean(timeline?.applicationEndDate) ||
+    Boolean(timeline?.rentalStartDate) ||
+    Boolean(timeline?.rentalEndDate);
 
   return (
     <Card className="relative overflow-hidden transition-all hover:shadow-md">
@@ -348,6 +380,62 @@ function ServiceCard({ service, onToggleLive }: ServiceCardProps) {
           </div>
         )}
 
+        {hasTimeline && (
+          <div className="mt-3 rounded-md bg-secondary/50 p-3">
+            <div className="text-xs font-medium text-foreground mb-2">Timeline</div>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>Application start</span>
+                <span className="text-foreground">
+                  {timeline?.applicationStartDate
+                    ? timeline.applicationStartDate.toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Application end</span>
+                <span className="text-foreground">
+                  {timeline?.applicationEndDate
+                    ? timeline.applicationEndDate.toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Rental start</span>
+                <span className="text-foreground">
+                  {timeline?.rentalStartDate
+                    ? timeline.rentalStartDate.toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Rental end</span>
+                <span className="text-foreground">
+                  {timeline?.rentalEndDate
+                    ? timeline.rentalEndDate.toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                    : '-'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="mt-3 pt-3 border-t flex items-center justify-between text-xs text-muted-foreground">
           <span>
             Created:{' '}
@@ -375,6 +463,7 @@ interface AddServiceDialogProps {
 }
 
 function AddServiceDialog({ open, onOpenChange, onCreated }: AddServiceDialogProps) {
+  const [step, setStep] = useState<1 | 2>(1);
   const [formData, setFormData] = useState({
     name: '',
     category: '' as ServiceCategory,
@@ -384,15 +473,48 @@ function AddServiceDialog({ open, onOpenChange, onCreated }: AddServiceDialogPro
     includesGST: true,
     note: '',
     isLive: false,
+    applicationStartDate: '',
+    applicationEndDate: '',
+    rentalStartDate: '',
+    rentalEndDate: '',
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const isStep1Valid =
+    Boolean(formData.name) &&
+    Boolean(formData.category) &&
+    Boolean(formData.perUnit) &&
+    Boolean(formData.activity) &&
+    Boolean(formData.basePrice);
+
+  const isStep2Valid =
+    Boolean(formData.applicationStartDate) &&
+    Boolean(formData.applicationEndDate) &&
+    Boolean(formData.rentalStartDate) &&
+    Boolean(formData.rentalEndDate);
+
+  const handleNext = () => {
+    if (!isStep1Valid) {
+      toast.error('Please fill all required fields');
+      return;
+    }
+    setStep(2);
+  };
+
+  const handleBack = () => {
+    setStep(1);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
-    if (!formData.name || !formData.category || !formData.perUnit || !formData.activity || !formData.basePrice) {
+    if (!isStep1Valid) {
       toast.error('Please fill all required fields');
+      return;
+    }
+    if (!isStep2Valid) {
+      toast.error('Please add all timeline dates');
       return;
     }
 
@@ -405,6 +527,14 @@ function AddServiceDialog({ open, onOpenChange, onCreated }: AddServiceDialogPro
       inclusive_GST: formData.includesGST,
       Note: formData.note || '',
       status: formData.isLive ? 'Live' : 'Draft',
+      timeline: [
+        {
+          application_start_date: formData.applicationStartDate,
+          application_end_date: formData.applicationEndDate,
+          rental_start_date: formData.rentalStartDate,
+          rental_end_date: formData.rentalEndDate,
+        },
+      ],
     };
 
     const BASE_URL = getBaseUrl().replace(/\/$/, '');
@@ -447,7 +577,12 @@ function AddServiceDialog({ open, onOpenChange, onCreated }: AddServiceDialogPro
         includesGST: true,
         note: '',
         isLive: false,
+        applicationStartDate: '',
+        applicationEndDate: '',
+        rentalStartDate: '',
+        rentalEndDate: '',
       });
+      setStep(1);
       onOpenChange(false);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to create service');
@@ -469,163 +604,272 @@ function AddServiceDialog({ open, onOpenChange, onCreated }: AddServiceDialogPro
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-5 py-4">
-          {/* Service Name */}
-          <div className="space-y-2">
-            <Label htmlFor="name" className="text-sm font-medium">
-              Service Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="name"
-              placeholder="e.g., Premium Ploughing Service"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="h-11"
-            />
-          </div>
-
-          {/* Category & Activity Row */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">
-                Category <span className="text-destructive">*</span>
-              </Label>
-              <Select
-                value={formData.category}
-                onValueChange={(value: ServiceCategory) => setFormData({ ...formData, category: value })}
-              >
-                <SelectTrigger className="h-11 bg-background">
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent className="bg-popover z-50">
-                  {categoryOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      <div className="flex items-center gap-2">
-                        {option.icon}
-                        {option.label}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">
-                Activity <span className="text-destructive">*</span>
-              </Label>
-              <Select
-                value={formData.activity}
-                onValueChange={(value: ActivityType) => setFormData({ ...formData, activity: value })}
-              >
-                <SelectTrigger className="h-11 bg-background">
-                  <SelectValue placeholder="Select activity" />
-                </SelectTrigger>
-                <SelectContent className="bg-popover z-50">
-                  {activityOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Per Unit */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">
-              Billing Unit <span className="text-destructive">*</span>
-            </Label>
-            <Select
-              value={formData.perUnit}
-              onValueChange={(value: PerUnit) => setFormData({ ...formData, perUnit: value })}
-            >
-              <SelectTrigger className="h-11 bg-background">
-                <SelectValue placeholder="Select billing unit" />
-              </SelectTrigger>
-              <SelectContent className="bg-popover z-50">
-                {perUnitOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Base Price Row */}
-          <div className="space-y-2">
-            <Label htmlFor="basePrice" className="text-sm font-medium">
-              Base Price (₹) <span className="text-destructive">*</span>
-            </Label>
-            <div className="flex items-center gap-4">
-              <div className="relative flex-1">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
-                <Input
-                  id="basePrice"
-                  type="number"
-                  placeholder="0.00"
-                  value={formData.basePrice}
-                  onChange={(e) => setFormData({ ...formData, basePrice: e.target.value })}
-                  className="h-11 pl-8"
-                />
-              </div>
-              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-secondary">
-                <Switch
-                  id="includesGST"
-                  checked={formData.includesGST}
-                  onCheckedChange={(checked) => setFormData({ ...formData, includesGST: checked })}
-                />
-                <Label htmlFor="includesGST" className="text-sm cursor-pointer">
-                  Includes GST
+          {step === 1 ? (
+            <>
+              {/* Service Name */}
+              <div className="space-y-2">
+                <Label htmlFor="name" className="text-sm font-medium">
+                  Service Name <span className="text-destructive">*</span>
                 </Label>
+                <Input
+                  id="name"
+                  placeholder="e.g., Premium Ploughing Service"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="h-11"
+                />
               </div>
-            </div>
-          </div>
 
-          {/* Note */}
-          <div className="space-y-2">
-            <Label htmlFor="note" className="text-sm font-medium">
-              Note / Description
-            </Label>
-            <Textarea
-              id="note"
-              placeholder="Add any special notes, discounts, or terms..."
-              value={formData.note}
-              onChange={(e) => setFormData({ ...formData, note: e.target.value })}
-              rows={3}
-              className="resize-none"
-            />
-          </div>
+              {/* Category & Activity Row */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">
+                    Category <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={formData.category}
+                    onValueChange={(value: ServiceCategory) =>
+                      setFormData({ ...formData, category: value })
+                    }
+                  >
+                    <SelectTrigger className="h-11 bg-background">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover z-50">
+                      {categoryOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <div className="flex items-center gap-2">
+                            {option.icon}
+                            {option.label}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          {/* Live Toggle */}
-          <div className="flex items-center justify-between p-4 rounded-lg bg-secondary/50 border border-border">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-full ${formData.isLive ? 'bg-green-500/20' : 'bg-muted'}`}>
-                <Zap className={`w-4 h-4 ${formData.isLive ? 'text-green-500' : 'text-muted-foreground'}`} />
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">
+                    Activity <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={formData.activity}
+                    onValueChange={(value: ActivityType) =>
+                      setFormData({ ...formData, activity: value })
+                    }
+                  >
+                    <SelectTrigger className="h-11 bg-background">
+                      <SelectValue placeholder="Select activity" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover z-50">
+                      {activityOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium">Publish Service</p>
-                <p className="text-xs text-muted-foreground">
-                  {formData.isLive ? 'Service will be visible to farmers' : 'Save as draft'}
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={formData.isLive}
-              onCheckedChange={(checked) => setFormData({ ...formData, isLive: checked })}
-            />
-          </div>
 
-          <DialogFooter className="gap-2 pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" className="gap-2" disabled={isSubmitting}>
-              <Zap className="w-4 h-4" />
-              {isSubmitting ? 'Creating...' : 'Create Service'}
-            </Button>
-          </DialogFooter>
+              {/* Per Unit */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Billing Unit <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={formData.perUnit}
+                  onValueChange={(value: PerUnit) =>
+                    setFormData({ ...formData, perUnit: value })
+                  }
+                >
+                  <SelectTrigger className="h-11 bg-background">
+                    <SelectValue placeholder="Select billing unit" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover z-50">
+                    {perUnitOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Base Price Row */}
+              <div className="space-y-2">
+                <Label htmlFor="basePrice" className="text-sm font-medium">
+                  Base Price (₹) <span className="text-destructive">*</span>
+                </Label>
+                <div className="flex items-center gap-4">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
+                    <Input
+                      id="basePrice"
+                      type="number"
+                      placeholder="0.00"
+                      value={formData.basePrice}
+                      onChange={(e) => setFormData({ ...formData, basePrice: e.target.value })}
+                      className="h-11 pl-8"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-secondary">
+                    <Switch
+                      id="includesGST"
+                      checked={formData.includesGST}
+                      onCheckedChange={(checked) =>
+                        setFormData({ ...formData, includesGST: checked })
+                      }
+                    />
+                    <Label htmlFor="includesGST" className="text-sm cursor-pointer">
+                      Includes GST
+                    </Label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Note */}
+              <div className="space-y-2">
+                <Label htmlFor="note" className="text-sm font-medium">
+                  Note / Description
+                </Label>
+                <Textarea
+                  id="note"
+                  placeholder="Add any special notes, discounts, or terms..."
+                  value={formData.note}
+                  onChange={(e) => setFormData({ ...formData, note: e.target.value })}
+                  rows={3}
+                  className="resize-none"
+                />
+              </div>
+
+              {/* Live Toggle */}
+              <div className="flex items-center justify-between p-4 rounded-lg bg-secondary/50 border border-border">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-full ${formData.isLive ? 'bg-green-500/20' : 'bg-muted'}`}>
+                    <Zap
+                      className={`w-4 h-4 ${formData.isLive ? 'text-green-500' : 'text-muted-foreground'}`}
+                    />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Publish Service</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formData.isLive ? 'Service will be visible to farmers' : 'Save as draft'}
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={formData.isLive}
+                  onCheckedChange={(checked) => setFormData({ ...formData, isLive: checked })}
+                />
+              </div>
+
+              <DialogFooter className="gap-2 pt-4">
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button type="button" className="gap-2" onClick={handleNext}>
+                  Next
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              {/* Timeline */}
+              <div className="rounded-lg border border-border bg-card p-4">
+                <div className="text-sm font-medium mb-3">Timeline</div>
+
+                <div className="relative pl-6">
+                  <div className="absolute left-[9px] top-2 bottom-2 w-px bg-border" />
+
+                  <div className="relative mb-4">
+                    <div className="absolute left-0 top-2 w-[18px] h-[18px] rounded-full border border-border bg-background" />
+                    <div className="pl-6 space-y-2">
+                      <Label htmlFor="applicationStartDate" className="text-sm font-medium">
+                        Application Start Date <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="applicationStartDate"
+                        type="date"
+                        value={formData.applicationStartDate}
+                        onChange={(e) =>
+                          setFormData({ ...formData, applicationStartDate: e.target.value })
+                        }
+                        className="h-11 bg-background"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="relative mb-4">
+                    <div className="absolute left-0 top-2 w-[18px] h-[18px] rounded-full border border-border bg-background" />
+                    <div className="pl-6 space-y-2">
+                      <Label htmlFor="applicationEndDate" className="text-sm font-medium">
+                        Application End Date <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="applicationEndDate"
+                        type="date"
+                        value={formData.applicationEndDate}
+                        onChange={(e) =>
+                          setFormData({ ...formData, applicationEndDate: e.target.value })
+                        }
+                        className="h-11 bg-background"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="relative mb-4">
+                    <div className="absolute left-0 top-2 w-[18px] h-[18px] rounded-full border border-border bg-background" />
+                    <div className="pl-6 space-y-2">
+                      <Label htmlFor="rentalStartDate" className="text-sm font-medium">
+                        Rental Start Date <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="rentalStartDate"
+                        type="date"
+                        value={formData.rentalStartDate}
+                        onChange={(e) =>
+                          setFormData({ ...formData, rentalStartDate: e.target.value })
+                        }
+                        className="h-11 bg-background"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <div className="absolute left-0 top-2 w-[18px] h-[18px] rounded-full border border-border bg-background" />
+                    <div className="pl-6 space-y-2">
+                      <Label htmlFor="rentalEndDate" className="text-sm font-medium">
+                        Rental End Date <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="rentalEndDate"
+                        type="date"
+                        value={formData.rentalEndDate}
+                        onChange={(e) =>
+                          setFormData({ ...formData, rentalEndDate: e.target.value })
+                        }
+                        className="h-11 bg-background"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2 pt-4">
+                <Button type="button" variant="outline" onClick={handleBack}>
+                  Back
+                </Button>
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" className="gap-2" disabled={isSubmitting || !isStep2Valid}>
+                  <Zap className="w-4 h-4" />
+                  {isSubmitting ? 'Creating...' : 'Create Service'}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </form>
       </DialogContent>
     </Dialog>
@@ -671,6 +915,15 @@ export function RateCardStandalone() {
       const mapped: Service[] = (data as RateCardApiItem[]).map((item) => {
         const createdAt = item.created_at ? new Date(item.created_at) : new Date();
         const status = (item.status ?? 'Draft').toString();
+        const timelineItem = Array.isArray(item.timeline) ? item.timeline[0] : undefined;
+        const timeline = timelineItem
+          ? {
+              applicationStartDate: parseDateOrUndefined(timelineItem.application_start_date),
+              applicationEndDate: parseDateOrUndefined(timelineItem.application_end_date),
+              rentalStartDate: parseDateOrUndefined(timelineItem.rental_start_date),
+              rentalEndDate: parseDateOrUndefined(timelineItem.rental_end_date),
+            }
+          : undefined;
 
         return {
           id: item.rental_id || crypto.randomUUID(),
@@ -683,6 +936,7 @@ export function RateCardStandalone() {
           note: item.Note ?? '',
           isLive: status.toLowerCase() === 'live',
           createdAt: Number.isNaN(createdAt.getTime()) ? new Date() : createdAt,
+          timeline,
         };
       });
 

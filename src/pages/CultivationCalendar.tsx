@@ -144,9 +144,69 @@ if (s === 'unaasigned') return 'unassigned';
 return s;
 };
 
-const isPendingAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'pending';
-const isCompletedAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'completed';
+const isContractFarmPendingAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'contract_farm_pending';
+const isContractFarmCompletedAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'contract_farm_completed';
+const isContractFarmAssignmentStatus = (raw?: string) => {
+const s = normalizeAssignmentStatus(raw);
+return s === 'contract_farm' || s === 'contract_farm_pending' || s === 'contract_farm_completed';
+};
+
+const isRentalSendWorkorderAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'rental_send_workorder';
+const isRentalPendingAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'rental_pending';
+const isRentalCompletedAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'rental_completed';
+const isRentalAssignmentStatus = (raw?: string) => {
+const s = normalizeAssignmentStatus(raw);
+return s === 'rental_send_workorder' || s === 'rental_pending' || s === 'rental_completed';
+};
+
+// For calendar coloring and the little clock icon, treat contract_farm_pending as a kind of "pending".
+const isPendingAssignmentStatus = (raw?: string) => {
+const s = normalizeAssignmentStatus(raw);
+return s === 'pending' || s === 'rental_pending' || s === 'contract_farm_pending';
+};
+
+// For the "Pending" badge + pending counts in the modal, do NOT include contract_farm_pending
+// because that should show as "Contract Farmer" and is not user-assignable.
+const isUserPendingAssignmentStatus = (raw?: string) => {
+const s = normalizeAssignmentStatus(raw);
+return s === 'pending' || s === 'rental_pending';
+};
+
+const isCompletedAssignmentStatus = (raw?: string) => {
+const s = normalizeAssignmentStatus(raw);
+return s === 'completed' || s === 'rental_completed' || s === 'contract_farm_completed';
+};
+
 const isOverdueAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'overdue';
+
+const combineAssignmentStatus = (a?: string, b?: string) => {
+const s1 = normalizeAssignmentStatus(a);
+const s2 = normalizeAssignmentStatus(b);
+
+if (
+isContractFarmAssignmentStatus(s1) ||
+isContractFarmAssignmentStatus(s2) ||
+isContractFarmPendingAssignmentStatus(s1) ||
+isContractFarmPendingAssignmentStatus(s2) ||
+isContractFarmCompletedAssignmentStatus(s1) ||
+isContractFarmCompletedAssignmentStatus(s2)
+) {
+if (isContractFarmPendingAssignmentStatus(s1) || isContractFarmPendingAssignmentStatus(s2)) return 'contract_farm_pending';
+if (isContractFarmCompletedAssignmentStatus(s1) || isContractFarmCompletedAssignmentStatus(s2)) return 'contract_farm_completed';
+return 'contract_farm';
+}
+
+if (isRentalAssignmentStatus(s1) || isRentalAssignmentStatus(s2)) {
+if (isRentalPendingAssignmentStatus(s1) || isRentalPendingAssignmentStatus(s2)) return 'rental_pending';
+if (isRentalSendWorkorderAssignmentStatus(s1) || isRentalSendWorkorderAssignmentStatus(s2)) return 'rental_send_workorder';
+if (isRentalCompletedAssignmentStatus(s1) || isRentalCompletedAssignmentStatus(s2)) return 'rental_completed';
+}
+
+if (isCompletedAssignmentStatus(s1) || isCompletedAssignmentStatus(s2)) return 'completed';
+if (normalizeAssignmentStatus(s1) === 'pending' || normalizeAssignmentStatus(s2) === 'pending') return 'pending';
+if (isOverdueAssignmentStatus(s1) || isOverdueAssignmentStatus(s2)) return 'overdue';
+return s1 || s2 || 'unassigned';
+};
 
 const getActivityIcon = (activity: string) => {
 const key = activity.trim().toLowerCase();
@@ -223,14 +283,7 @@ status: normalizeAssignmentStatus(a.status),
 continue;
 }
 const nextArea = (Number(existing.assigned_area) || 0) + (Number(a.assigned_area) || 0);
-const nextStatus =
-isCompletedAssignmentStatus(existing.status) || isCompletedAssignmentStatus(a.status)
-? 'completed'
-: isPendingAssignmentStatus(existing.status) || isPendingAssignmentStatus(a.status)
-? 'pending'
-: isOverdueAssignmentStatus(existing.status) || isOverdueAssignmentStatus(a.status)
-? 'overdue'
-: normalizeAssignmentStatus(existing.status);
+const nextStatus = combineAssignmentStatus(existing.status, a.status);
 byFarm.set(a.farm_id, {
 farm_id: existing.farm_id,
 assigned_area: nextArea,
@@ -604,7 +657,7 @@ setEquipmentCounts({});
 
 const isTaskPending = (task: CalendarActivity) => {
 const list = Array.isArray(task.assignments) ? task.assignments : [];
-const fromApi = list.some((a) => isPendingAssignmentStatus(a?.status));
+const fromApi = list.some((a) => isUserPendingAssignmentStatus(a?.status));
 if (fromApi) return true;
 if (!selectedDate) return false;
 const taskKey = getTaskKey(task);
@@ -616,12 +669,23 @@ const list = Array.isArray(task.assignments) ? task.assignments : [];
 return list.some((a) => isCompletedAssignmentStatus(a?.status));
 };
 
+const isTaskContractFarm = (task: CalendarActivity) => {
+const list = Array.isArray(task.assignments) ? task.assignments : [];
+return list.some((a) => isContractFarmAssignmentStatus(a?.status));
+};
+
+const isTaskRental = (task: CalendarActivity) => {
+const list = Array.isArray(task.assignments) ? task.assignments : [];
+return list.some((a) => isRentalAssignmentStatus(a?.status));
+};
+
 const isTaskOverdue = (task: CalendarActivity) => {
 const list = Array.isArray(task.assignments) ? task.assignments : [];
 return list.some((a) => isOverdueAssignmentStatus(a?.status));
 };
 
-const isTaskAssignable = (task: CalendarActivity) => !isTaskPending(task) && !isTaskCompleted(task);
+const isTaskAssignable = (task: CalendarActivity) =>
+!isTaskPending(task) && !isTaskCompleted(task) && !isTaskContractFarm(task);
 
 const getInventoryItemId = (item: ApiInventoryItem): string => {
 return String(item?.id || item?.Invent_id || item?.item || '');
@@ -1111,13 +1175,15 @@ showPending={false}
 const taskKey = getTaskKey(act);
 const pendingTask = isTaskPending(act);
 const completedTask = isTaskCompleted(act);
+const contractTask = isTaskContractFarm(act);
+const rentalTask = isTaskRental(act);
 const overdueTask = !completedTask && isTaskOverdue(act);
 const totalArea = Array.isArray(act.assignments) ? act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0) : 0;
 return (
 <div key={idx} className={cn("group transition-colors", completedTask ? "bg-green-50 hover:bg-green-50/80" : overdueTask ? "bg-red-50 hover:bg-red-50/80" : "bg-white hover:bg-gray-50/50")}>
 {/* ✅ MODIFIED: Removed Status Column & Chevron Column */}
 <div className="grid grid-cols-[40px_1.5fr_1fr_1fr] gap-2 px-5 py-4 items-center">
-<div className="flex justify-center"><input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer" checked={!!selectedTaskKeys[taskKey]} disabled={pendingTask || completedTask} onChange={(e) => { setSelectedTaskKeys((prev) => ({ ...prev, [taskKey]: e.target.checked })); }} /></div>
+<div className="flex justify-center"><input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer" checked={!!selectedTaskKeys[taskKey]} disabled={pendingTask || completedTask || contractTask} onChange={(e) => { setSelectedTaskKeys((prev) => ({ ...prev, [taskKey]: e.target.checked })); }} /></div>
 <div className="flex items-center gap-2.5 min-w-0">
 <div className="p-1.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 shrink-0">{getActivityIcon(act.activity)}</div>
 <div className="min-w-0 flex items-center gap-2">
@@ -1125,6 +1191,8 @@ return (
 {pendingTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">Pending</span>}
 {overdueTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">Overdue</span>}
 {completedTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">Done</span>}
+{contractTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">Contract Farmer</span>}
+{rentalTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">(Rental)</span>}
 </div>
 </div>
 <div><span className={cn("inline-flex items-center px-2 py-1 rounded text-[11px] font-bold border", completedTask ? "bg-green-100 text-green-800 border-green-200" : overdueTask ? "bg-red-100 text-red-800 border-red-200" : "bg-gray-50 text-gray-700 border-gray-200")}>{act.farm_id || '—'}</span></div>
@@ -1144,7 +1212,7 @@ return (
 <div className="text-xs text-muted-foreground"><span className="font-medium text-foreground">{allSelectedKeys.filter((k) => !!selectedTaskKeys[k]).length}</span> tasks selected</div>
 <div className="flex gap-2">
 <button onClick={closeModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Cancel</button>
-{anyAssignableSelected ? <button type="button" onClick={handleAssignTasksClick} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-green-800 hover:bg-green-900 text-white">Assign Task</button> : <span className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md bg-orange-100 text-orange-800 border border-orange-200">Pending</span>}
+{anyAssignableSelected ? <button type="button" onClick={handleAssignTasksClick} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-green-800 hover:bg-green-900 text-white">Assign Task</button> : <span className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md bg-slate-100 text-slate-700 border border-slate-200">Not Assignable</span>}
 </div>
 </div>
 </div>

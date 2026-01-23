@@ -8,6 +8,7 @@ import {
   ChevronRight, Fuel, Navigation
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import VehicleBusyCalendar from '@/components/logistics/VehicleBusyCalendar';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -18,8 +19,6 @@ import { getBaseUrl } from '@/lib/config';
 type LocationType = 'Plant' | 'Field' | 'Hub' | 'Deposit';
 type PlanStatus = 'Draft' | 'Live' | 'Completed';
 type TripStep = 1 | 2 | 3; // Step 1: Info, Step 2: Timeline/Checks, Step 3: Finalize
-
-type TripStatusBackend = 'created' | 'started' | 'completed' | string;
 
 interface CalendarEntry {
   date: string;
@@ -67,7 +66,6 @@ interface LogisticsPlan {
   status: PlanStatus;
   currentStep: TripStep; // 1, 2, or 3
   createdAt: string;
-  tripStatus?: TripStatusBackend;
   
   // Final Data
   finalData?: {
@@ -80,37 +78,13 @@ interface LogisticsPlan {
   };
 }
 
-type BackendPlanEntry = {
-  start: string;
-  end_hub: string;
-  feild_id: string;
-  check_point: Array<{
-    physical_damange: boolean;
-    fuel_level: number;
-    equipment_damange: boolean;
-  }>;
-};
-
-type BackendLogisticsPlan = {
-  plan: Record<string, BackendPlanEntry>;
-  plan_id: string;
-  trip_status: TripStatusBackend;
-  created_at: string;
-  vehicle_id: string;
-};
-
-// Day Plan Interface
-interface DayPlan {
-  id: string;
-  dayIndex: number;
-  date: string;
-  dateISO?: string;
-  start: string; // Plant/Hub name
-  fieldId: string;
-  endHub: string;
-}
-
 // --- MOCK DATA ---
+
+const AVAILABLE_VEHICLES = [
+  { id: 'v1', reg: 'MH-12-AB-1234', driver: 'Raju Singh', phone: '+91 98765 43210', type: 'Truck (10 Ton)' },
+  { id: 'v2', reg: 'MH-14-XY-9999', driver: 'Sham Lal', phone: '+91 90000 11111', type: 'Tractor' },
+  { id: 'v3', reg: 'MH-04-DL-5555', driver: 'Vikram Rao', phone: '+91 99887 77665', type: 'Pickup Van' },
+];
 
 const STANDARD_CHECKS = [
   { id: 'c1', label: 'No Fresh Dents/Scratches', checked: false },
@@ -128,16 +102,24 @@ const generateTripSheetPDF = (plan: LogisticsPlan) => {
 
 // --- COMPONENTS ---
 
+// Day Plan Interface
+interface DayPlan {
+  id: string;
+  dayIndex: number;
+  date: string;
+  start: string; // Plant/Hub name
+  fieldId: string;
+  endHub: string;
+}
+
 // 1. CREATE PLAN MODAL (2-STEP PROCESS)
 const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate: (p: LogisticsPlan) => void }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleCalendar | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
-  const [isPrefilledFromCalendar, setIsPrefilledFromCalendar] = useState(false);
   const [dayPlans, setDayPlans] = useState<DayPlan[]>([]);
   const [vehicleData, setVehicleData] = useState<VehicleCalendar[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   // Fetch vehicle calendar data on mount
   useEffect(() => {
@@ -170,49 +152,44 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
       grouped[activity].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     });
     return grouped;
-  };
-
-  // STEP 1: Vehicle & Activity Selection
+  }
+      { date: makeDat& Activity Selection
   const handleVehicleActivitySelect = (vehicle: VehicleCalendar, activity: string) => {
     setSelectedVehicle(vehicle);
-    setSelectedActivity(activity);
-    const matchingEntries = (vehicle.calander || [])
-      .filter(e => e.activity === activity)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    setSelectedActivity(activitytivity: 'Transport', block_name: 'Block G' },
+      { date: makeDate(20), activity: 'Maintenance', block_name: 'Block I' },
+      { date: makeDate(28), activity: 'Equipment Pickup', block_name: 'Block H' },
+    ],
+  };
+  
+  return (schedules[vehicleId] || []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+};
 
-    if (matchingEntries.length > 0) {
-      const makeDateLabel = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const initialPlans: DayPlan[] = matchingEntries.map((entry, i) => ({
+// 1. CREATE PLAN MODAL (2-STEP PROCESS)
+const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate: (p: LogisticsPlan) => void }) => {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [selectedVehicle, setSelectedVehicle] = useState<typeof AVAILABLE_VEHICLES[0] | null>(null);
+  const [dayPlans, setDayPlans] = useState<DayPlan[]>([]);
+
+  // STEP 1: Vehicle Selection
+  const handleVehicleSelect = (vehicle: typeof AVAILABLE_VEHICLES[0]) => {
+    setSelectedVehicle(vehicle);
+    // Initialize a 3-day planning scaffold
+    const base = new Date();
+    const makeDateLabel = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const initialPlans: DayPlan[] = Array.from({ length: 3 }).map((_, i) => {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      return {
         id: `dp-${Date.now()}-${i}`,
         dayIndex: i + 1,
-        date: makeDateLabel(entry.date),
-        dateISO: entry.date,
+        date: makeDateLabel(d),
         start: i === 0 ? 'Plant' : '',
-        fieldId: entry.farm_id,
+        fieldId: '',
         endHub: ''
-      }));
-      setIsPrefilledFromCalendar(true);
-      setDayPlans(initialPlans);
-    } else {
-      // Fallback: if no calendar dates exist for this activity, allow manual planning
-      const base = new Date();
-      const makeDateLabel = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const initialPlans: DayPlan[] = Array.from({ length: 3 }).map((_, i) => {
-        const d = new Date(base);
-        d.setDate(base.getDate() + i);
-        return {
-          id: `dp-${Date.now()}-${i}`,
-          dayIndex: i + 1,
-          date: makeDateLabel(d),
-          dateISO: d.toISOString().slice(0, 10),
-          start: i === 0 ? 'Plant' : '',
-          fieldId: '',
-          endHub: ''
-        };
-      });
-      setIsPrefilledFromCalendar(false);
-      setDayPlans(initialPlans);
-    }
+      };
+    });
+    setDayPlans(initialPlans);
     setStep(2);
   };
 
@@ -229,10 +206,6 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
   };
 
   const addDay = () => {
-    if (isPrefilledFromCalendar) {
-      toast.message('Days are pre-populated from the selected activity schedule');
-      return;
-    }
     setDayPlans(prev => {
       const last = prev[prev.length - 1];
       const base = new Date();
@@ -243,7 +216,6 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
         id: `dp-${Date.now()}-${prev.length}`,
         dayIndex: prev.length + 1,
         date: makeDateLabel(d),
-        dateISO: d.toISOString().slice(0, 10),
         start: last?.endHub || last?.start || 'Hub 1',
         fieldId: '',
         endHub: ''
@@ -252,7 +224,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
     });
   };
 
-  const handleLivePlan = async () => {
+  const handleLivePlan = () => {
     if (!selectedVehicle) {
       toast.error('Please select a vehicle');
       return;
@@ -265,54 +237,6 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
       toast.error('Please fill Start, Field ID and End Hub for all days');
       return;
     }
-
-    const plan: Record<
-      string,
-      {
-        start: string;
-        feild_id: string;
-        end_hub: string;
-        check_point: Array<{
-          physical_damange: boolean;
-          equipment_damange: boolean;
-          fuel_level: number;
-        }>;
-      }
-    > = {};
-
-    for (const p of dayPlans) {
-      const dateKey = (p.dateISO && p.dateISO.trim()) ? p.dateISO.trim() : p.date;
-      plan[dateKey] = {
-        start: p.start,
-        feild_id: p.fieldId,
-        end_hub: p.endHub,
-        check_point: [
-          {
-            physical_damange: false,
-            equipment_damange: false,
-            fuel_level: 0,
-          },
-        ],
-      };
-    }
-
-    setSaving(true);
-    try {
-      const response = await fetch(`${getBaseUrl()}/admin_vehicles/save_logistics_plan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, vehicle_id: selectedVehicle.vehicle_id }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Request failed (${response.status})`);
-      }
-
-      const result = await response.json().catch(() => null);
-      if (!result || result.success !== true) {
-        throw new Error('Save failed');
-      }
 
     // Build stops from day plans
     const builtStops: RouteStop[] = [];
@@ -330,7 +254,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
         id: `s-${Date.now()}-${idx}-f`,
         date: p.date,
         type: 'Field',
-        locationName: `${isPrefilledFromCalendar ? 'Farm' : 'Field'} ${p.fieldId}`,
+        locationName: `Field ${p.fieldId}`,
         isReached: false
       });
       builtStops.push({
@@ -355,15 +279,8 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
       currentStep: 1,
       createdAt: new Date().toLocaleDateString(),
     });
-
-      toast.success('Trip Saved & Live!');
-      onClose();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to save plan';
-      toast.error(message);
-    } finally {
-      setSaving(false);
-    }
+    toast.success("Trip Created & Live!");
+    onClose();
   };
 
   return (
@@ -434,25 +351,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
                                   >
                                     <div className="flex items-center justify-between mb-2">
                                       <div className="text-sm font-bold text-gray-900">{activity}</div>
-                                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">{entries.length} days</span>
-                                    </div>
-                                    <div className="space-y-1">
-                                      {entries.slice(0, 3).map((entry, idx) => (
-                                        <div key={idx} className="flex items-center gap-2 text-xs text-gray-600">
-                                          <CalendarIcon className="w-3 h-3 text-gray-400" />
-                                          <span>{new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                                          <span className="text-gray-400">•</span>
-                                          <span>{entry.acres_covered} acres</span>
-                                        </div>
-                                      ))}
-                                      {entries.length > 3 && (
-                                        <div className="text-xs text-gray-400 italic">+{entries.length - 3} more dates</div>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </>
+                                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-fu
                           ) : (
                             <div className="text-center py-8">
                               <div className="text-xs text-gray-400 mb-2">No scheduled work</div>
@@ -486,7 +385,25 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
                       <div className="text-sm text-gray-500">Driver: {selectedVehicle.driver_name || selectedVehicle.driver} • Activity: <span className="font-medium text-blue-600">{selectedActivity}</span></div>
                     </div>
                   </div>
-                  <button onClick={() => { setStep(1); setSelectedVehicle(null); setSelectedActivity(null); setIsPrefilledFromCalendar(false); setDayPlans([]); }} className="text-sm text-blue-600 hover:underline flex items-center gap-1">
+                  <button onClick={() => { setStep(1); setSelectedVehicle(null); setSelectedActivity(null); }
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: Trip Planning */}
+          {step === 2 && selectedVehicle && (
+            <div className="max-w-4xl mx-auto">
+              {/* Selected Vehicle Info */}
+              <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Truck className="w-6 h-6" /></div>
+                    <div>
+                      <div className="text-lg font-bold text-gray-900">{selectedVehicle.reg}</div>
+                      <div className="text-sm text-gray-500">{selectedVehicle.type} • Driver: {selectedVehicle.driver}</div>
+                    </div>
+                  </div>
+                  <button onClick={() => setStep(1)} className="text-sm text-blue-600 hover:underline flex items-center gap-1">
                     <ArrowLeft className="w-4 h-4" /> Change Vehicle
                   </button>
                 </div>
@@ -497,9 +414,6 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
                 <div className="p-6 border-b border-gray-100 bg-gray-50/50">
                   <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><CalendarIcon className="w-5 h-5 text-[#2F5233]" /> Daily Trip Plan</h2>
                   <p className="text-sm text-gray-500">Define daily movements: Start → Field → Hub</p>
-                  {isPrefilledFromCalendar && (
-                    <p className="text-xs text-gray-500 mt-2">Date and Field ID are pre-filled from the selected activity schedule. Enter End Hub only.</p>
-                  )}
                 </div>
                 <div className="p-8 space-y-6">
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -509,7 +423,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
                           <th className="p-3 font-medium pl-6">Day</th>
                           <th className="p-3 font-medium">Date</th>
                           <th className="p-3 font-medium">Start</th>
-                          <th className="p-3 font-medium">{isPrefilledFromCalendar ? 'Farm ID' : 'Field ID'}</th>
+                          <th className="p-3 font-medium">Field ID</th>
                           <th className="p-3 font-medium">End Hub</th>
                         </tr>
                       </thead>
@@ -531,19 +445,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
                               )}
                             </td>
                             <td className="p-3">
-                              <input
-                                className={cn(
-                                  "w-full p-2 border border-gray-200 rounded text-sm",
-                                  isPrefilledFromCalendar ? "bg-gray-100 text-gray-700" : "bg-white"
-                                )}
-                                placeholder={isPrefilledFromCalendar ? "Prefilled" : "e.g. 123456"}
-                                value={dp.fieldId}
-                                readOnly={isPrefilledFromCalendar}
-                                onChange={e => {
-                                  if (isPrefilledFromCalendar) return;
-                                  updateDayPlan(dp.id, 'fieldId', e.target.value);
-                                }}
-                              />
+                              <input className="w-full p-2 border border-gray-200 rounded bg-white text-sm" placeholder="e.g. 123456" value={dp.fieldId} onChange={e => updateDayPlan(dp.id, 'fieldId', e.target.value)} />
                             </td>
                             <td className="p-3">
                               <input className="w-full p-2 border border-gray-200 rounded bg-white text-sm" placeholder="e.g. Hub 3" value={dp.endHub} onChange={e => updateDayPlan(dp.id, 'endHub', e.target.value)} />
@@ -554,16 +456,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
                     </table>
                   </div>
                   <div className="flex justify-between items-center">
-                    <button
-                      type="button"
-                      onClick={addDay}
-                      className={cn(
-                        "px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium",
-                        isPrefilledFromCalendar ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "hover:bg-gray-50"
-                      )}
-                    >
-                      + Add Day
-                    </button>
+                    <button type="button" onClick={addDay} className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">+ Add Day</button>
                     <div className="text-xs text-gray-500">Start auto-fills from previous day's hub</div>
                   </div>
 
@@ -578,7 +471,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
                           <div className="flex items-center gap-2 ml-2">
                             <span className="px-2 py-1 rounded bg-blue-50 text-blue-700">{dp.start || '—'}</span>
                             <ChevronRight className="w-4 h-4 text-gray-400" />
-                            <span className="px-2 py-1 rounded bg-green-50 text-green-700">{isPrefilledFromCalendar ? 'Farm' : 'Field'} {dp.fieldId || '—'}</span>
+                            <span className="px-2 py-1 rounded bg-green-50 text-green-700">Field {dp.fieldId || '—'}</span>
                             <ChevronRight className="w-4 h-4 text-gray-400" />
                             <span className="px-2 py-1 rounded bg-purple-50 text-purple-700">{dp.endHub || '—'}</span>
                           </div>
@@ -590,15 +483,8 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
               </div>
 
               <div className="mt-6 flex justify-end">
-                <button
-                  onClick={handleLivePlan}
-                  disabled={saving}
-                  className={cn(
-                    "bg-[#2F5233] text-white px-8 py-3 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2",
-                    saving ? "opacity-60 cursor-not-allowed" : "hover:bg-[#1a331d]"
-                  )}
-                >
-                  <CheckCircle2 className="w-4 h-4" /> {saving ? 'Saving…' : 'Make Live'}
+                <button onClick={handleLivePlan} className="bg-[#2F5233] text-white px-8 py-3 rounded-lg text-sm font-bold hover:bg-[#1a331d] shadow-sm flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" /> Make Live
                 </button>
               </div>
             </div>
@@ -888,13 +774,6 @@ const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, 
 const MonitorSection = ({ plans, onUpdate }: { plans: LogisticsPlan[], onUpdate: (p: LogisticsPlan) => void }) => {
   const [activePlan, setActivePlan] = useState<LogisticsPlan | null>(null);
 
-  const renderTripStatusIcon = (status?: TripStatusBackend) => {
-    if (status === 'started') return <AlertTriangle className="w-4 h-4 text-yellow-600" />;
-    if (status === 'completed') return <CheckCircle2 className="w-4 h-4 text-green-600" />;
-    if (status === 'created') return <Clock className="w-4 h-4 text-slate-500" />;
-    return <Clock className="w-4 h-4 text-slate-400" />;
-  };
-
   return (
     <div>
       {/* Grid */}
@@ -918,14 +797,7 @@ const MonitorSection = ({ plans, onUpdate }: { plans: LogisticsPlan[], onUpdate:
               <div className="mt-2 mb-6 text-sm text-gray-600 space-y-1">
                 <p className="flex items-center gap-2"><User className="w-3 h-3 text-gray-400" /> Driver: {plan.driverName}</p>
                 <p className="flex items-center gap-2">
-                  {renderTripStatusIcon(plan.tripStatus)}
-                  Status:
-                  <span className={cn(
-                    "font-medium",
-                    plan.tripStatus === 'completed' ? "text-green-600" : plan.tripStatus === 'started' ? "text-yellow-700" : "text-slate-600"
-                  )}>
-                    {plan.tripStatus || plan.status}
-                  </span>
+                  <Activity className="w-3 h-3 text-gray-400" /> Status: <span className={cn("font-medium", plan.status === 'Completed' ? "text-blue-600" : "text-green-600")}>{plan.status}</span>
                 </p>
               </div>
               
@@ -962,95 +834,6 @@ const MonitorSection = ({ plans, onUpdate }: { plans: LogisticsPlan[], onUpdate:
 const LogisticsManagement = () => {
   const [plans, setPlans] = useState<LogisticsPlan[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [loadingPlans, setLoadingPlans] = useState(true);
-
-  const buildStopsFromBackendPlan = (plan: Record<string, BackendPlanEntry>): RouteStop[] => {
-    const dates = Object.keys(plan).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-    if (dates.length === 0) return [];
-
-    const builtStops: RouteStop[] = [];
-
-    const firstDate = dates[0];
-    builtStops.push({
-      id: `s-${Date.now()}-start`,
-      date: firstDate,
-      type: (plan[firstDate].start.toLowerCase().includes('hub') ? 'Hub' : 'Plant'),
-      locationName: plan[firstDate].start,
-      isReached: false,
-    });
-
-    dates.forEach((date, idx) => {
-      const p = plan[date];
-      builtStops.push({
-        id: `s-${Date.now()}-${idx}-f`,
-        date,
-        type: 'Field',
-        locationName: `Field ${p.feild_id}`,
-        isReached: false,
-      });
-      builtStops.push({
-        id: `s-${Date.now()}-${idx}-h`,
-        date,
-        type: 'Hub',
-        locationName: p.end_hub,
-        isReached: false,
-        inspection: { completed: false, items: STANDARD_CHECKS.map(c => ({ ...c })) },
-      });
-    });
-
-    return builtStops;
-  };
-
-  const fetchPlans = async () => {
-    setLoadingPlans(true);
-    try {
-      const response = await fetch(`${getBaseUrl()}/admin_vehicles/get_logistics_plan`);
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Request failed (${response.status})`);
-      }
-      const data = (await response.json()) as BackendLogisticsPlan[];
-
-      const mapped: LogisticsPlan[] = (Array.isArray(data) ? data : []).map((item) => {
-        const internalStatus: PlanStatus = item.trip_status === 'completed' ? 'Completed' : item.trip_status === 'started' ? 'Live' : 'Draft';
-        const currentStep: TripStep = item.trip_status === 'completed' ? 3 : item.trip_status === 'started' ? 2 : 1;
-
-        const stops = buildStopsFromBackendPlan(item.plan || {});
-        if (item.trip_status === 'completed') {
-          stops.forEach(s => { s.isReached = true; });
-        }
-
-        const createdAt = new Date(item.created_at).toLocaleDateString();
-        const vehicleReg = item.vehicle_id ? item.vehicle_id.slice(0, 8) : 'Vehicle';
-
-        return {
-          id: item.plan_id,
-          vehicleId: item.vehicle_id,
-          vehicleReg,
-          vehicleType: 'Logistics',
-          driverName: '—',
-          driverPhone: '—',
-          stops,
-          status: internalStatus,
-          currentStep,
-          createdAt,
-          tripStatus: item.trip_status,
-        };
-      });
-
-      setPlans(mapped);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to load plans';
-      toast.error(message);
-      setPlans([]);
-    } finally {
-      setLoadingPlans(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchPlans();
-  }, []);
 
   const handleCreate = (p: LogisticsPlan) => {
     setPlans([...plans, p]);
@@ -1074,14 +857,7 @@ const LogisticsManagement = () => {
           </button>
         </div>
         
-        {loadingPlans ? (
-          <div className="text-center py-20">
-            <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-            <p className="text-gray-500">Loading trip plans...</p>
-          </div>
-        ) : (
-          <MonitorSection plans={plans} onUpdate={handleUpdate} />
-        )}
+        <MonitorSection plans={plans} onUpdate={handleUpdate} />
       </div>
 
       {/* Create Plan Modal */}

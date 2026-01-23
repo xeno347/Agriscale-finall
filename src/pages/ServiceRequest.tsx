@@ -21,18 +21,22 @@ import { Search, MoreVertical, CheckCircle2, FileText, Eye, User, MapPin, Calend
 // Types
 // ============================================
 
-export type RequestStatus = 'applied' | 'approved' | 'work_order' | 'completed';
+export type RequestStatus = 'applied' | 'approved' | 'work_order_sent' | 'completed';
+
+type CultivationOrderState = 'pending' | 'created';
 
 export interface ServiceRequest {
   id: string;
   serviceId: string;
   serviceName: string;
+  farmerId: string;
   farmerName: string;
   farmerContact: string;
   farmLocation: string;
   areaSize: string;
   requestedDate: Date;
   status: RequestStatus;
+  cultivationOrderState?: CultivationOrderState;
   appliedAt: Date;
   approvedAt?: Date;
   workOrderSentAt?: Date;
@@ -47,6 +51,10 @@ type RentalApplicationApiItem = {
   request_id?: string;
   farmer_name?: string;
   status?: string;
+  // Optional fields (not currently in the backend response we saw),
+  // but supported here for the "approved -> work_order_sent" gate.
+  cultivation_order_created?: boolean;
+  cultivation_order_status?: string;
 };
 
 type RentalApplicationsApiGroup = {
@@ -60,10 +68,27 @@ type RentalApplicationsApiResponse = {
 };
 
 function toRequestStatus(value: string | undefined): RequestStatus {
-  if (value === 'applied' || value === 'approved' || value === 'work_order' || value === 'completed') {
-    return value;
-  }
+  const v = (value ?? '').trim();
+
+  if (v === 'applied' || v === 'approved' || v === 'work_order_sent') return v;
+  if (v === 'Completed' || v === 'completed') return 'completed';
+
+  // Backward-compat / typo tolerance
+  if (v === 'work_order' || v === 'work_order_send' || v === 'work order sent') return 'work_order_sent';
+
   return 'applied';
+}
+
+function toApiRequestStatus(value: RequestStatus): string {
+  if (value === 'completed') return 'Completed';
+  return value;
+}
+
+function toCultivationOrderState(app: RentalApplicationApiItem): CultivationOrderState {
+  if (app?.cultivation_order_created === true) return 'created';
+  const raw = (app?.cultivation_order_status ?? '').toString().trim().toLowerCase();
+  if (raw === 'created' || raw === 'generated' || raw === 'done' || raw === 'available') return 'created';
+  return 'pending';
 }
 
 // ============================================
@@ -90,7 +115,7 @@ const statusConfig: Record<RequestStatus, { label: string; className: string }> 
     label: 'Approved',
     className: 'bg-amber-50 text-amber-700 border-amber-200',
   },
-  work_order: {
+  work_order_sent: {
     label: 'Work Order Sent',
     className: 'bg-indigo-50 text-indigo-700 border-indigo-200',
   },
@@ -127,7 +152,7 @@ const statusTabs: {
   { value: 'all', label: 'All Requests' },
   { value: 'applied', label: 'Applied' },
   { value: 'approved', label: 'Approved' },
-  { value: 'work_order', label: 'Work Order Sent' },
+  { value: 'work_order_sent', label: 'Work Order Sent' },
   { value: 'completed', label: 'Completed' },
 ];
 
@@ -140,6 +165,7 @@ export function ServiceRequestsStandalone() {
   const [activeTab, setActiveTab] = useState<RequestStatus | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [updatingByRequestId, setUpdatingByRequestId] = useState<Record<string, boolean>>({});
 
   const fetchApplications = async () => {
     const BASE_URL = getBaseUrl().replace(/\/$/, '');
@@ -182,12 +208,14 @@ export function ServiceRequestsStandalone() {
             id: app?.request_id ?? `${rentalId}-${Math.random().toString(16).slice(2)}`,
             serviceId: rentalId,
             serviceName,
+            farmerId: app?.farmer_id ?? '',
             farmerName: app?.farmer_name ?? 'Unknown',
             farmerContact: app?.contact ?? '',
             farmLocation: '-',
             areaSize: `${Number.isFinite(area) ? area : 0} acres`,
             requestedDate: safeRequestedDate,
             status: toRequestStatus(app?.status),
+            cultivationOrderState: toCultivationOrderState(app),
             appliedAt: safeRequestedDate,
           });
         }
@@ -222,20 +250,77 @@ export function ServiceRequestsStandalone() {
     return matchesStatus && matchesSearch;
   });
 
-  const updateRequestStatus = (id: string, newStatus: RequestStatus) => {
-    setRequests(
-      requests.map((r) => {
+  const applyLocalStatusUpdate = (id: string, newStatus: RequestStatus) => {
+    setRequests((prev) =>
+      prev.map((r) => {
         if (r.id === id) {
           const now = new Date();
           const updates: Partial<ServiceRequest> = { status: newStatus };
           if (newStatus === 'approved') updates.approvedAt = now;
-          if (newStatus === 'work_order') updates.workOrderSentAt = now;
+          if (newStatus === 'work_order_sent') updates.workOrderSentAt = now;
           if (newStatus === 'completed') updates.completedAt = now;
           return { ...r, ...updates };
         }
         return r;
       })
     );
+  };
+
+  const updateRequestStatus = async (request: ServiceRequest, newStatus: RequestStatus) => {
+    if (!request?.serviceId || !request?.farmerId) {
+      toast.error('Missing rental_id or farmer_id for this request');
+      return;
+    }
+
+    // Gate: Approved -> Work Order Sent only allowed after cultivation order created
+    if (
+      request.status === 'approved' &&
+      newStatus === 'work_order_sent' &&
+      request.cultivationOrderState !== 'created'
+    ) {
+      toast.error('Create cultivation order first');
+      return;
+    }
+
+    if (updatingByRequestId[request.id]) return;
+
+    const previousStatus = request.status;
+    setUpdatingByRequestId((prev) => ({ ...prev, [request.id]: true }));
+
+    // Optimistic UI update
+    applyLocalStatusUpdate(request.id, newStatus);
+
+    const BASE_URL = getBaseUrl().replace(/\/$/, '');
+    try {
+      const res = await fetch(`${BASE_URL}/admin_rental/update_rental_application_status`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          rental_id: request.serviceId,
+          farmer_id: request.farmerId,
+          new_status: toApiRequestStatus(newStatus),
+        }),
+      });
+
+      const data: any = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const message = data?.message || data?.error || 'Failed to update status';
+        applyLocalStatusUpdate(request.id, previousStatus);
+        toast.error(message);
+        return;
+      }
+
+      toast.success('Status updated');
+    } catch (err: any) {
+      applyLocalStatusUpdate(request.id, previousStatus);
+      toast.error(err?.message || 'Failed to update status');
+    } finally {
+      setUpdatingByRequestId((prev) => ({ ...prev, [request.id]: false }));
+    }
   };
 
   const getNextAction = (
@@ -245,8 +330,8 @@ export function ServiceRequestsStandalone() {
       case 'applied':
         return { label: 'Approve', nextStatus: 'approved' };
       case 'approved':
-        return { label: 'Send Work Order', nextStatus: 'work_order' };
-      case 'work_order':
+        return { label: 'Send Work Order', nextStatus: 'work_order_sent' };
+      case 'work_order_sent':
         return { label: 'Mark Complete', nextStatus: 'completed' };
       default:
         return null;
@@ -334,6 +419,13 @@ export function ServiceRequestsStandalone() {
               ) : filteredRequests.length > 0 ? (
                 filteredRequests.map((request, index) => {
                   const nextAction = getNextAction(request.status);
+                  const requiresCultivationOrder =
+                    request.status === 'approved' && nextAction?.nextStatus === 'work_order_sent';
+                  const isCultivationOrderCreated = request.cultivationOrderState === 'created';
+                  const isActionDisabled =
+                    Boolean(updatingByRequestId[request.id]) ||
+                    (requiresCultivationOrder && !isCultivationOrderCreated);
+
                   return (
                     <TableRow
                       key={request.id}
@@ -392,19 +484,35 @@ export function ServiceRequestsStandalone() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {request.status === 'approved' && (
+                            <div className="text-xs text-muted-foreground mr-2 whitespace-nowrap">
+                              Cultivation order:{' '}
+                              <span
+                                className={cn(
+                                  'font-medium',
+                                  request.cultivationOrderState === 'created'
+                                    ? 'text-foreground'
+                                    : 'text-muted-foreground'
+                                )}
+                              >
+                                {request.cultivationOrderState === 'created' ? 'Created' : 'Pending'}
+                              </span>
+                            </div>
+                          )}
                           {nextAction && (
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() =>
-                                updateRequestStatus(request.id, nextAction.nextStatus)
+                                updateRequestStatus(request, nextAction.nextStatus)
                               }
                               className="gap-1.5 text-xs"
+                              disabled={isActionDisabled}
                             >
                               {nextAction.nextStatus === 'approved' && (
                                 <CheckCircle2 className="w-3.5 h-3.5" />
                               )}
-                              {nextAction.nextStatus === 'work_order' && (
+                              {nextAction.nextStatus === 'work_order_sent' && (
                                 <FileText className="w-3.5 h-3.5" />
                               )}
                               {nextAction.nextStatus === 'completed' && (

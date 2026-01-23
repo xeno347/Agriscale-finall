@@ -37,6 +37,7 @@ import {
   CheckCircle2,
   CircleDot,
   Loader2,
+  ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -57,11 +58,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area'; // New component
 import getBaseUrl from '@/lib/config';
 
 type LivePlanStepStatus = 'idle' | 'loading' | 'success' | 'error';
+
+type RentalServiceOption = {
+  id: string;
+  name: string;
+  isLive: boolean;
+};
 
 // ============================================================================
 // TYPES
@@ -454,9 +469,11 @@ const CreateCultivationPlan: React.FC = () => {
   const [savingPlan, setSavingPlan] = useState(false);
 
   const [livePlanProgressOpen, setLivePlanProgressOpen] = useState(false);
-  const [livePlanStep, setLivePlanStep] = useState<1 | 2 | 3>(1);
+  const [livePlanStep, setLivePlanStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [savePlanStatus, setSavePlanStatus] = useState<LivePlanStepStatus>('idle');
   const [assignFarmsStatus, setAssignFarmsStatus] = useState<LivePlanStepStatus>('idle');
+  const [assignContractFarmersStatus, setAssignContractFarmersStatus] = useState<LivePlanStepStatus>('idle');
+  const [adjustRentalServicesStatus, setAdjustRentalServicesStatus] = useState<LivePlanStepStatus>('idle');
   const [livePlanError, setLivePlanError] = useState<string | null>(null);
 
   // --- State for mapped data (no popup) ---
@@ -466,6 +483,10 @@ const CreateCultivationPlan: React.FC = () => {
   const [apiMasterPlans, setApiMasterPlans] = useState<{ id: string; name: string; plan_list: any[] }[]>([]);
   // Add state for fetched blocks
   const [apiBlocks, setApiBlocks] = useState<{ block_id: string; block_name: string; total_area: number }[]>([]);
+
+  // Rental services (multi-select)
+  const [rentalServices, setRentalServices] = useState<RentalServiceOption[]>([]);
+  const [selectedRentalServiceIds, setSelectedRentalServiceIds] = useState<string[]>([]);
 
   // Plan metadata state and loading
   const [planMetaLoading, setPlanMetaLoading] = useState(false);
@@ -525,7 +546,45 @@ const CreateCultivationPlan: React.FC = () => {
       .catch(err => {
         console.error('Failed to fetch blocks:', err);
       });
+
+    // Fetch rental services (rate cards)
+    fetch(`${BASE_URL}/admin_rental/get_all_rental_rate_cards`)
+      .then(res => {
+        if (!res.ok) throw new Error('Network response was not ok');
+        return res.json();
+      })
+      .then(data => {
+        if (!Array.isArray(data)) return;
+        const mapped: RentalServiceOption[] = data
+          .map((item: any) => {
+            const id = String(item?.rental_id ?? '').trim();
+            const name = String(item?.service_name ?? '').trim();
+            const status = String(item?.status ?? '').trim().toLowerCase();
+            if (!id || !name) return null;
+            return { id, name, isLive: status === 'live' };
+          })
+          .filter(Boolean) as RentalServiceOption[];
+
+        // Prefer live services; if none are marked live, show all.
+        const live = mapped.filter((s) => s.isLive);
+        setRentalServices(live.length ? live : mapped);
+      })
+      .catch(err => {
+        console.error('Failed to fetch rental services:', err);
+      });
   }, []);
+
+  const selectedRentalServices = useMemo(() => {
+    if (!selectedRentalServiceIds.length) return [];
+    const byId = new Map(rentalServices.map((s) => [s.id, s] as const));
+    return selectedRentalServiceIds.map((id) => byId.get(id)).filter(Boolean) as RentalServiceOption[];
+  }, [rentalServices, selectedRentalServiceIds]);
+
+  const toggleRentalService = (id: string) => {
+    setSelectedRentalServiceIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
 
   // Helper to get selected master plan from API data
   const selectedApiMasterPlan = useMemo(() => {
@@ -603,10 +662,16 @@ const CreateCultivationPlan: React.FC = () => {
       toast.error('Please select a block and master plan first.');
       return;
     }
+    if (!selectedRentalServiceIds.length) {
+      toast.error('Please select at least one rental service.');
+      return;
+    }
     if (!rawMappedData.length) {
       toast.error('Generate the plan mapping before saving.');
       return;
     }
+
+    let currentStep: 1 | 2 | 3 | 4 | 5 = 1;
 
     try {
       setSavingPlan(true);
@@ -614,6 +679,8 @@ const CreateCultivationPlan: React.FC = () => {
       setLivePlanStep(1);
       setSavePlanStatus('idle');
       setAssignFarmsStatus('idle');
+      setAssignContractFarmersStatus('idle');
+      setAdjustRentalServicesStatus('idle');
       setLivePlanProgressOpen(true);
 
       const base = BASE_URL.replace(/\/$/, '');
@@ -624,6 +691,7 @@ const CreateCultivationPlan: React.FC = () => {
       };
 
       // Step 1: Plan made and ready (no work needed)
+      currentStep = 2;
       setLivePlanStep(2);
       setSavePlanStatus('loading');
 
@@ -640,6 +708,7 @@ const CreateCultivationPlan: React.FC = () => {
       setSavePlanStatus('success');
 
       // Step 3: Assigning farms (same payload)
+      currentStep = 3;
       setLivePlanStep(3);
       setAssignFarmsStatus('loading');
       const resp2 = await fetch(`${base}/admin_cultivation/feild_assignment_updater`, {
@@ -653,13 +722,56 @@ const CreateCultivationPlan: React.FC = () => {
         throw new Error('Field assignment did not return success');
       }
       setAssignFarmsStatus('success');
-      toast.success('Plan saved and farms assigned successfully!');
+
+      // Step 4: Assigning contract farmers (same payload)
+      currentStep = 4;
+      setLivePlanStep(4);
+      setAssignContractFarmersStatus('loading');
+      const resp3 = await fetch(`${base}/admin_cultivation/update_contractor_farmer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp3.ok) throw new Error('Failed to assign contract farmers');
+      const data3 = await resp3.json();
+      if (!(data3 && data3.status === 'success')) {
+        throw new Error('Assign contract farmers did not return success');
+      }
+      setAssignContractFarmersStatus('success');
+
+      // Step 5: Adjusting rental services
+      currentStep = 5;
+      setLivePlanStep(5);
+      setAdjustRentalServicesStatus('loading');
+
+      const rentalSetPayload = {
+        rental_set_id: selectedRentalServiceIds,
+        block_id: farmId,
+        master_plan_id: masterPlanId,
+      };
+
+      const resp4 = await fetch(`${base}/admin_cultivation/update_rental_set`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rentalSetPayload),
+      });
+      if (!resp4.ok) throw new Error('Failed to adjust rental services');
+      const data4 = await resp4.json();
+      if (!(data4 && data4.status === 'success')) {
+        throw new Error('Adjust rental services did not return success');
+      }
+      setAdjustRentalServicesStatus('success');
+
+      toast.success('Plan published successfully!');
     } catch (err) {
       console.error('Failed to save plan:', err);
       const message = err instanceof Error ? err.message : 'Something went wrong';
       setLivePlanError(message);
-      if (livePlanStep === 2) setSavePlanStatus('error');
-      if (livePlanStep === 3) setAssignFarmsStatus('error');
+      // Mark the active step as failed (best-effort)
+      if (currentStep === 2) setSavePlanStatus('error');
+      if (currentStep === 3) setAssignFarmsStatus('error');
+      if (currentStep === 4) setAssignContractFarmersStatus('error');
+      if (currentStep === 5) setAdjustRentalServicesStatus('error');
       toast.error(message);
     } finally {
       setSavingPlan(false);
@@ -835,6 +947,52 @@ const CreateCultivationPlan: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Select Rental Services</label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between"
+                    disabled={!rentalServices.length}
+                  >
+                    <span className="truncate">
+                      {selectedRentalServices.length
+                        ? `${selectedRentalServices.length} selected`
+                        : rentalServices.length
+                          ? 'Choose rental services...'
+                          : 'No rental services found'}
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]" align="start">
+                  <DropdownMenuLabel>Rental Services</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {rentalServices.map((s) => (
+                    <DropdownMenuCheckboxItem
+                      key={s.id}
+                      checked={selectedRentalServiceIds.includes(s.id)}
+                      onCheckedChange={() => toggleRentalService(s.id)}
+                    >
+                      {s.name}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {selectedRentalServices.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {selectedRentalServices.map((s) => (
+                    <Badge key={s.id} variant="secondary" className="text-xs">
+                      {s.name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
@@ -886,6 +1044,8 @@ const CreateCultivationPlan: React.FC = () => {
             setLivePlanStep(1);
             setSavePlanStatus('idle');
             setAssignFarmsStatus('idle');
+            setAssignContractFarmersStatus('idle');
+            setAdjustRentalServicesStatus('idle');
             setLivePlanError(null);
           }
         }}
@@ -964,6 +1124,60 @@ const CreateCultivationPlan: React.FC = () => {
               </div>
             </div>
 
+            {/* Step 4 */}
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-background p-3">
+              <div className="mt-0.5">
+                {assignContractFarmersStatus === 'loading' ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                ) : assignContractFarmersStatus === 'success' ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                ) : assignContractFarmersStatus === 'error' ? (
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                ) : (
+                  <CircleDot className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold">Step 4: Assigning contract farmers</div>
+                <div className="text-sm text-muted-foreground">
+                  {assignContractFarmersStatus === 'loading'
+                    ? 'Assigning contract farmers…'
+                    : assignContractFarmersStatus === 'success'
+                      ? 'Contract farmers assigned successfully'
+                      : assignContractFarmersStatus === 'error'
+                        ? 'Failed to assign contract farmers'
+                        : 'Pending'}
+                </div>
+              </div>
+            </div>
+
+            {/* Step 5 */}
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-background p-3">
+              <div className="mt-0.5">
+                {adjustRentalServicesStatus === 'loading' ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                ) : adjustRentalServicesStatus === 'success' ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                ) : adjustRentalServicesStatus === 'error' ? (
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                ) : (
+                  <CircleDot className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold">Step 5: Adjusting rental services</div>
+                <div className="text-sm text-muted-foreground">
+                  {adjustRentalServicesStatus === 'loading'
+                    ? 'Adjusting rental services…'
+                    : adjustRentalServicesStatus === 'success'
+                      ? 'Rental services adjusted successfully'
+                      : adjustRentalServicesStatus === 'error'
+                        ? 'Failed to adjust rental services'
+                        : 'Pending'}
+                </div>
+              </div>
+            </div>
+
             {livePlanError && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 {livePlanError}
@@ -972,7 +1186,7 @@ const CreateCultivationPlan: React.FC = () => {
           </div>
 
           <DialogFooter>
-            {assignFarmsStatus === 'success' ? (
+            {adjustRentalServicesStatus === 'success' ? (
               <Button
                 className="bg-green-700 hover:bg-green-800"
                 onClick={() => {
@@ -1013,6 +1227,19 @@ const CreateCultivationPlan: React.FC = () => {
             {apiMasterPlans.find(p => p.id === masterPlanId)?.name}
           </span>
         )}
+
+        {selectedRentalServices.length > 0 && (
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded bg-muted text-foreground text-sm font-medium">
+            <Layers className="h-4 w-4 text-muted-foreground" />
+            <span className="text-muted-foreground">Rental Services:</span>
+            <span className="font-semibold">
+              {selectedRentalServices.length === 1
+                ? selectedRentalServices[0].name
+                : `${selectedRentalServices.length} selected`}
+            </span>
+          </span>
+        )}
+
         {farmId && masterPlanId && !day0 && (
           <span className="text-muted-foreground text-xs animate-pulse font-semibold text-blue-600">
              &larr; Please click a date below to set Day 0
