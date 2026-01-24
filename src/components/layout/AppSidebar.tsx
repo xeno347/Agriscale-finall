@@ -17,7 +17,8 @@ import {
   Scale,
   Tractor,
   FileText,
-  Map 
+  Map,
+  AlertCircle // Imported AlertCircle icon
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -68,18 +69,26 @@ const NavItem = ({
 
       {!isSidebarCollapsed && <span className="truncate">{label}</span>}
 
-      {notificationStatus !== "none" && (
+      {/* Updated notification logic to render AlertCircle icon for warnings */}
+      {notificationStatus === "warning" ? (
+        <AlertCircle 
+          className={cn(
+            "absolute text-orange-500 fill-orange-50",
+            isSidebarCollapsed 
+              ? "top-1 right-1 w-3 h-3" 
+              : "right-3 top-1/2 -translate-y-1/2 w-4 h-4"
+          )} 
+        />
+      ) : notificationStatus === "success" ? (
         <span
           className={cn(
-            "absolute w-2 h-2 rounded-full ring-1 ring-white",
+            "absolute w-2 h-2 rounded-full bg-green-500 ring-1 ring-white",
             isSidebarCollapsed
               ? "top-2 right-2"
-              : "right-3 top-1/2 -translate-y-1/2",
-            notificationStatus === "warning" && "bg-orange-500",
-            notificationStatus === "success" && "bg-green-500"
+              : "right-3 top-1/2 -translate-y-1/2"
           )}
         />
-      )}
+      ) : null}
     </NavLink>
   );
 };
@@ -223,6 +232,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         {/* Group 1: Farm Management */}
         <NavGroup label="Farm Management" isSidebarCollapsed={isCollapsed}>
           <NavItem to="/tasks-beta" icon={CheckSquare} label="Tasks (Beta)" isSidebarCollapsed={isCollapsed} />
+          {/* Leads already has logic to show warning, which will now render as an alert icon */}
           <NavItem 
             to="/leads" 
             icon={Users} 
@@ -244,10 +254,23 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         {/* Group 3: Management */}
         <NavGroup label="Management" isSidebarCollapsed={isCollapsed}>
           <NavItem to="/inventory" icon={Box} label="Inventory" isSidebarCollapsed={isCollapsed} />
-          <NavItem to="/logistics" icon={Truck} label="Logistics" isSidebarCollapsed={isCollapsed} />
-          {/* Resource Management removed here */}
+          {/* Added notificationStatus="warning" to Logistics */}
+          <NavItem 
+            to="/logistics" 
+            icon={Truck} 
+            label="Logistics" 
+            isSidebarCollapsed={isCollapsed} 
+            notificationStatus="warning"
+          />
           <NavItem to="/vehicle-management" icon={Car} label="Vehicle List" isSidebarCollapsed={isCollapsed} />
-          <NavItem to="/fleet-chart" icon={Map} label="Fleet Chart" isSidebarCollapsed={isCollapsed} />
+          {/* Added notificationStatus="warning" to Fleet Chart */}
+          <NavItem 
+            to="/fleet-chart" 
+            icon={Map} 
+            label="Fleet Chart" 
+            isSidebarCollapsed={isCollapsed} 
+            notificationStatus="warning"
+          />
           <NavItem to="/staff-onboarding" icon={UserPlus} label="Staff Onboarding" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 

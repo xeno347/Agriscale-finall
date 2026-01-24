@@ -393,7 +393,8 @@ const FleetChart = () => {
             <table className="border-collapse w-full min-w-max">
               <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
                 <tr>
-                  <th className="sticky left-0 top-0 z-20 bg-gray-50 border-b border-r border-gray-200 w-48 min-w-[12rem] p-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Vehicle No.</th>
+                  {/* --- FIX: INCREASED Z-INDEX TO 50 --- */}
+                  <th className="sticky left-0 top-0 z-50 bg-gray-50 border-b border-r border-gray-200 w-48 min-w-[12rem] p-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Vehicle No.</th>
                   {days.map((day, i) => (
                     <th key={i} className="border-b border-gray-200 min-w-[10rem] p-2 text-center bg-gray-50">
                       <div className="flex flex-col items-center">
@@ -412,7 +413,8 @@ const FleetChart = () => {
 
                   return (
                     <tr key={vId} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="sticky left-0 z-10 bg-white border-r border-b border-gray-100 p-4 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.05)]">
+                      {/* --- FIX: INCREASED Z-INDEX TO 40 --- */}
+                      <td className="sticky left-0 z-40 bg-white border-r border-b border-gray-100 p-4 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.05)]">
                         <div className="font-bold text-gray-900 text-sm whitespace-nowrap">{vName}</div>
                         <div className="text-[10px] text-gray-400 font-medium uppercase mt-0.5">{vehicle.vehicle_information?.type}</div>
                       </td>
@@ -447,7 +449,7 @@ const FleetChart = () => {
                               <div className="w-full h-full flex items-center justify-center text-gray-200 select-none text-lg">-</div>
                             )}
 
-                            {/* --- CLICKABLE HUB CONNECTOR --- */}
+                            {/* --- CLICKABLE HUB CONNECTOR (Z-30) --- */}
                             {showHubConnector && (
                               <button 
                                 onClick={(e) => {
