@@ -12,6 +12,8 @@ import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { getBaseUrl } from '@/lib/config';
+import 'leaflet/dist/leaflet.css';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Popup } from 'react-leaflet';
 
 // --- TYPES ---
 
@@ -65,10 +67,10 @@ interface LogisticsPlan {
   driverPhone: string;
   stops: RouteStop[];
   status: PlanStatus;
-  currentStep: TripStep; // 1, 2, or 3
+  currentStep: TripStep;
   createdAt: string;
   tripStatus?: TripStatusBackend;
-  
+
   // Final Data
   finalData?: {
     finalChecklist: ChecklistItem[];
@@ -124,6 +126,151 @@ const generateTripSheetPDF = (plan: LogisticsPlan) => {
   doc.text(`TRIP SHEET: ${plan.id}`, 14, 20);
   doc.save(`TripSheet_${plan.id}.pdf`);
   toast.success("Trip Sheet PDF Downloaded");
+};
+
+// --- MAP HELPERS ---
+type LatLngTuple = [number, number];
+const BASE_COORD: LatLngTuple = [19.0760, 72.8777]; // Dummy base (Mumbai region)
+
+const getDummyCoordsForStop = (stop: RouteStop, index: number): LatLngTuple => {
+  const name = (stop.locationName || '').trim();
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash + name.charCodeAt(i)) % 1024;
+  const lat = BASE_COORD[0] + ((hash % 40) * 0.0015) + (index * 0.002);
+  const lng = BASE_COORD[1] + (((hash >> 3) % 40) * 0.0015);
+  return [lat, lng];
+};
+
+const typeColor = (t: LocationType) => {
+  if (t === 'Plant') return '#16a34a';
+  if (t === 'Field') return '#f59e0b';
+  if (t === 'Hub') return '#8b5cf6';
+  return '#64748b';
+};
+
+// Small Map Preview Component for Cards
+const MapPreview = ({ plan }: { plan: LogisticsPlan }) => {
+  const points = plan.stops.map((s, i) => ({ ...s, coords: getDummyCoordsForStop(s, i) }));
+  const center = points[0]?.coords || BASE_COORD;
+
+  return (
+    <div className="h-24 w-full rounded-lg overflow-hidden bg-gray-100 relative">
+      <MapContainer 
+        center={center} 
+        zoom={12} 
+        style={{ height: '100%', width: '100%' }}
+        zoomControl={false}
+        dragging={false}
+        scrollWheelZoom={false}
+        doubleClickZoom={false}
+        touchZoom={false}
+      >
+        <TileLayer
+          attribution=''
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <Polyline positions={points.map(p => p.coords)} color="#2563eb" weight={3} />
+        {points.map((p) => (
+          <CircleMarker 
+            key={p.id} 
+            center={p.coords} 
+            radius={4} 
+            color={typeColor(p.type)} 
+            fillColor={typeColor(p.type)} 
+            fillOpacity={0.8}
+            stroke={false}
+          />
+        ))}
+      </MapContainer>
+      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
+    </div>
+  );
+};
+
+// --- MAP MODAL ---
+const MapModal = ({ plan, onClose }: { plan: LogisticsPlan; onClose: () => void }) => {
+  const points = plan.stops.map((s, i) => ({ ...s, coords: getDummyCoordsForStop(s, i) }));
+  const center = points[0]?.coords || BASE_COORD;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-7xl h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-200">
+        <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
+              <Navigation className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-xl text-gray-900">Route Visualization</h2>
+              <p className="text-gray-600 text-sm">{plan.vehicleReg} • {plan.stops.length} waypoints</p>
+            </div>
+          </div>
+          <button 
+            onClick={onClose}
+            className="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center transition-colors"
+          >
+            <X className="w-5 h-5 text-gray-600" />
+          </button>
+        </div>
+
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-0">
+          <div className="lg:col-span-2">
+            <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
+              <TileLayer
+                attribution='&copy; OpenStreetMap contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              <Polyline positions={points.map(p => p.coords)} color="#2563eb" weight={4} />
+              {points.map((p) => (
+                <CircleMarker key={p.id} center={p.coords} radius={8} color={typeColor(p.type)} fillColor={typeColor(p.type)} fillOpacity={0.8}>
+                  <Popup>
+                    <div className="text-sm">
+                      <div className="font-bold">{p.type}</div>
+                      <div>{p.locationName}</div>
+                      <div className="text-xs text-gray-500">{p.date}</div>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              ))}
+            </MapContainer>
+          </div>
+
+          <div className="bg-gray-50 border-l border-gray-200 p-6 overflow-y-auto">
+            <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">
+              Route Details
+            </h3>
+            <div className="space-y-3">
+              {points.map((p, idx) => {
+                const getStopConfig = () => {
+                  if (idx === 0) return { label: 'Start', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' };
+                  if (p.type === 'Field') return { label: `Stop ${Math.ceil(idx/2)}`, bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' };
+                  return { label: `Rest ${Math.ceil(idx/2)}`, bg: 'bg-slate-50', text: 'text-slate-700', border: 'border-slate-200' };
+                };
+                
+                const config = getStopConfig();
+                
+                return (
+                  <div key={`pd-${p.id}`} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-gray-100">
+                    <div className={`px-2.5 py-1 rounded-md text-xs font-medium ${config.bg} ${config.text} ${config.border} border whitespace-nowrap`}>
+                      {config.label}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">{p.locationName}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-gray-600">{p.type}</span>
+                        <span className="text-gray-300">•</span>
+                        <span className="text-xs text-gray-500">{p.date}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // --- COMPONENTS ---
@@ -367,24 +514,37 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-5xl max-h-[90vh] rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-5xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-200">
         
         {/* Header */}
-        <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <h2 className="font-bold text-xl text-gray-900">Create New Trip</h2>
+        <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+                <Plus className="w-4 h-4 text-white" />
+              </div>
+              <h2 className="font-semibold text-xl text-gray-900">Create New Operation</h2>
+            </div>
             <div className="flex items-center gap-2 text-sm">
-              <span className={cn("px-3 py-1 rounded-full font-bold", step === 1 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>1. Choose Vehicle</span>
-              <ChevronRight className="w-4 h-4 text-gray-300" />
-              <span className={cn("px-3 py-1 rounded-full font-bold", step === 2 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>2. Plan Trip</span>
+              <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium transition-all", step === 1 ? "bg-slate-900 text-white" : "bg-gray-100 text-gray-600")}>
+                <div className="w-1.5 h-1.5 bg-current rounded-full"></div>
+                Select Vehicle
+              </div>
+              <ChevronRight className="w-4 h-4 text-gray-400" />
+              <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium transition-all", step === 2 ? "bg-slate-900 text-white" : "bg-gray-100 text-gray-600")}>
+                <div className="w-1.5 h-1.5 bg-current rounded-full"></div>
+                Plan Route
+              </div>
             </div>
           </div>
-          <button onClick={onClose}><X className="w-6 h-6 text-gray-400 hover:text-gray-600" /></button>
+          <button onClick={onClose} className="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center transition-colors">
+            <X className="w-5 h-5 text-gray-600" />
+          </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-8 bg-gray-50/30">
+        <div className="flex-1 overflow-y-auto p-8 bg-gray-50">
           
           {/* STEP 1: Vehicle Selection */}
           {step === 1 && (
@@ -666,26 +826,42 @@ const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-5xl h-[85vh] rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-200">
         
         {/* Header with Steps Indicator */}
-        <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <h2 className="font-bold text-xl text-gray-900">Trip Execution</h2>
+        <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+                <LayoutList className="w-4 h-4 text-white" />
+              </div>
+              <h2 className="font-semibold text-xl text-gray-900">Operation Execution</h2>
+            </div>
             <div className="flex items-center gap-2 text-sm">
-              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 1 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>1. Info</span>
-              <ChevronRight className="w-4 h-4 text-gray-300" />
-              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 2 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>2. Timeline</span>
-              <ChevronRight className="w-4 h-4 text-gray-300" />
-              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 3 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>3. Finalize</span>
+              <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium transition-all", plan.currentStep === 1 ? "bg-slate-900 text-white" : "bg-gray-100 text-gray-600")}>
+                <div className="w-1.5 h-1.5 bg-current rounded-full"></div>
+                Info
+              </div>
+              <ChevronRight className="w-4 h-4 text-gray-400" />
+              <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium transition-all", plan.currentStep === 2 ? "bg-slate-900 text-white" : "bg-gray-100 text-gray-600")}>
+                <div className="w-1.5 h-1.5 bg-current rounded-full"></div>
+                Timeline
+              </div>
+              <ChevronRight className="w-4 h-4 text-gray-400" />
+              <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium transition-all", plan.currentStep === 3 ? "bg-slate-900 text-white" : "bg-gray-100 text-gray-600")}>
+                <div className="w-1.5 h-1.5 bg-current rounded-full"></div>
+                Finalize
+              </div>
             </div>
           </div>
-          <button onClick={onClose}><X className="w-6 h-6 text-gray-400 hover:text-gray-600" /></button>
+          <button onClick={onClose} className="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center transition-colors">
+            <X className="w-5 h-5 text-gray-600" />
+          </button>
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-8 bg-gray-50/30">
+        <div className="flex-1 overflow-y-auto p-8 bg-gray-50">
           
           {/* STEP 1: PRE-TRIP INFO (Diagram Step 1) */}
           {plan.currentStep === 1 && (
@@ -885,8 +1061,9 @@ const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, 
 
 
 // 2. MONITOR SECTION (The Grid View)
-const MonitorSection = ({ plans, onUpdate }: { plans: LogisticsPlan[], onUpdate: (p: LogisticsPlan) => void }) => {
+const MonitorSection = ({ plans, onUpdate, onCreateClick }: { plans: LogisticsPlan[], onUpdate: (p: LogisticsPlan) => void, onCreateClick: () => void }) => {
   const [activePlan, setActivePlan] = useState<LogisticsPlan | null>(null);
+  const [activeMapPlan, setActiveMapPlan] = useState<LogisticsPlan | null>(null);
 
   const renderTripStatusIcon = (status?: TripStatusBackend) => {
     if (status === 'started') return <AlertTriangle className="w-4 h-4 text-yellow-600" />;
@@ -899,49 +1076,143 @@ const MonitorSection = ({ plans, onUpdate }: { plans: LogisticsPlan[], onUpdate:
     <div>
       {/* Grid */}
       {plans.length === 0 ? (
-        <div className="text-center py-20">
-          <Truck className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500 text-lg font-medium">No active trips yet</p>
-          <p className="text-gray-400 text-sm mt-2">Click "Create Plan" to start planning a new trip</p>
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <div className="w-16 h-16 bg-gray-100 rounded-xl flex items-center justify-center mx-auto mb-4">
+            <Truck className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Operations</h3>
+          <p className="text-gray-600 text-sm max-w-md mx-auto mb-6">
+            Begin fleet management by creating your first logistics operation plan.
+          </p>
+          <button 
+            onClick={onCreateClick}
+            className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-2 mx-auto"
+          >
+            <Plus className="w-4 h-4" /> Create Operation
+          </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {plans.map(plan => (
-            <div key={plan.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col h-full">
-              <div className="flex items-start gap-4 mb-3">
-                <div className="mt-1"><Truck className="w-5 h-5 text-[#2F5233]" /></div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{plan.vehicleReg}</h3>
-                  <p className="text-xs text-gray-500 mt-1">{plan.stops.length} stops • {plan.createdAt}</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+          {plans.map(plan => {
+            const getStatusConfig = () => {
+              if (plan.tripStatus === 'completed') return { 
+                color: 'text-emerald-700', 
+                bg: 'bg-emerald-50', 
+                border: 'border-emerald-200',
+                label: 'Completed'
+              };
+              if (plan.tripStatus === 'started') return { 
+                color: 'text-amber-700', 
+                bg: 'bg-amber-50', 
+                border: 'border-amber-200',
+                label: 'In Progress'
+              };
+              return { 
+                color: 'text-slate-700', 
+                bg: 'bg-slate-50', 
+                border: 'border-slate-200',
+                label: 'Pending'
+              };
+            };
+            
+            const statusConfig = getStatusConfig();
+            
+            return (
+              <div key={plan.id} className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 group">
+                {/* Card Header */}
+                <div className="p-6 border-b border-gray-100">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
+                        <Truck className="w-5 h-5 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900 text-base">{plan.vehicleReg}</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">{plan.vehicleType} • {plan.createdAt}</p>
+                      </div>
+                    </div>
+                    <div className={`px-2.5 py-1 rounded-md text-xs font-medium ${statusConfig.bg} ${statusConfig.color} ${statusConfig.border} border`}>
+                      {statusConfig.label}
+                    </div>
+                  </div>
+                  
+                  {/* Route Summary */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                      <span className="text-xs font-medium text-gray-700">Route Overview</span>
+                      <span className="text-xs text-gray-500">• {plan.stops.length} stops</span>
+                    </div>
+                    <p className="text-xs text-gray-600 leading-relaxed">
+                      {plan.stops.slice(0,3).map(s => s.locationName).join(' → ')}{plan.stops.length > 3 ? ' …' : ''}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Map Preview */}
+                <div className="px-6 pt-4">
+                  <div className="relative">
+                    <MapPreview plan={plan} />
+                    <button 
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setActiveMapPlan(plan);
+                      }}
+                      className="absolute top-2 right-2 bg-white/90 hover:bg-white text-gray-700 p-1.5 rounded-md shadow-sm transition-colors duration-200 backdrop-blur-sm"
+                      title="View full map"
+                    >
+                      <Navigation className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Driver & Details */}
+                <div className="p-6 pt-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center">
+                      <User className="w-3.5 h-3.5 text-gray-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{plan.driverName}</p>
+                      <p className="text-xs text-gray-500">Assigned Driver</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center">
+                      {renderTripStatusIcon(plan.tripStatus)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${statusConfig.color}`}>
+                        {statusConfig.label}
+                      </p>
+                      <p className="text-xs text-gray-500">Current Status</p>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Action */}
+                <div className="p-6 pt-0">
+                  {plan.status === 'Completed' ? (
+                    <button 
+                      onClick={() => generateTripSheetPDF(plan)} 
+                      className="w-full bg-slate-900 hover:bg-slate-800 text-white py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-2"
+                    >
+                      <Download className="w-4 h-4" /> Download Report
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => setActivePlan(plan)} 
+                      className="w-full bg-slate-900 hover:bg-slate-800 text-white py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-2"
+                    >
+                      <LayoutList className="w-4 h-4" /> Manage Operation
+                    </button>
+                  )}
                 </div>
               </div>
-              <div className="mt-2 mb-6 text-sm text-gray-600 space-y-1">
-                <p className="flex items-center gap-2"><User className="w-3 h-3 text-gray-400" /> Driver: {plan.driverName}</p>
-                <p className="flex items-center gap-2">
-                  {renderTripStatusIcon(plan.tripStatus)}
-                  Status:
-                  <span className={cn(
-                    "font-medium",
-                    plan.tripStatus === 'completed' ? "text-green-600" : plan.tripStatus === 'started' ? "text-yellow-700" : "text-slate-600"
-                  )}>
-                    {plan.tripStatus || plan.status}
-                  </span>
-                </p>
-              </div>
-              
-              <div className="mt-auto">
-                {plan.status === 'Completed' ? (
-                  <button onClick={() => generateTripSheetPDF(plan)} className="w-full border border-gray-200 rounded-lg py-2 flex items-center justify-center gap-2 text-sm font-medium text-purple-700 hover:bg-purple-50">
-                    <Download className="w-4 h-4" /> Download PDF
-                  </button>
-                ) : (
-                  <button onClick={() => setActivePlan(plan)} className="w-full border border-gray-200 rounded-lg py-2 flex items-center justify-center gap-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                    <LayoutList className="w-4 h-4" /> Trip Timeline / Execute
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -951,6 +1222,12 @@ const MonitorSection = ({ plans, onUpdate }: { plans: LogisticsPlan[], onUpdate:
           plan={activePlan} 
           onClose={() => setActivePlan(null)} 
           onUpdate={(p) => { onUpdate(p); setActivePlan(p); }} 
+        />
+      )}
+      {activeMapPlan && (
+        <MapModal
+          plan={activeMapPlan}
+          onClose={() => setActiveMapPlan(null)}
         />
       )}
     </div>
@@ -1059,28 +1336,53 @@ const LogisticsManagement = () => {
   const handleUpdate = (p: LogisticsPlan) => setPlans(plans.map(plan => plan.id === p.id ? p : plan));
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] p-8 font-sans text-slate-900">
-      <div className="w-full space-y-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-[#1a1a1a] tracking-tight">Logistics Master</h1>
-            <p className="text-gray-500 mt-1">Unified Fleet Management System</p>
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
+      {/* Professional Header */}
+      <div className="bg-white border-b border-gray-200 shadow-sm">
+        <div className="px-8 py-6">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="space-y-1">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+                  <Truck className="w-4 h-4 text-white" />
+                </div>
+                <h1 className="text-2xl font-semibold text-gray-900 tracking-tight">Logistics Operations</h1>
+              </div>
+              <p className="text-gray-600 text-sm font-medium">Fleet Management & Route Optimization</p>
+              <div className="flex items-center gap-4 mt-2">
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
+                  <span className="font-medium">{plans.length} Active Operations</span>
+                </div>
+                <div className="text-gray-300">•</div>
+                <div className="text-xs text-gray-500">
+                  Last Updated: {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+            </div>
+            <button 
+              onClick={() => setShowCreateModal(true)}
+              className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-2 shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              New Operation
+            </button>
           </div>
-          <button 
-            onClick={() => setShowCreateModal(true)}
-            className="bg-[#2F5233] text-white px-6 py-3 rounded-lg text-sm font-bold hover:bg-[#1a331d] shadow-sm flex items-center gap-2 w-fit"
-          >
-            <Plus className="w-5 h-5" /> Create Plan
-          </button>
         </div>
-        
+      </div>
+
+      {/* Main Content */}
+      <div className="px-8 py-8">
         {loadingPlans ? (
-          <div className="text-center py-20">
-            <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-            <p className="text-gray-500">Loading trip plans...</p>
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <div className="w-12 h-12 mx-auto mb-4">
+              <div className="w-12 h-12 border-2 border-gray-300 border-t-slate-900 rounded-full animate-spin"></div>
+            </div>
+            <h3 className="text-sm font-medium text-gray-900 mb-1">Loading Operations</h3>
+            <p className="text-xs text-gray-500">Please wait while we fetch your logistics data...</p>
           </div>
         ) : (
-          <MonitorSection plans={plans} onUpdate={handleUpdate} />
+          <MonitorSection plans={plans} onUpdate={handleUpdate} onCreateClick={() => setShowCreateModal(true)} />
         )}
       </div>
 
