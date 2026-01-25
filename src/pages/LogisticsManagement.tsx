@@ -687,6 +687,193 @@ const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, 
   );
 };
 
+// --- TASK PANEL ---
+const TaskPanel = ({ onCreatePlan }: { onCreatePlan: () => void }) => {
+  const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
+
+  const toggleTaskComplete = (taskId: string) => {
+    const newCompleted = new Set(completedTasks);
+    if (newCompleted.has(taskId)) {
+      newCompleted.delete(taskId);
+    } else {
+      newCompleted.add(taskId);
+    }
+    setCompletedTasks(newCompleted);
+  };
+
+  const tasks = [
+    {
+      id: 'jd-start',
+      title: 'Start of Day - JD-Link Data',
+      description: 'Enter engine hours at day start',
+      type: 'start',
+      icon: <Play className="w-4 h-4" />,
+      color: 'text-blue-600',
+      bgColor: 'bg-blue-50',
+      borderColor: 'border-blue-200',
+      action: () => {
+        toast.info('JD-Link integration coming soon!');
+      }
+    },
+    {
+      id: 'create-plans',
+      title: 'Create Cultivation Plans',
+      description: 'Make new plans for assigned activities',
+      type: 'plan',
+      icon: <Plus className="w-4 h-4" />,
+      color: 'text-emerald-600', 
+      bgColor: 'bg-emerald-50',
+      borderColor: 'border-emerald-200',
+      action: onCreatePlan
+    },
+    {
+      id: 'jd-end',
+      title: 'End of Day - JD-Link Data',
+      description: 'Enter diesel consumption & engine hours',
+      type: 'end',
+      icon: <Fuel className="w-4 h-4" />,
+      color: 'text-orange-600',
+      bgColor: 'bg-orange-50', 
+      borderColor: 'border-orange-200',
+      action: () => {
+        toast.info('JD-Link integration coming soon!');
+      }
+    }
+  ];
+
+  return (
+    <div className="w-80 bg-white border-l border-gray-200 flex flex-col">
+      {/* Header */}
+      <div className="p-6 border-b border-gray-100">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+            <CheckCircle2 className="w-4 h-4 text-white" />
+          </div>
+          <h2 className="font-semibold text-lg text-gray-900">Daily Tasks</h2>
+        </div>
+        <p className="text-sm text-gray-600">Complete your logistics tasks for today</p>
+        <div className="mt-3 flex items-center gap-2">
+          <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+          <span className="text-xs text-gray-500">
+            {completedTasks.size} of {tasks.length} completed
+          </span>
+        </div>
+      </div>
+
+      {/* Tasks List */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {tasks.map((task) => {
+          const isCompleted = completedTasks.has(task.id);
+          return (
+            <div
+              key={task.id}
+              className={cn(
+                "border rounded-xl p-4 transition-all duration-200 cursor-pointer hover:shadow-sm",
+                isCompleted 
+                  ? "bg-gray-50 border-gray-200 opacity-75" 
+                  : `${task.bgColor} ${task.borderColor}`
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div 
+                  className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                    isCompleted ? "bg-gray-200 text-gray-500" : `${task.bgColor} ${task.color}`
+                  )}
+                >
+                  {task.icon}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className={cn(
+                      "font-medium text-sm",
+                      isCompleted ? "text-gray-500 line-through" : "text-gray-900"
+                    )}>
+                      {task.title}
+                    </h3>
+                    {task.type === 'start' && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded font-medium">AM</span>}
+                    {task.type === 'end' && <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded font-medium">PM</span>}
+                  </div>
+                  <p className={cn(
+                    "text-xs mb-3",
+                    isCompleted ? "text-gray-400" : "text-gray-600"
+                  )}>
+                    {task.description}
+                  </p>
+                  
+                  {/* Action Buttons */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        task.action();
+                      }}
+                      disabled={isCompleted}
+                      className={cn(
+                        "px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex-1",
+                        isCompleted
+                          ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                          : task.id === 'create-plans'
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                            : "bg-slate-900 hover:bg-slate-800 text-white"
+                      )}
+                    >
+                      {task.id === 'create-plans' ? 'Create Plans' : 'Start Task'}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleTaskComplete(task.id);
+                        if (!isCompleted) {
+                          toast.success(`${task.title} marked as completed!`);
+                        }
+                      }}
+                      className={cn(
+                        "p-1.5 rounded-md transition-colors",
+                        isCompleted
+                          ? "bg-gray-200 text-gray-600 hover:bg-gray-300"
+                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                      )}
+                      title={isCompleted ? "Mark as incomplete" : "Mark as complete"}
+                    >
+                      {isCompleted ? (
+                        <X className="w-3 h-3" />
+                      ) : (
+                        <CheckCircle2 className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Progress Footer */}
+      <div className="p-6 border-t border-gray-100 bg-gray-50">
+        <div className="mb-2">
+          <div className="flex justify-between text-xs text-gray-600 mb-1">
+            <span>Daily Progress</span>
+            <span>{Math.round((completedTasks.size / tasks.length) * 100)}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div 
+              className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${(completedTasks.size / tasks.length) * 100}%` }}
+            ></div>
+          </div>
+        </div>
+        {completedTasks.size === tasks.length && (
+          <div className="text-center py-2">
+            <span className="text-xs font-medium text-emerald-600">🎉 All tasks completed!</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- MONITOR SECTION ---
 const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: LogisticsPlan[], onUpdate: (p: LogisticsPlan) => void, onCreateClick: () => void, onDelete: (id: string) => void }) => {
   const [activePlan, setActivePlan] = useState<LogisticsPlan | null>(null);
@@ -705,7 +892,7 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
           <button onClick={onCreateClick} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium">Create Operation</button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {plans.map(plan => {
             const getStatusConfig = () => {
               if (plan.tripStatus === 'completed') return { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Completed' };
@@ -921,7 +1108,7 @@ const LogisticsManagement = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 flex flex-col">
       <div className="bg-white border-b border-gray-200 shadow-sm">
         <div className="px-8 py-6 flex justify-between">
            <div className="flex items-center gap-3">
@@ -930,14 +1117,30 @@ const LogisticsManagement = () => {
              </div>
              <h1 className="text-2xl font-semibold text-gray-900">Logistics Operations</h1>
            </div>
-           <button onClick={() => setShowCreateModal(true)} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2">
-             <Plus className="w-4 h-4" /> New Operation
-           </button>
+           <div className="flex items-center gap-4">
+             {/* Unplanned Orders Alert */}
+             <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+               <AlertTriangle className="w-4 h-4 text-amber-600" />
+               <span className="text-sm font-medium text-amber-800">3 unplanned orders</span>
+             </div>
+             <button onClick={() => setShowCreateModal(true)} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2">
+               <Plus className="w-4 h-4" /> New Operation
+             </button>
+           </div>
         </div>
       </div>
-      <div className="px-8 py-8">
-        {loadingPlans ? <div>Loading...</div> : <MonitorSection plans={plans} onUpdate={handleUpdate} onCreateClick={() => setShowCreateModal(true)} onDelete={handleDelete} />}
+      
+      {/* Main Content with Task Panel */}
+      <div className="flex-1 flex">
+        {/* Left: Main Content */}
+        <div className="flex-1 px-8 py-8">
+          {loadingPlans ? <div>Loading...</div> : <MonitorSection plans={plans} onUpdate={handleUpdate} onCreateClick={() => setShowCreateModal(true)} onDelete={handleDelete} />}
+        </div>
+        
+        {/* Right: Task Panel */}
+        <TaskPanel onCreatePlan={() => setShowCreateModal(true)} />
       </div>
+      
       {showCreateModal && <CreatePlanModal onClose={() => setShowCreateModal(false)} onCreate={handleCreate} />}
     </div>
   );

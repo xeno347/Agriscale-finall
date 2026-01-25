@@ -18,9 +18,11 @@ import {
   Tractor,
   FileText,
   Map,
-  AlertCircle // Imported AlertCircle icon
+  AlertCircle, // Imported AlertCircle icon
+  User,
+  MoreHorizontal
 } from "lucide-react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 /* ---------------- NAV ITEM COMPONENT ---------------- */
@@ -153,6 +155,7 @@ interface AppSidebarProps {
 
 const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     document.title = "SBR | Farm-connect";
@@ -288,6 +291,51 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         </NavGroup>
 
       </nav>
+
+      {/* Footer (User Details + More button) */}
+      <div
+        className={cn(
+          "border-t border-gray-100",
+          isCollapsed ? "p-2" : "p-3"
+        )}
+      >
+        <div
+          className={cn(
+            "flex items-center gap-3",
+            isCollapsed ? "justify-center" : ""
+          )}
+        >
+          <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
+            <User className="w-4 h-4 text-gray-600" />
+          </div>
+
+          {!isCollapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-gray-900 truncate">
+                SBR User
+              </p>
+              <p className="text-xs text-gray-500 truncate">
+                Logistics Manager
+              </p>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => navigate("/tools/khasra_records")}
+          title={isCollapsed ? "More" : undefined}
+          className={cn(
+            "mt-3 w-full rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors",
+            isCollapsed
+              ? "mx-auto flex h-10 w-10 items-center justify-center p-0"
+              : "flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold"
+          )}
+        >
+          <MoreHorizontal className={cn(isCollapsed ? "w-5 h-5" : "w-4 h-4")} />
+          {!isCollapsed && <span>More</span>}
+        </button>
+      </div>
     </aside>
   );
 };

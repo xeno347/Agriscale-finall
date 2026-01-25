@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -7,9 +7,21 @@ import {
   Search,
   Calendar as CalendarIcon,
   Warehouse,
-  Droplet
+  Droplet,
+  Clock,
+  AlertTriangle,
+  Route,
+  Edit3,
+  User,
+  Phone,
+  Fuel,
+  Lock,
+  Unlock,
+  Info,
+  HelpCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import getBaseUrl from '@/lib/config';
 
 // --- MAP IMPORTS ---
 import { 
@@ -42,6 +54,12 @@ interface ApiVehicle {
     vehicle_number?: string;
     type?: string;
   };
+  driver?: {
+    name: string;
+    phone: string;
+    checkedIn: boolean;
+  };
+  currentFuelLevel?: number | null; // in Liters (optional; not provided by get_logistics_plan)
 }
 
 interface TaskAssignment {
@@ -51,6 +69,7 @@ interface TaskAssignment {
   type: 'farm' | 'hub' | 'maintenance';
   geo_boundary?: [number, number][]; 
   center?: [number, number];
+  farm_id?: string;
 }
 
 interface FuelData {
@@ -62,6 +81,15 @@ interface DaySchedule {
   date: string;
   tasks: TaskAssignment[]; // Support multiple tasks
   fuel?: FuelData;
+  // New tracking fields
+  initialEngineHours?: number; // from driver
+  finalEngineHours?: number; // from driver
+  damageChecklist?: string; // from logistics manager - editable
+  totalDistance?: number; // from logistics manager - editable
+  tasksStatus?: 'completed' | 'pending' | 'partial'; // from driver
+  // Locking system
+  isLocked?: boolean; // from logistics manager
+  damageChecklistTouched?: boolean; // track if damage field was interacted with
 }
 
 // Map: VehicleID -> DateString -> DaySchedule
@@ -81,6 +109,30 @@ const getDaysInMonth = (year: number, month: number) => {
 
 const formatDateKey = (date: Date) => {
   return date.toISOString().split('T')[0];
+};
+
+type BackendPlanEntry = {
+  usage_fuel: number;
+  activity: string;
+  total_distance: number;
+  initial_engine_hours: number;
+  input_fuel: number;
+  final_engine_hours: number;
+  locked: boolean;
+  damage_notes: string;
+  status: string;
+  farm_id: string;
+};
+
+type BackendVehiclePlan = {
+  plan_id: string;
+  vehicle_id: string;
+  vehicle_number: string;
+  driver_contact?: string;
+  driver_name?: string;
+  plan: Record<string, BackendPlanEntry[]>;
+  trip_status?: string | null;
+  created_at?: string;
 };
 
 // --- REAL-WORLD DATA (MUMBAI / MAHARASHTRA) ---
@@ -118,88 +170,120 @@ const FIELD_POLYGONS: Record<string, [number, number][]> = {
   ]
 };
 
-const DUMMY_VEHICLES: ApiVehicle[] = [
-  { vehicle_id: 'v1', vehicle_information: { vehicle_number: 'MH-04-JD-1111', type: 'Truck' } }, 
-  { vehicle_id: 'v2', vehicle_information: { vehicle_number: 'MH-12-PQ-2222', type: 'Tractor' } }, 
-  { vehicle_id: 'v3', vehicle_information: { vehicle_number: 'MH-43-AA-3333', type: 'Harvester' } }, 
-  { vehicle_id: 'v4', vehicle_information: { vehicle_number: 'MH-01-ZZ-9999', type: 'Van' } }, 
-  { vehicle_id: 'v5', vehicle_information: { vehicle_number: 'GJ-06-BB-8888', type: 'Truck' } }, 
-];
-
-const generateDummySchedule = (): ScheduleMap => {
-  const map: ScheduleMap = {};
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-
-  const getCenter = (poly: [number, number][]): [number, number] => {
-    const lat = poly.reduce((sum, p) => sum + p[0], 0) / poly.length;
-    const lng = poly.reduce((sum, p) => sum + p[1], 0) / poly.length;
-    return [lat, lng];
-  };
-
-  const addTask = (vId: string, day: number, loc: string, type: 'farm' | 'hub' | 'maintenance') => {
-    if (!map[vId]) map[vId] = {};
-    const dateStr = new Date(year, month, day).toISOString().split('T')[0];
-    const poly = FIELD_POLYGONS[loc] || FIELD_POLYGONS['Hub Central (Bhiwandi)'];
-    
-    if (!map[vId][dateStr]) {
-      map[vId][dateStr] = {
-        date: dateStr,
-        tasks: [],
-        fuel: { input: 0, consumed: Math.floor(Math.random() * 20) + 5 } // Random consumption
-      };
-    }
-
-    // Add Fuel Input randomly for some days
-    if (Math.random() > 0.7) {
-        if(map[vId][dateStr].fuel) map[vId][dateStr].fuel!.input = Math.floor(Math.random() * 50) + 20;
-    }
-
-    map[vId][dateStr].tasks.push({
-      id: `${vId}-${dateStr}-${Date.now()}-${Math.random()}`,
-      location_name: loc,
-      status: 'active',
-      type: type,
-      geo_boundary: poly,
-      center: getCenter(poly)
-    });
-  };
-
-  // --- LOGISTICS SCHEDULE ---
-
-  // V1: MH-04 
-  addTask('v1', 1, 'Farm A (Nashik)', 'farm');
-  addTask('v1', 2, 'Farm B (Pune)', 'farm');
-  
-  // MULTI-TASK EXAMPLE: V1 on Day 3 goes to Farm C AND Farm A
-  addTask('v1', 3, 'Farm C (Palghar)', 'farm');
-  addTask('v1', 3, 'Farm A (Nashik)', 'farm'); // Second task same day
-  
-  addTask('v1', 4, 'Farm D (Alibag)', 'farm');
-  addTask('v1', 8, 'Maintenance', 'maintenance');
-
-  // V2: MH-12
-  addTask('v2', 1, 'Hub Central (Bhiwandi)', 'hub');
-  addTask('v2', 2, 'Hub Central (Bhiwandi)', 'hub');
-  addTask('v2', 3, 'Farm B (Pune)', 'farm');
-  addTask('v2', 15, 'Hub South (Navi Mumbai)', 'hub');
-
-  // V3: MH-43
-  addTask('v3', 1, 'Farm C (Palghar)', 'farm');
-  addTask('v3', 5, 'Farm C (Palghar)', 'farm');
-  
-  // V4: MH-01
-  addTask('v4', 1, 'Maintenance', 'maintenance');
-  
-  // V5: GJ
-  for(let i=1; i<=10; i++) addTask('v5', i, 'Farm A (Nashik)', 'farm');
-
-  return map;
+const normalizeTaskStatus = (status: string | undefined): 'active' | 'completed' | 'pending' => {
+  const s = String(status ?? '').toLowerCase().trim();
+  if (s === 'completed') return 'completed';
+  if (s === 'pending') return 'pending';
+  return 'active';
 };
 
-const fetchVehicles = async () => DUMMY_VEHICLES;
-const fetchSchedule = async () => generateDummySchedule();
+const combineTaskStatuses = (statuses: Array<'active' | 'completed' | 'pending'>): 'completed' | 'pending' | 'partial' => {
+  if (statuses.length === 0) return 'pending';
+  const allCompleted = statuses.every((s) => s === 'completed');
+  if (allCompleted) return 'completed';
+  const allPending = statuses.every((s) => s === 'pending');
+  if (allPending) return 'pending';
+  return 'partial';
+};
+
+const fetchLogisticsPlan = async (): Promise<{ vehicles: ApiVehicle[]; schedule: ScheduleMap }> => {
+  const base = getBaseUrl().replace(/\/$/, '');
+  const url = `${base}/admin_vehicles/get_logistics_plan`;
+
+  const resp = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  let data: any = null;
+  try {
+    data = await resp.json();
+  } catch {
+    // ignore
+  }
+
+  if (!resp.ok) {
+    const message = data?.message || data?.error || `Server responded ${resp.status}`;
+    throw new Error(message);
+  }
+
+  const list: Array<Record<string, BackendVehiclePlan>> = Array.isArray(data) ? data : [];
+  const vehicles: ApiVehicle[] = [];
+  const schedule: ScheduleMap = {};
+
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const entries = Object.entries(item);
+    for (const [vehicleNumberKey, planObj] of entries) {
+      if (!planObj || typeof planObj !== 'object') continue;
+      const vehicleId = String(planObj.vehicle_id ?? vehicleNumberKey);
+      const vehicleNumber = String(planObj.vehicle_number ?? vehicleNumberKey);
+      const driverName = String(planObj.driver_name ?? '—');
+      const driverPhone = String(planObj.driver_contact ?? '—');
+      const checkedIn = Boolean(planObj.trip_status);
+
+      vehicles.push({
+        vehicle_id: vehicleId,
+        vehicle_information: { vehicle_number: vehicleNumber, type: '—' },
+        driver: { name: driverName, phone: driverPhone, checkedIn },
+        currentFuelLevel: null,
+      });
+
+      const plan = planObj.plan && typeof planObj.plan === 'object' ? planObj.plan : {};
+      schedule[vehicleId] = schedule[vehicleId] || {};
+
+      for (const [dateKey, dayEntriesRaw] of Object.entries(plan)) {
+        const dayEntries: BackendPlanEntry[] = Array.isArray(dayEntriesRaw) ? dayEntriesRaw : [];
+        if (dayEntries.length === 0) continue;
+
+        const tasks: TaskAssignment[] = dayEntries.map((e, idx) => ({
+          id: `${vehicleId}-${dateKey}-${idx}-${e?.farm_id ?? 'farm'}`,
+          location_name: String(e?.activity ?? 'Activity'),
+          status: normalizeTaskStatus(e?.status),
+          type: 'farm',
+          farm_id: e?.farm_id ? String(e.farm_id) : undefined,
+        }));
+
+        const totalDistance = dayEntries.reduce((acc, e) => acc + (Number(e?.total_distance) || 0), 0);
+        const inputFuel = dayEntries.reduce((acc, e) => acc + (Number(e?.input_fuel) || 0), 0);
+        const usageFuel = dayEntries.reduce((acc, e) => acc + (Number(e?.usage_fuel) || 0), 0);
+        const initialEngineHours = dayEntries.reduce((min, e) => {
+          const v = Number(e?.initial_engine_hours);
+          if (Number.isNaN(v)) return min;
+          return min == null ? v : Math.min(min, v);
+        }, null as number | null);
+        const finalEngineHours = dayEntries.reduce((max, e) => {
+          const v = Number(e?.final_engine_hours);
+          if (Number.isNaN(v)) return max;
+          return max == null ? v : Math.max(max, v);
+        }, null as number | null);
+        const damageNotes = dayEntries
+          .map((e) => String(e?.damage_notes ?? '').trim())
+          .filter((s) => s.length > 0);
+        const isLocked = dayEntries.every((e) => Boolean(e?.locked));
+        const statuses = tasks.map((t) => t.status);
+
+        schedule[vehicleId][dateKey] = {
+          date: dateKey,
+          tasks,
+          fuel: { input: inputFuel, consumed: usageFuel },
+          totalDistance,
+          initialEngineHours: initialEngineHours ?? 0,
+          finalEngineHours: finalEngineHours ?? 0,
+          damageChecklist: damageNotes.join(' | '),
+          tasksStatus: combineTaskStatuses(statuses),
+          isLocked,
+          // From API we can safely consider this "checked" even if notes empty
+          damageChecklistTouched: true,
+        };
+      }
+    }
+  }
+
+  return { vehicles, schedule };
+};
 
 // --- Map Components ---
 
@@ -211,6 +295,7 @@ const RecenterMap = ({ center }: { center: [number, number] }) => {
 
 const LocationMapPopup = ({ data, onClose }: { data: TaskAssignment & { vehicle: string, date: string }, onClose: () => void }) => {
   const isHub = data.type === 'hub';
+  const hasBoundary = Array.isArray(data.geo_boundary) && data.geo_boundary.length > 0;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -225,6 +310,7 @@ const LocationMapPopup = ({ data, onClose }: { data: TaskAssignment & { vehicle:
             </h3>
             <p className="text-sm text-gray-500">
               Vehicle <b>{data.vehicle}</b> • {data.date} • <span className="uppercase text-xs font-bold tracking-wider">{data.type} View</span>
+              {data.farm_id ? <span className="text-gray-400"> • Farm: {data.farm_id}</span> : null}
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
@@ -250,20 +336,29 @@ const LocationMapPopup = ({ data, onClose }: { data: TaskAssignment & { vehicle:
               </LayersControl.BaseLayer>
             </LayersControl>
             <RecenterMap center={data.center || [19.0760, 72.8777]} />
-            <Polygon 
-              positions={data.geo_boundary || []} 
-              pathOptions={{ 
-                color: isHub ? '#9333ea' : '#ef4444', 
-                fillColor: isHub ? '#a855f7' : '#ef4444', 
-                fillOpacity: 0.3, 
-                weight: 2
-              }}
-            >
-              <LeafletTooltip permanent direction="center" className={cn("border-0 shadow-md text-xs font-bold px-2 py-1 rounded bg-white/90", isHub ? "text-purple-700" : "text-red-700")}>
-                {data.location_name}
-              </LeafletTooltip>
-            </Polygon>
+
+            {hasBoundary ? (
+              <Polygon 
+                positions={data.geo_boundary || []} 
+                pathOptions={{ 
+                  color: isHub ? '#9333ea' : '#ef4444', 
+                  fillColor: isHub ? '#a855f7' : '#ef4444', 
+                  fillOpacity: 0.3, 
+                  weight: 2
+                }}
+              >
+                <LeafletTooltip permanent direction="center" className={cn("border-0 shadow-md text-xs font-bold px-2 py-1 rounded bg-white/90", isHub ? "text-purple-700" : "text-red-700")}>
+                  {data.location_name}
+                </LeafletTooltip>
+              </Polygon>
+            ) : null}
           </MapContainer>
+
+          {!hasBoundary ? (
+            <div className="absolute bottom-3 left-3 bg-white/90 border border-gray-200 rounded-md px-3 py-2 text-xs text-gray-700 shadow">
+              No boundary/map data for this activity.
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -280,13 +375,55 @@ const FleetChart = () => {
   const [searchTerm, setSearchTerm] = useState('');
   
   const [selectedCell, setSelectedCell] = useState<(TaskAssignment & { vehicle: string, date: string }) | null>(null);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+
+  const updateScheduleData = (vehicleId: string, date: string, field: string, value: any) => {
+    setSchedule(prev => ({
+      ...prev,
+      [vehicleId]: {
+        ...prev[vehicleId],
+        [date]: {
+          ...prev[vehicleId]?.[date],
+          [field]: value
+        }
+      }
+    }));
+  };
+
+  // Helper function to check if logistics manager data is complete
+  const isDataComplete = (dayData: DaySchedule | undefined) => {
+    if (!dayData || !dayData.tasks?.length) return false;
+    return (
+      dayData.totalDistance !== undefined && 
+      dayData.totalDistance > 0 &&
+      dayData.damageChecklistTouched === true
+    );
+  };
+
+  // Helper function to get cell background color based on lock status and completion
+  const getCellBackgroundColor = (dayData: DaySchedule | undefined) => {
+    if (!dayData || !dayData.tasks?.length) return 'bg-white';
+    
+    const isComplete = isDataComplete(dayData);
+    
+    if (dayData.isLocked) {
+      return isComplete ? 'bg-green-200' : 'bg-red-200';
+    }
+    return 'bg-orange-200';
+  };
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const [vData, sData] = await Promise.all([fetchVehicles(), fetchSchedule()]);
-      setVehicles(vData);
-      setSchedule(sData);
+      try {
+        const { vehicles: vData, schedule: sData } = await fetchLogisticsPlan();
+        setVehicles(vData);
+        setSchedule(sData);
+      } catch (e) {
+        console.error(e);
+        setVehicles([]);
+        setSchedule({});
+      }
       setLoading(false);
     };
     load();
@@ -350,6 +487,14 @@ const FleetChart = () => {
             <span className="px-4 text-sm font-bold text-gray-700 w-32 text-center select-none">{currentDate.toLocaleString('default', { month: 'short', year: 'numeric' })}</span>
             <button onClick={() => handleMonthChange(1)} className="p-1 hover:bg-white rounded shadow-sm transition-all"><ChevronRight className="w-4 h-4 text-gray-600" /></button>
           </div>
+          {/* Help Button */}
+          <button 
+            onClick={() => setShowHelpModal(true)}
+            className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
+            title="Help & Instructions"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
         </div>
       </div>
 
@@ -362,7 +507,7 @@ const FleetChart = () => {
             <table className="border-collapse w-full min-w-max">
               <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
                 <tr>
-                  <th className="sticky left-0 top-0 z-50 bg-gray-50 border-b border-r border-gray-200 w-48 min-w-[12rem] p-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Vehicle No.</th>
+                  <th className="sticky left-0 top-0 z-50 bg-gray-50 border-b border-r border-gray-200 w-52 min-w-[13rem] p-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Vehicle Info</th>
                   {days.map((day, i) => (
                     <th key={i} className="border-b border-gray-200 min-w-[10rem] p-2 text-center bg-gray-50">
                       <div className="flex flex-col items-center">
@@ -381,12 +526,71 @@ const FleetChart = () => {
 
                   return (
                     // WRAPPER for Row spanning 2 rows
-                    <>
+                    <Fragment key={vId}>
                     {/* ROW 1: TASKS */}
                     <tr key={`${vId}-tasks`} className="bg-white">
-                      <td rowSpan={2} className="sticky left-0 z-40 bg-white border-r border-b border-gray-100 p-4 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.05)] align-middle">
-                        <div className="font-bold text-gray-900 text-sm whitespace-nowrap">{vName}</div>
-                        <div className="text-[10px] text-gray-400 font-medium uppercase mt-0.5">{vehicle.vehicle_information?.type}</div>
+                      <td rowSpan={2} className="sticky left-0 z-40 bg-white border-r border-b border-gray-100 p-3 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.05)] align-top min-w-[200px]">
+                        {/* Vehicle Info */}
+                        <div className="space-y-2">
+                          <div>
+                            <div className="font-bold text-gray-900 text-sm whitespace-nowrap">{vName}</div>
+                            <div className="text-[10px] text-gray-400 font-medium uppercase mt-0.5">{vehicle.vehicle_information?.type}</div>
+                          </div>
+                          
+                          {/* Driver Info */}
+                          {vehicle.driver && (
+                            <div className="border-t border-gray-100 pt-2 space-y-1">
+                              <div className="flex items-center gap-1.5 text-[11px] text-gray-700">
+                                <User className="w-3 h-3 text-gray-500" />
+                                <span className="font-medium">{vehicle.driver.name}</span>
+                                <span className={cn(
+                                  "ml-auto px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase",
+                                  vehicle.driver.checkedIn 
+                                    ? "bg-green-100 text-green-700" 
+                                    : "bg-gray-100 text-gray-600"
+                                )}>
+                                  {vehicle.driver.checkedIn ? 'IN' : 'OUT'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-gray-600">
+                                <Phone className="w-3 h-3 text-gray-400" />
+                                <span>{vehicle.driver.phone}</span>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Fuel Level (optional; not provided by get_logistics_plan) */}
+                          {typeof vehicle.currentFuelLevel === 'number' && Number.isFinite(vehicle.currentFuelLevel) ? (
+                            <div className="border-t border-gray-100 pt-2">
+                              <div className="flex items-center gap-1.5 text-[11px]">
+                                <Fuel className="w-3 h-3 text-gray-500" />
+                                <span className="text-gray-600">Fuel:</span>
+                                <span className={cn(
+                                  "font-bold",
+                                  vehicle.currentFuelLevel > 50 ? "text-green-600" :
+                                  vehicle.currentFuelLevel > 20 ? "text-yellow-600" :
+                                  "text-red-600"
+                                )}>
+                                  {vehicle.currentFuelLevel}L
+                                </span>
+                                {/* Fuel Bar */}
+                                <div className="flex-1 ml-1">
+                                  <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                    <div 
+                                      className={cn(
+                                        "h-full transition-all duration-300 rounded-full",
+                                        vehicle.currentFuelLevel > 50 ? "bg-green-500" :
+                                        vehicle.currentFuelLevel > 20 ? "bg-yellow-500" :
+                                        "bg-red-500"
+                                      )}
+                                      style={{ width: `${Math.min(100, vehicle.currentFuelLevel)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
                       </td>
 
                       {days.map((day, dIndex) => {
@@ -403,25 +607,112 @@ const FleetChart = () => {
                         const showHubConnector = hasTasks && nextDayData?.tasks?.length > 0 && tasks[0].type === 'farm' && nextDayData.tasks[0].type === 'farm';
 
                         return (
-                          <td key={`${vId}-t-${dIndex}`} className="border-r border-gray-100 p-1 h-20 relative align-top min-w-[10rem]">
+                          <td key={`${vId}-t-${dIndex}`} className={cn(
+                            "border-r border-gray-100 p-1 h-32 relative align-top min-w-[12rem]",
+                            getCellBackgroundColor(dayData)
+                          )}>
                             {hasTasks ? (
                               <div className="w-full h-full flex flex-col gap-1">
-                                {tasks.map((task, tIdx) => (
-                                  <button 
-                                    key={task.id}
-                                    onClick={() => setSelectedCell({ ...task, vehicle: vName, date: dateKey })}
+                                {/* Task Info */}
+                                <div className="flex-1">
+                                  {tasks.map((task, tIdx) => (
+                                    <button 
+                                      key={task.id}
+                                      onClick={() => setSelectedCell({ ...task, vehicle: vName, date: dateKey })}
+                                      className={cn(
+                                        "w-full rounded-md border flex flex-col items-start justify-center px-2 py-1 transition-all group relative overflow-hidden shadow-sm hover:shadow-md mb-1",
+                                        getCellColor(task.type)
+                                      )}
+                                    >
+                                      <span className="text-xs font-bold truncate w-full text-left">{task.location_name}</span>
+                                      <span className="text-[10px] opacity-70 truncate w-full text-left capitalize flex items-center gap-1">
+                                        {task.type === 'hub' ? <Warehouse className="w-3 h-3" /> : null}
+                                        {task.type}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                                
+                                {/* Additional Data */}
+                                <div className="bg-gray-50 rounded p-1 text-[9px] space-y-0.5">
+                                  {/* Engine Hours */}
+                                  <div className="flex items-center gap-1 text-gray-600">
+                                    <Clock className="w-3 h-3" />
+                                    <span>Start: {dayData?.initialEngineHours || 0}h</span>
+                                    <span className="text-gray-400">|</span>
+                                    <span>End: {dayData?.finalEngineHours || 0}h</span>
+                                  </div>
+                                  
+                                  {/* Distance & Status */}
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1 text-gray-600">
+                                      <Route className="w-3 h-3" />
+                                      <input 
+                                        type="number"
+                                        value={dayData?.totalDistance || ''}
+                                        onChange={(e) => {
+                                          const value = parseInt(e.target.value) || 0;
+                                          updateScheduleData(vId, dateKey, 'totalDistance', value);
+                                        }}
+                                        disabled={dayData?.isLocked}
+                                        className={cn(
+                                          "w-12 px-1 border border-gray-300 rounded text-[9px] text-center",
+                                          dayData?.isLocked ? "bg-gray-100 cursor-not-allowed" : "bg-white"
+                                        )}
+                                        placeholder="km"
+                                      />
+                                      <span>km</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className={cn(
+                                        "px-1 py-0.5 rounded text-[8px] font-bold uppercase",
+                                        dayData?.tasksStatus === 'completed' ? "bg-green-100 text-green-700" :
+                                        dayData?.tasksStatus === 'pending' ? "bg-red-100 text-red-700" :
+                                        "bg-yellow-100 text-yellow-700"
+                                      )}>
+                                        {dayData?.tasksStatus || 'N/A'}
+                                      </span>
+                                      {/* Lock/Unlock Button */}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          updateScheduleData(vId, dateKey, 'isLocked', !dayData?.isLocked);
+                                        }}
+                                        className={cn(
+                                          "p-0.5 rounded transition-colors",
+                                          dayData?.isLocked ? "text-red-600 hover:bg-red-100" : "text-gray-500 hover:bg-gray-100"
+                                        )}
+                                        title={dayData?.isLocked ? "Unlock" : "Lock"}
+                                      >
+                                        {dayData?.isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                                      </button>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Damage Input */}
+                                  {dayData?.damageChecklist && (
+                                    <div className="flex items-center gap-1 text-orange-600">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      <span className="truncate flex-1">{dayData.damageChecklist}</span>
+                                    </div>
+                                  )}
+                                  <input 
+                                    type="text"
+                                    value={dayData?.damageChecklist || ''}
+                                    onChange={(e) => {
+                                      updateScheduleData(vId, dateKey, 'damageChecklist', e.target.value);
+                                      if (!dayData?.damageChecklistTouched) {
+                                        updateScheduleData(vId, dateKey, 'damageChecklistTouched', true);
+                                      }
+                                    }}
+                                    disabled={dayData?.isLocked}
                                     className={cn(
-                                      "w-full flex-1 rounded-md border flex flex-col items-start justify-center px-2 transition-all group relative overflow-hidden shadow-sm hover:shadow-md min-h-[36px]",
-                                      getCellColor(task.type)
+                                      "w-full px-1 py-0.5 border border-gray-300 rounded text-[9px]",
+                                      dayData?.isLocked ? "bg-gray-100 cursor-not-allowed" : "bg-white"
                                     )}
-                                  >
-                                    <span className="text-xs font-bold truncate w-full text-left">{task.location_name}</span>
-                                    <span className="text-[10px] opacity-70 truncate w-full text-left capitalize flex items-center gap-1">
-                                      {task.type === 'hub' ? <Warehouse className="w-3 h-3" /> : null}
-                                      {task.type}
-                                    </span>
-                                  </button>
-                                ))}
+                                    placeholder="Damage notes..."
+                                  />
+                                </div>
                               </div>
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-gray-200 select-none text-lg">-</div>
@@ -433,13 +724,12 @@ const FleetChart = () => {
                                   e.stopPropagation();
                                   handleHubClick(vName, `${dateKey} - ${nextDateKey}`);
                                 }}
-                                className="absolute top-1/2 -right-3 -translate-y-1/2 z-30 group/hub hover:scale-110 transition-transform"
-                                title="View Hub Location"
+                                className="absolute top-1/2 -right-2 -translate-y-1/2 z-30 group/hub hover:scale-105 transition-all opacity-40 hover:opacity-80"
+                                title="Transit Hub"
                               >
-                                <div className="bg-[#1e293b] text-white text-[10px] font-bold px-2 py-1 rounded-md shadow-lg border border-white/50 flex items-center justify-center min-w-[36px]">
-                                  Hub
+                                <div className="bg-gray-300 text-gray-600 text-[8px] font-medium px-1 py-0.5 rounded shadow-sm border border-gray-200 flex items-center justify-center min-w-[20px]">
+                                  →
                                 </div>
-                                <div className="h-0.5 w-6 bg-[#1e293b] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -z-10 opacity-50"></div>
                               </button>
                             )}
                           </td>
@@ -455,7 +745,7 @@ const FleetChart = () => {
                             const fuel = vSchedule[dateKey]?.fuel;
 
                             return (
-                                <td key={`${vId}-f-${dIndex}`} className="border-r border-b border-gray-100 p-1 h-8 text-center align-middle">
+                                <td key={`${vId}-f-${dIndex}`} className="border-r border-b border-gray-100 p-1 h-12 text-center align-middle">
                                     {fuel ? (
                                         <div className="flex items-center justify-between px-2 text-[10px] font-medium text-gray-500">
                                             <span className={cn("flex items-center gap-1", fuel.input > 0 ? "text-green-600 font-bold" : "")}>
@@ -473,7 +763,7 @@ const FleetChart = () => {
                             )
                         })}
                     </tr>
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -483,6 +773,183 @@ const FleetChart = () => {
       </div>
 
       {selectedCell && <LocationMapPopup data={selectedCell} onClose={() => setSelectedCell(null)} />}
+      
+      {/* Help Modal */}
+      {showHelpModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white w-full max-w-4xl h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-blue-50 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <HelpCircle className="w-6 h-6 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Fleet Chart Instructions</h2>
+                  <p className="text-sm text-gray-600">Complete guide for logistics managers</p>
+                </div>
+              </div>
+              <button onClick={() => setShowHelpModal(false)} className="p-2 hover:bg-blue-100 rounded-full transition-colors">
+                <X className="w-6 h-6 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-6 space-y-6">
+              
+              {/* Vehicle Information */}
+              <section>
+                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <User className="w-5 h-5 text-blue-600" />
+                  Vehicle Information (Left Column)
+                </h3>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
+                    <div>
+                      <p className="font-medium text-gray-900">Vehicle Details</p>
+                      <p className="text-sm text-gray-600">Vehicle number and type (Truck, Tractor, etc.)</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
+                    <div>
+                      <p className="font-medium text-gray-900">Driver Information</p>
+                      <p className="text-sm text-gray-600">Name, phone number, and check-in status (IN/OUT badge)</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 bg-orange-500 rounded-full mt-2"></div>
+                    <div>
+                      <p className="font-medium text-gray-900">Current Fuel Level</p>
+                      <p className="text-sm text-gray-600">Liters remaining with color-coded bar (Green &gt;50L, Yellow 20-50L, Red &lt;20L)</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Task Cells */}
+              <section>
+                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-blue-600" />
+                  Task Cells (Daily Schedule)
+                </h3>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
+                    <div>
+                      <p className="font-medium text-gray-900">Task Information</p>
+                      <p className="text-sm text-gray-600">Location name and task type (Farm, Hub, Maintenance). Click to view on map.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 bg-purple-500 rounded-full mt-2"></div>
+                    <div>
+                      <p className="font-medium text-gray-900">Engine Hours</p>
+                      <p className="text-sm text-gray-600">Start and end engine hours (provided by driver - read only)</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
+                    <div>
+                      <p className="font-medium text-gray-900">Task Status</p>
+                      <p className="text-sm text-gray-600">Completion status from driver (Completed, Pending, Partial)</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Color Coding System */}
+              <section>
+                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-blue-600" />
+                  Background Color System
+                </h3>
+                <div className="space-y-3">
+                  <div className="bg-orange-200 p-3 rounded-lg border-l-4 border-orange-400">
+                    <p className="font-bold text-orange-800">🟠 Orange Background - Work in Progress</p>
+                    <p className="text-sm text-orange-700">Cell is not locked. You can edit distance and damage notes.</p>
+                  </div>
+                  <div className="bg-green-200 p-3 rounded-lg border-l-4 border-green-400">
+                    <p className="font-bold text-green-800">🟢 Green Background - Complete & Locked</p>
+                    <p className="text-sm text-green-700">All required data is filled and cell is locked. Good quality control!</p>
+                  </div>
+                  <div className="bg-red-200 p-3 rounded-lg border-l-4 border-red-400">
+                    <p className="font-bold text-red-800">🔴 Red Background - Incomplete but Locked</p>
+                    <p className="text-sm text-red-700">Cell is locked but missing required data. Needs attention!</p>
+                  </div>
+                </div>
+              </section>
+
+              {/* Your Tasks as Logistics Manager */}
+              <section>
+                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <Edit3 className="w-5 h-5 text-blue-600" />
+                  Your Tasks as Logistics Manager
+                </h3>
+                <div className="bg-blue-50 p-4 rounded-lg space-y-3">
+                  <div className="flex items-start gap-3">
+                    <Route className="w-4 h-4 text-blue-600 mt-1" />
+                    <div>
+                      <p className="font-medium text-gray-900">Distance Tracking</p>
+                      <p className="text-sm text-gray-600">Enter total kilometers traveled in the distance input field</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-4 h-4 text-orange-600 mt-1" />
+                    <div>
+                      <p className="font-medium text-gray-900">Damage Inspection</p>
+                      <p className="text-sm text-gray-600">Add damage notes or leave empty if no damage found. Touching this field marks it as 'checked'.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <Lock className="w-4 h-4 text-red-600 mt-1" />
+                    <div>
+                      <p className="font-medium text-gray-900">Lock/Unlock System</p>
+                      <p className="text-sm text-gray-600">Lock cells when review is complete. Locked cells cannot be edited until unlocked.</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Fuel Tracking */}
+              <section>
+                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <Fuel className="w-5 h-5 text-blue-600" />
+                  Fuel Tracking (Bottom Row)
+                </h3>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                  <p className="text-sm text-gray-600"><strong>In:</strong> Fuel input from inventory (API data)</p>
+                  <p className="text-sm text-gray-600"><strong>Use:</strong> Daily fuel consumption you track</p>
+                </div>
+              </section>
+
+              {/* Navigation Tips */}
+              <section>
+                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <Info className="w-5 h-5 text-blue-600" />
+                  Navigation Tips
+                </h3>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                  <p className="text-sm text-gray-600">• Use the search bar to quickly find specific vehicles</p>
+                  <p className="text-sm text-gray-600">• Navigate months using the arrow buttons</p>
+                  <p className="text-sm text-gray-600">• Click on farm/hub tasks to view location on map</p>
+                  <p className="text-sm text-gray-600">• Today's date is highlighted in blue</p>
+                  <p className="text-sm text-gray-600">• Subtle arrows (→) indicate transit between farm locations</p>
+                </div>
+              </section>
+
+            </div>
+            
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-200 bg-gray-50 text-center">
+              <p className="text-sm text-gray-600">Need more help? Contact your system administrator</p>
+            </div>
+            
+          </div>
+        </div>
+      )}
       
     </div>
   );

@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import AppLayout from "./components/layout/AppLayout";
 import Index from "./pages/Index";
 import Leads from "./pages/Leads";
@@ -24,6 +24,7 @@ import WeighmentQC from "./pages/WeighmentQC";
 import RentalRateCard from "./pages/RentalRateCard";
 import ServiceRequest from "./pages/ServiceRequest";
 import FleetChart from "./pages/FleetChart";
+import KhasraFinder from "./pages/khasra_finder";
 
 const queryClient = new QueryClient();
 
@@ -65,6 +66,10 @@ const App = () => (
           {/* Lease & Asset Management */}
           <Route path="/rental-rate-card" element={<AppLayout><RentalRateCard /></AppLayout>} />
           <Route path="/service-requests" element={<AppLayout><ServiceRequest /></AppLayout>} />
+
+          {/* Tools (not in sidebar nav) */}
+          <Route path="/tools/khasra_records" element={<KhasraFinder />} />
+          <Route path="/khasra-finder" element={<Navigate to="/tools/khasra_records" replace />} />
 
           <Route path="*" element={<NotFound />} />
         </Routes>
