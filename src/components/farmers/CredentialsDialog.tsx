@@ -25,9 +25,13 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (next: FarmerCredentials) => void;
+  // entity: 'farmer' (default) or 'staff' - when 'staff' a POST will be used to create credentials
+  entity?: 'farmer' | 'staff';
+  // optional role to send when creating staff credentials
+  role?: string;
 };
 
-export default function CredentialsDialog({ farmerId, credentials, open, onOpenChange, onSaved }: Props) {
+export default function CredentialsDialog({ farmerId, credentials, open, onOpenChange, onSaved, entity = 'farmer', role }: Props) {
   const { toast } = useToast();
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -59,22 +63,42 @@ export default function CredentialsDialog({ farmerId, credentials, open, onOpenC
     try {
       setIsGenerating(true);
       const base = getBaseUrl();
-      const url = `${base.replace(/\/$/, '')}/farmer_managment/generate_farmer_credentials/${encodeURIComponent(farmerId)}`;
+      if (entity === 'staff') {
+        const url = `${base.replace(/\/$/, '')}/admin_staff/create_redentials`;
 
-      const resp = await fetch(url, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staff_id: farmerId, role: role ?? '' }),
+        });
 
-      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+        if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
 
-      const result = await resp.json();
-      const nextUserId = result?.user_id ?? result?.userId ?? null;
-      const nextPassword = result?.password ?? null;
+        const result = await resp.json();
+        const nextUserId = result?.user_name ?? result?.userName ?? result?.user_id ?? null;
+        const nextPassword = result?.password ?? result?.pass ?? null;
 
-      setDraftUserId(nextUserId);
-      setDraftPassword(nextPassword);
-      setDraftSaved(false);
+        setDraftUserId(nextUserId);
+        setDraftPassword(nextPassword);
+        setDraftSaved(false);
+      } else {
+        const url = `${base.replace(/\/$/, '')}/farmer_managment/generate_farmer_credentials/${encodeURIComponent(farmerId)}`;
+
+        const resp = await fetch(url, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+
+        const result = await resp.json();
+        const nextUserId = result?.user_id ?? result?.userId ?? null;
+        const nextPassword = result?.password ?? null;
+
+        setDraftUserId(nextUserId);
+        setDraftPassword(nextPassword);
+        setDraftSaved(false);
+      }
     } catch (error) {
       console.error('Failed to generate credentials:', error);
       toast({
@@ -100,26 +124,51 @@ export default function CredentialsDialog({ farmerId, credentials, open, onOpenC
     try {
       setIsSaving(true);
       const base = getBaseUrl();
-      const url = `${base.replace(/\/$/, '')}/farmer_managment/save_credentials`;
+      if (entity === 'staff') {
+        const url = `${base.replace(/\/$/, '')}/admin_staff/save_credentials`;
 
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          farmer_id: farmerId,
-          user_id: effectiveUserId,
-          password: effectivePassword,
-        }),
-      });
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            staff_id: farmerId,
+            user_name: effectiveUserId,
+            password: effectivePassword,
+            role: role ?? '',
+          }),
+        });
 
-      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+        if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
 
-      const result = await resp.json();
-      if (result?.success !== true) throw new Error('Save credentials failed');
+        // accept either { success:true } or any 2xx response as success
+        const result = await resp.json().catch(() => ({}));
+        if (result && result?.success === false) throw new Error('Save credentials failed');
 
-      const next = { userId: effectiveUserId, password: effectivePassword, saved: true };
-      setDraftSaved(true);
-      onSaved(next);
+        const next = { userId: effectiveUserId, password: effectivePassword, saved: true };
+        setDraftSaved(true);
+        onSaved(next);
+      } else {
+        const url = `${base.replace(/\/$/, '')}/farmer_managment/save_credentials`;
+
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            farmer_id: farmerId,
+            user_id: effectiveUserId,
+            password: effectivePassword,
+          }),
+        });
+
+        if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+
+        const result = await resp.json();
+        if (result?.success !== true) throw new Error('Save credentials failed');
+
+        const next = { userId: effectiveUserId, password: effectivePassword, saved: true };
+        setDraftSaved(true);
+        onSaved(next);
+      }
     } catch (error) {
       console.error('Failed to save credentials:', error);
       toast({

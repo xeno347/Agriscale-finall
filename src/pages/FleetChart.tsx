@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
+import { toast } from 'sonner';
 
 // --- MAP IMPORTS ---
 import { 
@@ -235,34 +236,54 @@ const fetchLogisticsPlan = async (): Promise<{ vehicles: ApiVehicle[]; schedule:
       schedule[vehicleId] = schedule[vehicleId] || {};
 
       for (const [dateKey, dayEntriesRaw] of Object.entries(plan)) {
-        const dayEntries: BackendPlanEntry[] = Array.isArray(dayEntriesRaw) ? dayEntriesRaw : [];
-        if (dayEntries.length === 0) continue;
+        // Support two shapes:
+        // 1) dateKey: [ { ...entry... }, ... ] (legacy)
+        // 2) dateKey: { usage_fuel, plans: [ { locked, activity, status, farm_id }, ... ], total_distance, ... }
+        const raw: any = dayEntriesRaw;
 
-        const tasks: TaskAssignment[] = dayEntries.map((e, idx) => ({
+        let dayEntriesArray: any[] = [];
+        if (Array.isArray(raw)) {
+          dayEntriesArray = raw;
+        } else if (raw && Array.isArray(raw.plans)) {
+          dayEntriesArray = raw.plans;
+        } else {
+          dayEntriesArray = [];
+        }
+
+        // skip if no task entries and no top-level data
+        const hasTopLevelData = raw && (raw.total_distance != null || raw.input_fuel != null || raw.usage_fuel != null || raw.initial_engine_hours != null || raw.final_engine_hours != null || (raw.plans && raw.plans.length));
+        if (dayEntriesArray.length === 0 && !hasTopLevelData) continue;
+
+        const tasks: TaskAssignment[] = dayEntriesArray.map((e: any, idx: number) => ({
           id: `${vehicleId}-${dateKey}-${idx}-${e?.farm_id ?? 'farm'}`,
-          location_name: String(e?.activity ?? 'Activity'),
+          location_name: String(e?.activity ?? e?.location_name ?? 'Activity'),
           status: normalizeTaskStatus(e?.status),
           type: 'farm',
           farm_id: e?.farm_id ? String(e.farm_id) : undefined,
         }));
 
-        const totalDistance = dayEntries.reduce((acc, e) => acc + (Number(e?.total_distance) || 0), 0);
-        const inputFuel = dayEntries.reduce((acc, e) => acc + (Number(e?.input_fuel) || 0), 0);
-        const usageFuel = dayEntries.reduce((acc, e) => acc + (Number(e?.usage_fuel) || 0), 0);
-        const initialEngineHours = dayEntries.reduce((min, e) => {
+        // Totals: prefer top-level fields if present, otherwise aggregate from entries
+        const totalDistance = Number(raw?.total_distance) || dayEntriesArray.reduce((acc: number, e: any) => acc + (Number(e?.total_distance) || 0), 0);
+        const inputFuel = Number(raw?.input_fuel) || dayEntriesArray.reduce((acc: number, e: any) => acc + (Number(e?.input_fuel) || 0), 0);
+        const usageFuel = Number(raw?.usage_fuel) || dayEntriesArray.reduce((acc: number, e: any) => acc + (Number(e?.usage_fuel) || 0), 0);
+
+        const initialEngineHours = (raw && Number(raw.initial_engine_hours)) || dayEntriesArray.reduce((min: number | null, e: any) => {
           const v = Number(e?.initial_engine_hours);
           if (Number.isNaN(v)) return min;
           return min == null ? v : Math.min(min, v);
         }, null as number | null);
-        const finalEngineHours = dayEntries.reduce((max, e) => {
+
+        const finalEngineHours = (raw && Number(raw.final_engine_hours)) || dayEntriesArray.reduce((max: number | null, e: any) => {
           const v = Number(e?.final_engine_hours);
           if (Number.isNaN(v)) return max;
           return max == null ? v : Math.max(max, v);
         }, null as number | null);
-        const damageNotes = dayEntries
-          .map((e) => String(e?.damage_notes ?? '').trim())
-          .filter((s) => s.length > 0);
-        const isLocked = dayEntries.every((e) => Boolean(e?.locked));
+
+        const damageNotes = (raw && String(raw.damage_notes || '').trim() ? [String(raw.damage_notes).trim()] : []).concat(
+          dayEntriesArray.map((e: any) => String(e?.damage_notes ?? '').trim()).filter((s: string) => s.length > 0)
+        ).filter(Boolean);
+
+        const isLocked = Boolean(raw?.locked) || dayEntriesArray.every((e: any) => Boolean(e?.locked));
         const statuses = tasks.map((t) => t.status);
 
         schedule[vehicleId][dateKey] = {
@@ -427,6 +448,64 @@ const FleetChart = () => {
       setLoading(false);
     };
     load();
+  }, []);
+
+  // WebSocket: listen for driver check-in events and update vehicle state in real-time
+  useEffect(() => {
+    const base = getBaseUrl().replace(/\/$/, '');
+    const wsUrl = base.replace(/^http/, 'ws') + '/ws/check_in';
+
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (err) {
+      console.warn('WS connection failed', err);
+      return;
+    }
+
+    ws.onopen = () => {
+      console.debug('WS connected to', wsUrl);
+    };
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        const eventName = msg?.event || msg?.type || null;
+        const payload = msg?.payload || msg;
+
+        if (eventName === 'USER_CHECK_IN' || eventName === 'USER_CHECKIN' || payload?.staff_id) {
+          const vehicleNumber = payload?.vehicle_number || '';
+          const staffName = payload?.staff_name || '';
+
+          if (vehicleNumber) {
+            setVehicles(prev => {
+              return prev.map(v => {
+                const vNum = (v.vehicle_information?.vehicle_number || '').toString();
+                if (vNum && vNum.toLowerCase() === vehicleNumber.toString().toLowerCase()) {
+                  return {
+                    ...v,
+                    driver: {
+                      ...(v.driver || {}),
+                      name: staffName || v.driver?.name || '—',
+                      checkedIn: true,
+                    }
+                  };
+                }
+                return v;
+              });
+            });
+
+            toast.success(`${staffName || 'Driver'} checked in (${vehicleNumber})`);
+          }
+        }
+      } catch (e) {
+        console.debug('WS message parse error', e);
+      }
+    };
+
+    ws.onerror = (err) => console.warn('WS error', err);
+
+    return () => { try { ws?.close(); } catch (e) { /* ignore */ } };
   }, []);
 
   const days = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());

@@ -6,11 +6,13 @@ import {
   Image as ImageIcon,
   IdCard,
   Landmark,
-  Hash
+  Hash,
+  KeyRound
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getBaseUrl } from '@/lib/config';
 import { toast } from 'sonner';
+import CredentialsDialog, { type FarmerCredentials } from '@/components/farmers/CredentialsDialog';
 
 // --- TYPES ---
 interface StaffApiItem {
@@ -30,6 +32,7 @@ interface StaffApiItem {
     staff_department: string;
     staff_designation: string;
   };
+  credentials?: FarmerCredentials | null;
 }
 
 const StaffOnboarding = () => {
@@ -49,6 +52,7 @@ const StaffOnboarding = () => {
   const [ifscCode, setIfscCode] = useState('');
   const [formStep, setFormStep] = useState<1 | 2>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [credentialsDialogStaffId, setCredentialsDialogStaffId] = useState<string | null>(null);
 
   const resetForm = () => {
     setFormStep(1);
@@ -249,18 +253,19 @@ const StaffOnboarding = () => {
               <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Type</th>
               <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Contact</th>
               <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Status</th>
+              <th className="px-6 py-4 text-center font-semibold text-muted-foreground">Credentials</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {isLoadingStaff ? (
               <tr>
-                <td className="px-6 py-8 text-center text-muted-foreground" colSpan={6}>
+                <td className="px-6 py-8 text-center text-muted-foreground" colSpan={7}>
                   Loading staff...
                 </td>
               </tr>
             ) : filteredStaff.length === 0 ? (
               <tr>
-                <td className="px-6 py-8 text-center text-muted-foreground" colSpan={6}>
+                <td className="px-6 py-8 text-center text-muted-foreground" colSpan={7}>
                   No staff found.
                 </td>
               </tr>
@@ -302,6 +307,19 @@ const StaffOnboarding = () => {
                         <span className="w-1.5 h-1.5 rounded-full bg-green-600" />
                         Active
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <CredentialsDialog
+                        farmerId={staff.staff_id}
+                        credentials={staff.credentials}
+                        open={credentialsDialogStaffId === staff.staff_id}
+                        onOpenChange={(nextOpen) => setCredentialsDialogStaffId(nextOpen ? staff.staff_id : null)}
+                        onSaved={(next) =>
+                          setStaffList(prev => prev.map(s => (s.staff_id === staff.staff_id ? { ...s, credentials: next } : s)))
+                        }
+                        entity="staff"
+                        role={staff.staff_information?.staff_designation ?? ''}
+                      />
                     </td>
                   </tr>
                 );
