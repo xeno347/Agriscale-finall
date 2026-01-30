@@ -13,10 +13,12 @@ import {
 
 interface LeadsTableProps {
   leads: Lead[];
-  onProceed: (lead: Lead) => void;
+  onRegister?: (lead: Lead) => void;
+  onFlag?: (id: string, flagged: boolean) => void;
+  onAddLand?: (lead: Lead) => void;
 }
 
-const LeadsTable = ({ leads, onProceed }: LeadsTableProps) => {
+const LeadsTable = ({ leads, onRegister, onFlag, onAddLand }: LeadsTableProps) => {
   const getNextActionLabel = (status: Lead['status']) => {
     switch (status) {
       case 'contacted':
@@ -87,7 +89,7 @@ const LeadsTable = ({ leads, onProceed }: LeadsTableProps) => {
                 <Button
                   size="sm"
                   variant={lead.status === 'rejected' ? 'outline' : 'default'}
-                  onClick={() => onProceed(lead)}
+                  onClick={() => onRegister && onRegister(lead)}
                   disabled={lead.status === 'registered'}
                 >
                   {getNextActionLabel(lead.status)}

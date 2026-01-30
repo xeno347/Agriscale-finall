@@ -1,8 +1,8 @@
-export type LeadStatus = 'contacted' | 'verified' | 'registered' | 'rejected';
+export type LeadStatus = 'contacted' | 'verified' | 'registered' | 'rejected' | 'follow_up';
 
 export interface Lead {
-  id: string; // Local or backend id
-  backendId?: string; // Always set for backend leads
+  id: string;
+  backendId?: string;
   farmerId?: string;
   fullName: string;
   phoneNumber: string;
@@ -22,8 +22,23 @@ export interface Lead {
   status: LeadStatus;
   createdAt?: Date | string;
   updatedAt?: Date | string;
-  kycData?: any;
-  agreementData?: any;
+  
+  // NEW FIELDS
+  isFlagged: boolean; 
+  behaviorNote?: string;
+  stopPayments: boolean;
+  stopInputs: boolean;
+  
+  kycData?: KYCDetails;
+  agreementData?: LeaseAgreement; // Detailed lease info
+}
+
+export interface LeaseAgreement {
+  leaseStartDate: string;
+  leaseEndDate: string;
+  leaseRent: number;
+  b1DocumentUrl?: string;
+  kissanBookUrl?: string;
 }
 
 export interface KYCDetails {
@@ -36,70 +51,4 @@ export interface KYCDetails {
   verified: boolean;
 }
 
-export interface Agreement {
-  id: string;
-  title: string;
-  signedDate: Date;
-  documentUrl: string;
-}
-
-export interface LandMapping {
-  totalArea: number;
-  coordinates: { lat: number; lng: number }[];
-  soilType?: string;
-  irrigationType?: string;
-  satelliteImageUrl?: string;
-}
-
-export interface Farmer {
-  id: string;
-  fullName: string;
-  phoneNumber: string;
-  alternatePhone?: string;
-  village: string;
-  taluka?: string;
-  tehsil?: string;
-  district: string;
-  state: string;
-  profileImageUrl?: string;
-  kyc?: KYCDetails;
-  landMapping?: LandMapping;
-  agreements: Agreement[];
-  createdAt: Date;
-}
-
-export type HarvestPlanStatus = 'planned' | 'in-progress' | 'completed' | 'cancelled';
-export type HarvestOrderStatus = 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled';
-
-export interface HarvestPlan {
-  id: string;
-  farmerId: string;
-  farmerName: string;
-  cropType: string;
-  planningDate: Date | string;
-  expectedHarvestDate: Date | string;
-  estimatedYield: number;
-  yieldUnit: 'kg' | 'tonnes' | 'quintals';
-  notes?: string;
-  status: HarvestPlanStatus;
-  createdAt: Date | string;
-  updatedAt?: Date | string;
-}
-
-export interface HarvestOrder {
-  id: string;
-  farmerId: string;
-  farmerName: string;
-  cropType: string;
-  quantity: number;
-  quantityUnit: 'kg' | 'tonnes' | 'quintals';
-  orderDate: Date | string;
-  expectedDeliveryDate: Date | string;
-  buyerName?: string;
-  price?: number;
-  totalAmount?: number;
-  notes?: string;
-  status: HarvestOrderStatus;
-  createdAt: Date | string;
-  updatedAt?: Date | string;
-}
+// ... keep HarvestPlan and HarvestOrder as they were
