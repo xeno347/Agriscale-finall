@@ -1,5 +1,10 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Search, Filter, Users, MapPin, Phone, FileText, ShieldCheck, Map as MapIcon, NotebookText, Wallet } from 'lucide-react';
+import { MapContainer, TileLayer, Polygon, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import iconUrl from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -144,6 +149,40 @@ const Farmers = () => {
     icon: React.ReactNode;
     data: unknown;
   }) => {
+    // Normalize possible coordinate shapes to [[lat,lng], ...]
+    const normalizedCoords: [number, number][] | null = (() => {
+      if (!data) return null;
+      // If data is an object with coordinates property
+      const asAny = data as any;
+      const coords = asAny?.coordinates ?? asAny?.landCoordinates ?? asAny;
+      if (!coords) return null;
+      if (!Array.isArray(coords) || coords.length === 0) return null;
+      // If elements are objects with lat/lng
+      if (typeof coords[0] === 'object' && coords[0] !== null && 'lat' in coords[0]) {
+        return coords.map((c: any) => [Number(c.lat), Number(c.lng)]);
+      }
+      // If elements are arrays [lat,lng] or [lng,lat] heuristics
+      if (Array.isArray(coords[0]) && coords[0].length >= 2) {
+        // Assume [lat,lng] ordering used across app
+        return coords.map((c: any) => [Number(c[0]), Number(c[1])]);
+      }
+      // If coords is a flat numeric array [lat, lng]
+      if (typeof coords[0] === 'number' && coords.length >= 2) {
+        return [[Number(coords[0]), Number(coords[1])]];
+      }
+      return null;
+    })();
+
+    // Fix default marker icon paths for Leaflet inside this component
+    const DefaultIcon = L.icon({
+      iconUrl: iconUrl as string,
+      shadowUrl: iconShadow as string,
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+    });
+    // @ts-ignore
+    L.Marker.prototype.options.icon = DefaultIcon;
+
     return (
       <Dialog>
         <DialogTrigger asChild>
@@ -156,7 +195,27 @@ const Farmers = () => {
             <DialogTitle>{title}</DialogTitle>
             {description ? <DialogDescription>{description}</DialogDescription> : null}
           </DialogHeader>
-          {renderDialogBody(data)}
+          {normalizedCoords ? (
+            <div className="h-72 w-full rounded-md overflow-hidden">
+              <MapContainer
+                center={[normalizedCoords[0][0], normalizedCoords[0][1]]}
+                zoom={15}
+                style={{ height: '100%', width: '100%' }}
+                scrollWheelZoom={false}
+              >
+                <TileLayer
+                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                  attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+                />
+                <Polygon positions={normalizedCoords as any} pathOptions={{ color: '#f03' }} />
+                <Marker position={[normalizedCoords[0][0], normalizedCoords[0][1]] as any}>
+                  <Popup>Land mapping (first point)</Popup>
+                </Marker>
+              </MapContainer>
+            </div>
+          ) : (
+            renderDialogBody(data)
+          )}
         </DialogContent>
       </Dialog>
     );

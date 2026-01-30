@@ -52,7 +52,9 @@ const Leads = () => {
           leadSource: farmer.lead_source || 'N/A',
           farmingOption: farmer.farming_option,
           village: farmer.village || 'N/A',
+          // Keep taluka for backward compatibility, but prefer tehsil if provided by backend
           taluka: farmer.taluka,
+          tehsil: farmer.tehsil || farmer.taluka || undefined,
           district: farmer.district || 'N/A',
           state: farmer.state || 'N/A',
           estimatedLandArea: farmer.estimated_land_area,
@@ -89,20 +91,14 @@ const Leads = () => {
       const base = getBaseUrl();
 
       // Determine land_coordinates logic
+      // If any land mapping or location exists, always send a nested list of coordinate pairs
+      // i.e. [[lat, lng], [lat, lng], ...]. This includes single-point mappings.
       let land_coordinates = null;
-      // If landCoordinates is an array of objects and has more than 1, treat as mapping
-      if (Array.isArray(data.landCoordinates) && data.landCoordinates.length > 1) {
-        // Mapping done: [[lat, lng], ...]
+      if (Array.isArray(data.landCoordinates) && data.landCoordinates.length > 0) {
         land_coordinates = data.landCoordinates.map(coord => [coord.lat, coord.lng]);
-      } else if (
-        (!data.landCoordinates || data.landCoordinates.length === 0) && (data as any).landLocation
-      ) {
-        // Mapping skipped, but landLocation provided: [lat, lng]
+      } else if ((data as any).landLocation) {
         const loc = (data as any).landLocation;
-        land_coordinates = [loc.lat, loc.lng];
-      } else if (Array.isArray(data.landCoordinates) && data.landCoordinates.length === 1) {
-        // Only one coordinate in mapping (edge case): treat as [lat, lng]
-        land_coordinates = [data.landCoordinates[0].lat, data.landCoordinates[0].lng];
+        land_coordinates = [[loc.lat, loc.lng]];
       } else {
         land_coordinates = null;
       }
@@ -115,7 +111,8 @@ const Leads = () => {
         lead_source: data.leadSource,
         farming_option: data.farmingOption || '', // Required string field
         village: data.village,
-        taluka: data.taluka || null,
+        // send `tehsil` to backend; fallback to `taluka` if older UI supplies it
+        tehsil: (data as any).tehsil || (data as any).taluka || null,
         district: data.district,
         state: data.state,
         estimated_land_area: parseFloat(String(data.estimatedLandArea || 0)), // Ensure float type
@@ -147,6 +144,8 @@ const Leads = () => {
           title: 'Success',
           description: 'Lead added successfully',
         });
+        // Refresh the leads list from server to ensure latest data
+        await loadLeads();
       } else {
         throw new Error('Server returned success: false');
       }
@@ -162,6 +161,8 @@ const Leads = () => {
           title: 'Success (offline)',
           description: 'Lead saved locally',
         });
+          // Attempt to refresh leads (may fail if offline)
+          await loadLeads();
       } catch (err) {
         toast({
           title: 'Error',
@@ -191,6 +192,7 @@ const Leads = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lead_id: leadId }),
       });
+      console.log('lead_id:', leadId);
 
       if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
 
@@ -309,11 +311,13 @@ const Leads = () => {
     }
   };
 
-  const filteredLeads = leads.filter(lead =>
-    lead.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    lead.village.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    lead.district.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredLeads = leads
+    .filter(lead => lead.status !== 'registered')
+    .filter(lead =>
+      lead.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      lead.village.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      lead.district.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
   const stats = {
     total: leads.length,

@@ -10,6 +10,7 @@ export interface Lead {
   leadSource: string;
   village: string;
   taluka?: string;
+  tehsil?: string;
   district: string;
   state: string;
   estimatedLandArea?: number;
@@ -57,6 +58,7 @@ export interface Farmer {
   alternatePhone?: string;
   village: string;
   taluka?: string;
+  tehsil?: string;
   district: string;
   state: string;
   profileImageUrl?: string;

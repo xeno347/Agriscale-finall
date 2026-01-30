@@ -68,6 +68,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area'; // New component
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import getBaseUrl from '@/lib/config';
 
 type LivePlanStepStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -483,6 +484,12 @@ const CreateCultivationPlan: React.FC = () => {
   const [apiMasterPlans, setApiMasterPlans] = useState<{ id: string; name: string; plan_list: any[] }[]>([]);
   // Add state for fetched blocks
   const [apiBlocks, setApiBlocks] = useState<{ block_id: string; block_name: string; total_area: number }[]>([]);
+  // Add state for zones
+  const [apiZones, setApiZones] = useState<{ zone_id: string; zone_name: string; total_area: number }[]>([]);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [blocksInZone, setBlocksInZone] = useState<{ block_id: string; block_name: string; total_area: number }[]>([]);
+  const [selectedFarmIds, setSelectedFarmIds] = useState<string[]>([]);
+  const [planMode, setPlanMode] = useState<'zone' | 'group'>('zone');
 
   // Rental services (multi-select)
   const [rentalServices, setRentalServices] = useState<RentalServiceOption[]>([]);
@@ -545,6 +552,25 @@ const CreateCultivationPlan: React.FC = () => {
       })
       .catch(err => {
         console.error('Failed to fetch blocks:', err);
+      });
+
+    // Fetch zones
+    fetch(`${BASE_URL}/farmer_managment/get_zones`)
+      .then(res => {
+        if (!res.ok) throw new Error('Network response was not ok');
+        return res.json();
+      })
+      .then(data => {
+        if (data && Array.isArray(data.zones)) {
+          setApiZones(data.zones.map((zone: any) => ({
+            zone_id: zone.zone_id,
+            zone_name: zone.zone_name,
+            total_area: zone.total_area,
+          })));
+        }
+      })
+      .catch(err => {
+        console.error('Failed to fetch zones:', err);
       });
 
     // Fetch rental services (rate cards)
@@ -907,107 +933,292 @@ const CreateCultivationPlan: React.FC = () => {
         </div>
       </div>
 
-      {/* --- DIALOG: Select Farm/Plan --- */}
+      {/* --- DIALOG: Select Farm/Plan with Tabs --- */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Create Cultivation Plan</DialogTitle>
-            <DialogDescription>Select a farm and master plan to begin.</DialogDescription>
+            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-green-700 to-emerald-600 bg-clip-text text-transparent">Create Cultivation Plan</DialogTitle>
+            <DialogDescription>Choose between zone-based or group-based planning.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Select Block</label>
-              <Select value={farmId ?? ''} onValueChange={setFarmId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a block..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {apiBlocks.map(block => (
-                    <SelectItem key={block.block_id} value={block.block_id}>
-                      <span className="font-medium">{block.block_name}</span>
-                      <Badge variant="outline" className="ml-2 text-xs">{block.total_area} acres</Badge>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Select Master Plan</label>
-              <Select value={masterPlanId ?? ''} onValueChange={setMasterPlanId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a master plan..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {apiMasterPlans.map(plan => (
-                    <SelectItem key={plan.id} value={plan.id}>
-                      <span>{plan.name}</span>
-                      <Badge variant="outline" className="ml-2 text-xs">{plan.plan_list.length} activities</Badge>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Select Rental Services</label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full justify-between"
-                    disabled={!rentalServices.length}
-                  >
-                    <span className="truncate">
-                      {selectedRentalServices.length
-                        ? `${selectedRentalServices.length} selected`
-                        : rentalServices.length
-                          ? 'Choose rental services...'
-                          : 'No rental services found'}
-                    </span>
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]" align="start">
-                  <DropdownMenuLabel>Rental Services</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {rentalServices.map((s) => (
-                    <DropdownMenuCheckboxItem
-                      key={s.id}
-                      checked={selectedRentalServiceIds.includes(s.id)}
-                      onCheckedChange={() => toggleRentalService(s.id)}
-                    >
-                      {s.name}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+          <Tabs defaultValue="zone" className="w-full" onValueChange={(val) => setPlanMode(val as 'zone' | 'group')}>
+            <TabsList className="grid w-full grid-cols-2 mb-6 bg-gradient-to-r from-gray-100 to-gray-50 p-1 rounded-xl">
+              <TabsTrigger value="zone" className="rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-md transition-all">
+                Zone Plan
+              </TabsTrigger>
+              <TabsTrigger value="group" className="rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-md transition-all">
+                Group Plan
+              </TabsTrigger>
+            </TabsList>
 
-              {selectedRentalServices.length > 0 && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {selectedRentalServices.map((s) => (
-                    <Badge key={s.id} variant="secondary" className="text-xs">
-                      {s.name}
-                    </Badge>
-                  ))}
+            <TabsContent value="zone" className="space-y-5 mt-4">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700">Select Zone</label>
+                <Select
+                  value={selectedZoneId ?? ''}
+                  onValueChange={(val) => {
+                    setSelectedZoneId(val);
+                    // Fetch blocks in this zone
+                    fetch(`${BASE_URL}/farmer_managment/get_zone_details?zone_id=${val}`)
+                      .then(res => res.json())
+                      .then(data => {
+                        if (data && Array.isArray(data.blocks)) {
+                          setBlocksInZone(data.blocks);
+                        } else {
+                          // Fallback: filter blocks by zone (if API doesn't support)
+                          setBlocksInZone([]);
+                        }
+                      })
+                      .catch(() => setBlocksInZone([]));
+                  }}
+                >
+                  <SelectTrigger className="border-2 hover:border-green-400 transition-colors">
+                    <SelectValue placeholder="Choose a zone..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {apiZones.map(zone => (
+                      <SelectItem key={zone.zone_id} value={zone.zone_id}>
+                        <span className="font-medium">{zone.zone_name}</span>
+                        <Badge variant="outline" className="ml-2 text-xs">{zone.total_area} acres</Badge>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {selectedZoneId && blocksInZone.length > 0 && (
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-4">
+                  <p className="text-sm font-semibold text-green-800 mb-3">Blocks in this Zone:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {blocksInZone.map(block => (
+                      <Badge key={block.block_id} variant="secondary" className="bg-white border border-green-300 text-green-800 font-medium px-3 py-1">
+                        {block.block_name} ({block.total_area} acres)
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700">Select Master Plan</label>
+                <Select value={masterPlanId ?? ''} onValueChange={setMasterPlanId}>
+                  <SelectTrigger className="border-2 hover:border-green-400 transition-colors">
+                    <SelectValue placeholder="Choose a master plan..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {apiMasterPlans.map(plan => (
+                      <SelectItem key={plan.id} value={plan.id}>
+                        <span className="font-medium">{plan.name}</span>
+                        <Badge variant="outline" className="ml-2 text-xs">{plan.plan_list.length} activities</Badge>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700">Select Rental Services</label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between border-2 hover:border-green-400 transition-colors"
+                      disabled={!rentalServices.length}
+                    >
+                      <span className="truncate">
+                        {selectedRentalServices.length
+                          ? `${selectedRentalServices.length} selected`
+                          : rentalServices.length
+                            ? 'Choose rental services...'
+                            : 'No rental services found'}
+                      </span>
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]" align="start">
+                    <DropdownMenuLabel>Rental Services</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {rentalServices.map((s) => (
+                      <DropdownMenuCheckboxItem
+                        key={s.id}
+                        checked={selectedRentalServiceIds.includes(s.id)}
+                        onCheckedChange={() => toggleRentalService(s.id)}
+                      >
+                        {s.name}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {selectedRentalServices.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {selectedRentalServices.map((s) => (
+                      <Badge key={s.id} variant="secondary" className="bg-green-100 text-green-800 border border-green-300">
+                        {s.name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="group" className="space-y-5 mt-4">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700">Select Farms (Blocks)</label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between border-2 hover:border-blue-400 transition-colors"
+                    >
+                      <span className="truncate">
+                        {selectedFarmIds.length
+                          ? `${selectedFarmIds.length} farm(s) selected`
+                          : 'Choose farms...'}
+                      </span>
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]" align="start">
+                    <DropdownMenuLabel>Select Farms</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {apiBlocks.map((block) => (
+                      <DropdownMenuCheckboxItem
+                        key={block.block_id}
+                        checked={selectedFarmIds.includes(block.block_id)}
+                        onCheckedChange={() => {
+                          setSelectedFarmIds(prev =>
+                            prev.includes(block.block_id)
+                              ? prev.filter(id => id !== block.block_id)
+                              : [...prev, block.block_id]
+                          );
+                        }}
+                      >
+                        {block.block_name} ({block.total_area} acres)
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {selectedFarmIds.length > 0 && (
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-blue-800 mb-3">Selected Farms:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedFarmIds.map(id => {
+                        const block = apiBlocks.find(b => b.block_id === id);
+                        return block ? (
+                          <Badge key={id} variant="secondary" className="bg-white border border-blue-300 text-blue-800 font-medium px-3 py-1">
+                            {block.block_name} ({block.total_area} acres)
+                          </Badge>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700">Select Master Plan</label>
+                <Select value={masterPlanId ?? ''} onValueChange={setMasterPlanId}>
+                  <SelectTrigger className="border-2 hover:border-blue-400 transition-colors">
+                    <SelectValue placeholder="Choose a master plan..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {apiMasterPlans.map(plan => (
+                      <SelectItem key={plan.id} value={plan.id}>
+                        <span className="font-medium">{plan.name}</span>
+                        <Badge variant="outline" className="ml-2 text-xs">{plan.plan_list.length} activities</Badge>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700">Select Rental Services</label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between border-2 hover:border-blue-400 transition-colors"
+                      disabled={!rentalServices.length}
+                    >
+                      <span className="truncate">
+                        {selectedRentalServices.length
+                          ? `${selectedRentalServices.length} selected`
+                          : rentalServices.length
+                            ? 'Choose rental services...'
+                            : 'No rental services found'}
+                      </span>
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]" align="start">
+                    <DropdownMenuLabel>Rental Services</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {rentalServices.map((s) => (
+                      <DropdownMenuCheckboxItem
+                        key={s.id}
+                        checked={selectedRentalServiceIds.includes(s.id)}
+                        onCheckedChange={() => toggleRentalService(s.id)}
+                      >
+                        {s.name}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {selectedRentalServices.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {selectedRentalServices.map((s) => (
+                      <Badge key={s.id} variant="secondary" className="bg-blue-100 text-blue-800 border border-blue-300">
+                        {s.name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter className="gap-3 pt-4 border-t">
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className="font-semibold">
               Cancel
             </Button>
             <Button
               onClick={async () => {
-                if (!farmId || !masterPlanId) return;
+                // Validate based on plan mode
+                if (planMode === 'zone') {
+                  if (!selectedZoneId || !masterPlanId) {
+                    toast.error('Please select a zone and master plan');
+                    return;
+                  }
+                  // Use first block in zone as farmId for metadata
+                  if (blocksInZone.length === 0) {
+                    toast.error('No blocks found in selected zone');
+                    return;
+                  }
+                  setFarmId(blocksInZone[0].block_id);
+                } else {
+                  if (selectedFarmIds.length === 0 || !masterPlanId) {
+                    toast.error('Please select at least one farm and a master plan');
+                    return;
+                  }
+                  // Use first selected farm as farmId for metadata
+                  setFarmId(selectedFarmIds[0]);
+                }
+
                 setPlanMetaLoading(true);
                 setPlanMeta(null);
                 try {
+                  const blockIdForMeta = planMode === 'zone' ? blocksInZone[0].block_id : selectedFarmIds[0];
                   const resp = await fetch(`${BASE_URL}/admin_cultivation/plan_metadata_finder`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ block_id: farmId, master_plan_id: masterPlanId })
+                    body: JSON.stringify({ block_id: blockIdForMeta, master_plan_id: masterPlanId })
                   });
                   if (!resp.ok) throw new Error('Failed to fetch plan metadata');
                   const data = await resp.json();
@@ -1019,13 +1230,19 @@ const CreateCultivationPlan: React.FC = () => {
                   setHighlighted({});
                   setHighlightCounts({});
                   setRawMappedData([]);
+                  toast.success(`${planMode === 'zone' ? 'Zone' : 'Group'} plan setup complete!`);
                 } catch (err) {
                   toast.error('Failed to load plan metadata');
                 } finally {
                   setPlanMetaLoading(false);
                 }
               }}
-              disabled={!farmId || !masterPlanId || planMetaLoading}
+              disabled={
+                planMetaLoading ||
+                !masterPlanId ||
+                (planMode === 'zone' ? !selectedZoneId : selectedFarmIds.length === 0)
+              }
+              className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold px-6 shadow-lg hover:shadow-xl transition-all duration-300"
             >
               {planMetaLoading ? 'Loading...' : 'Continue to Calendar'}
             </Button>

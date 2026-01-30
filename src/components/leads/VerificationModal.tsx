@@ -2,6 +2,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Lead } from '@/types/farm';
 import { Check, X, MapPin, Phone, Droplets, FileText } from 'lucide-react';
+import { MapContainer, TileLayer, Polygon, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import iconUrl from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
 interface VerificationModalProps {
   open: boolean;
@@ -13,6 +18,36 @@ interface VerificationModalProps {
 
 const VerificationModal = ({ open, onClose, lead, onVerify, onReject }: VerificationModalProps) => {
   if (!lead) return null;
+
+  // Fix default marker icon paths for Leaflet
+  const DefaultIcon = L.icon({
+    iconUrl: iconUrl as string,
+    shadowUrl: iconShadow as string,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+  });
+  // @ts-ignore - mutate Leaflet Marker prototype so markers render correctly
+  L.Marker.prototype.options.icon = DefaultIcon;
+
+  // Normalize landCoordinates to LatLng tuples [[lat,lng], ...]
+  const normalizedCoords: [number, number][] | null = (() => {
+    const raw = lead.landCoordinates as any;
+    if (!raw) return null;
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+    // If array of objects {lat,lng}
+    if (typeof raw[0] === 'object' && raw[0] !== null && 'lat' in raw[0]) {
+      return raw.map((c: any) => [Number(c.lat), Number(c.lng)]);
+    }
+    // If array of arrays [lat, lng]
+    if (Array.isArray(raw[0]) && raw[0].length >= 2) {
+      return raw.map((c: any) => [Number(c[0]), Number(c[1])]);
+    }
+    // If a flat numeric array [lat, lng]
+    if (typeof raw[0] === 'number' && raw.length >= 2) {
+      return [[Number(raw[0]), Number(raw[1])]];
+    }
+    return null;
+  })();
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -57,17 +92,36 @@ const VerificationModal = ({ open, onClose, lead, onVerify, onReject }: Verifica
             )}
           </div>
 
-          {/* Map Preview */}
-          {lead.location && (
+          {/* Interactive Map Preview: show polygon or marker in a Leaflet map */}
+          {(normalizedCoords || lead.location) && (
             <div className="aspect-video rounded-lg overflow-hidden bg-muted">
-              <img
-                src={`https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/${lead.location.lng},${lead.location.lat},14,0/400x200?access_token=pk.eyJ1IjoiZXhhbXBsZSIsImEiOiJjbGV4YW1wbGUifQ.example`}
-                alt="Farm location"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=400&h=200&fit=crop';
-                }}
-              />
+              <MapContainer
+                center={
+                  normalizedCoords
+                    ? [normalizedCoords[0][0], normalizedCoords[0][1]]
+                    : [lead.location!.lat, lead.location!.lng]
+                }
+                zoom={15}
+                style={{ height: '100%', width: '100%' }}
+                scrollWheelZoom={false}
+              >
+                <TileLayer
+                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                  attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+                />
+                {normalizedCoords ? (
+                  <>
+                    <Polygon positions={normalizedCoords as any} pathOptions={{ color: '#f03' }} />
+                    <Marker position={[normalizedCoords[0][0], normalizedCoords[0][1]] as any}>
+                      <Popup>Lead land mapping (first point)</Popup>
+                    </Marker>
+                  </>
+                ) : (
+                  <Marker position={[lead.location!.lat, lead.location!.lng] as any}>
+                    <Popup>Lead location</Popup>
+                  </Marker>
+                )}
+              </MapContainer>
             </div>
           )}
 

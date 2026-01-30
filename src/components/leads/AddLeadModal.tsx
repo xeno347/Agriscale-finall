@@ -25,7 +25,7 @@ export interface AddLeadFormData {
   leadSource: string;
   farmingOption?: string;
   village: string;
-  taluka?: string;
+  tehsil?: string;
   district: string;
   state: string;
   estimatedLandArea?: number;
@@ -51,7 +51,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
     leadSource: '',
     farmingOption: '',
     village: '',
-    taluka: '',
+    tehsil: '',
     district: '',
     state: '',
     estimatedLandArea: undefined,
@@ -94,7 +94,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
         leadSource: '',
         farmingOption: '',
         village: '',
-        taluka: '',
+        tehsil: '',
         district: '',
         state: '',
         estimatedLandArea: undefined,
@@ -168,23 +168,54 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   };
 
   const extractCoordinates = () => {
-    // Extract drawn polygon coordinates from leaflet
+    // Extract drawn polygon coordinates from leaflet.
+    // Handle nested latlng arrays returned by polygon/rectangle (rings),
+    // as well as circle (getLatLng) and single markers.
     const coordinates: { lat: number; lng: number }[] = [];
+
+    const pushLatLng = (ll: any) => {
+      if (!ll) return;
+      const lat = typeof ll.lat === 'number' ? ll.lat : ll[0];
+      const lng = typeof ll.lng === 'number' ? ll.lng : ll[1];
+      if (typeof lat === 'number' && typeof lng === 'number') {
+        coordinates.push({ lat, lng });
+      }
+    };
+
+    const flattenAndPush = (obj: any) => {
+      if (!obj) return;
+      if (Array.isArray(obj)) {
+        obj.forEach((item) => flattenAndPush(item));
+      } else if (obj.lat !== undefined && obj.lng !== undefined) {
+        pushLatLng(obj);
+      } else if (obj.hasOwnProperty('lat') || obj.hasOwnProperty('lng')) {
+        pushLatLng(obj);
+      }
+    };
+
     if (featureGroupRef.current) {
       const layers = (featureGroupRef.current as any).getLayers?.();
-      if (layers) {
+      if (layers && Array.isArray(layers)) {
         layers.forEach((layer: any) => {
-          if (layer.getLatLngs) {
-            const latlngs = layer.getLatLngs();
-            if (Array.isArray(latlngs)) {
-              latlngs.forEach((latlng: any) => {
-                coordinates.push({ lat: latlng.lat, lng: latlng.lng });
-              });
+          try {
+            if (typeof layer.getLatLngs === 'function') {
+              const latlngs = layer.getLatLngs();
+              // latlngs can be nested arrays (rings) or a flat array
+              flattenAndPush(latlngs);
+            } else if (typeof layer.getLatLng === 'function') {
+              // circle / marker
+              const ll = layer.getLatLng();
+              pushLatLng(ll);
             }
+          } catch (e) {
+            // ignore malformed layers
+            // eslint-disable-next-line no-console
+            console.warn('Error extracting latlngs from layer', e);
           }
         });
       }
     }
+
     return coordinates;
   };
 
@@ -297,15 +328,15 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   placeholder="Enter village name"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="taluka">Taluka</Label>
-                <Input
-                  id="taluka"
-                  value={formData.taluka}
-                  onChange={e => setFormData(prev => ({ ...prev, taluka: e.target.value }))}
-                  placeholder="Enter taluka"
-                />
-              </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tehsil">Tehsil</Label>
+                      <Input
+                        id="tehsil"
+                        value={(formData as any).tehsil}
+                        onChange={e => setFormData(prev => ({ ...prev, tehsil: e.target.value }))}
+                        placeholder="Enter tehsil"
+                      />
+                    </div>
               <div className="space-y-2">
                 <Label htmlFor="district">District *</Label>
                 <Input

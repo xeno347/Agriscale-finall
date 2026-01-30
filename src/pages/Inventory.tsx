@@ -3,7 +3,7 @@ import {
   Search, Filter, Plus, Minus, 
   Package, AlertTriangle, History, 
   ArrowUpRight, ArrowDownLeft, X,
-  FileText, TrendingUp, Download, Edit,
+  FileText, TrendingUp, Download, Edit, RefreshCw,
   Calendar, User, MapPin, Tag, Fuel
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -115,6 +115,7 @@ const Inventory = () => {
   const [items, setItems] = useState<InventoryItem[]>(MOCK_INVENTORY);
   const [transactions, setTransactions] = useState<Transaction[]>(MOCK_TRANSACTIONS);
   const [fuelRequests, setFuelRequests] = useState<FuelRequest[]>(MOCK_FUEL_REQUESTS);
+  const [isFuelLoading, setIsFuelLoading] = useState<boolean>(true);
   
   // State for UI
   const [activeTab, setActiveTab] = useState<'stock' | 'history'>('stock');
@@ -164,40 +165,69 @@ const Inventory = () => {
     }
   };
 
-  const confirmDelivery = () => {
-    if (selectedFuelRequest) {
-      setFuelRequests(fuelRequests.map(req => 
-        req.request_id === selectedFuelRequest.request_id 
-          ? { ...req, status: 'delivered' as FuelRequestStatus }
-          : req
-      ));
-      toast.success(`Fuel delivered to ${selectedFuelRequest.vehicleNumber}`);
+  const confirmDelivery = async () => {
+    if (!selectedFuelRequest) return;
+    const req = selectedFuelRequest;
+    try {
+      const url = `${getBaseUrl()}/inventory/confirm_fuel_request`;
+      const body = {
+        vehicle_number: req.vehicleNumber,
+        request_id: req.request_id,
+        status: 'delivered'
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText);
+        throw new Error(`HTTP ${res.status} - ${text}`);
+      }
+
+      const data = await res.json().catch(() => null);
+      if (data && data.success === false) {
+        toast.error(data.message || 'Failed to confirm delivery');
+        return;
+      }
+
+      setFuelRequests(prev => prev.map(r => r.request_id === req.request_id ? { ...r, status: 'delivered' } : r));
+      toast.success(`Fuel delivered to ${req.vehicleNumber}`);
       setIsConfirmDeliveryOpen(false);
       setSelectedFuelRequest(null);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Error confirming fuel delivery', err);
+      toast.error('Error confirming fuel delivery');
     }
   };
 
-  // Fetch fuel requests from backend on mount
-  useEffect(() => {
-    const fetchFuelRequests = async () => {
-      try {
-        const url = `${getBaseUrl()}/inventory/get_all_fuel_request`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (data && data.success && Array.isArray(data.fuel_requests)) {
-          const mapped: FuelRequest[] = data.fuel_requests.map((fr: any, idx: number) => mapBackendFuelRequest(fr, idx));
-          setFuelRequests(mapped);
-        } else {
-          toast.error('Failed to load fuel requests');
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('Error fetching fuel requests', err);
-        toast.error('Error fetching fuel requests');
+  // Fetch fuel requests (reusable for mount + refresh)
+  const fetchFuelRequests = async () => {
+    setIsFuelLoading(true);
+    try {
+      const url = `${getBaseUrl()}/inventory/get_all_fuel_request`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.fuel_requests)) {
+        const mapped: FuelRequest[] = data.fuel_requests.map((fr: any, idx: number) => mapBackendFuelRequest(fr, idx));
+        setFuelRequests(mapped);
+      } else {
+        toast.error('Failed to load fuel requests');
       }
-    };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Error fetching fuel requests', err);
+      toast.error('Error fetching fuel requests');
+    } finally {
+      setIsFuelLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchFuelRequests();
   }, []);
 
@@ -718,87 +748,104 @@ const Inventory = () => {
                     </button>
                   )}
                 </div>
-              </div>
-              <button 
-                onClick={() => {
-                  setIsFuelRequestsOpen(false);
-                  setFuelSearchQuery('');
-                }}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors ml-4"
-              >
-                <X className="w-5 h-5 text-muted-foreground"/>
-              </button>
+                </div>
+                <div className="flex items-start gap-2 ml-4">
+                  <button
+                    onClick={() => fetchFuelRequests()}
+                    disabled={isFuelLoading}
+                    title="Refresh"
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <RefreshCw className={`w-5 h-5 text-muted-foreground ${isFuelLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setIsFuelRequestsOpen(false);
+                      setFuelSearchQuery('');
+                    }}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5 text-muted-foreground"/>
+                  </button>
+                </div>
             </div>
             
-            {/* Fuel Requests Table */}
-            <div className="bg-white border border-border rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 border-b border-border">
-                  <tr>
-                    <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Request ID</th>
-                    <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Driver</th>
-                    <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Vehicle</th>
-                    <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Amount (L)</th>
-                    <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Date</th>
-                    <th className="px-6 py-4 text-center font-semibold text-muted-foreground">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredFuelRequests.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
-                        <Fuel className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                        <p>{fuelSearchQuery ? 'No matching fuel requests found' : 'No fuel requests found'}</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredFuelRequests.map((request) => (
-                      <tr key={request.request_id} className="hover:bg-muted/20">
-                        <td className="px-6 py-4">
-                          <span className="font-mono text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                            {request.request_id}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
-                            <User className="w-4 h-4 text-muted-foreground" />
-                            <span className="font-medium text-foreground">{request.driverName}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="font-mono text-sm font-medium">{request.vehicleNumber}</span>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Fuel className="w-4 h-4 text-blue-600" />
-                            <span className="font-bold">{request.requestedAmount} L</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-muted-foreground">
-                          {format(new Date(request.requestDate), 'dd MMM yyyy, HH:mm')}
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          {request.status === 'delivered' ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
-                              <div className="w-1.5 h-1.5 rounded-full bg-green-600" />
-                              Delivered
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => handleStatusChange(request)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors cursor-pointer"
-                            >
-                              <div className="w-1.5 h-1.5 rounded-full bg-orange-600 animate-pulse" />
-                              Requested
-                            </button>
-                          )}
-                        </td>
+              {/* Fuel Requests Table or Loading */}
+              <div className="bg-white border border-border rounded-xl overflow-hidden">
+                {isFuelLoading ? (
+                  <div className="p-12 flex flex-col items-center justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600 mb-3" />
+                    <p className="text-sm text-muted-foreground">Loading fuel requests...</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 border-b border-border">
+                      <tr>
+                        <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Request ID</th>
+                        <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Driver</th>
+                        <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Vehicle</th>
+                        <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Amount (L)</th>
+                        <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Date</th>
+                        <th className="px-6 py-4 text-center font-semibold text-muted-foreground">Status</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {filteredFuelRequests.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                            <Fuel className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                            <p>{fuelSearchQuery ? 'No matching fuel requests found' : 'No fuel requests found'}</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredFuelRequests.map((request) => (
+                          <tr key={request.request_id} className="hover:bg-muted/20">
+                            <td className="px-6 py-4">
+                              <span className="font-mono text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                                {request.request_id}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2">
+                                <User className="w-4 h-4 text-muted-foreground" />
+                                <span className="font-medium text-foreground">{request.driverName}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="font-mono text-sm font-medium">{request.vehicleNumber}</span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Fuel className="w-4 h-4 text-blue-600" />
+                                <span className="font-bold">{request.requestedAmount} L</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-muted-foreground">
+                              {format(new Date(request.requestDate), 'dd MMM yyyy, HH:mm')}
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              {request.status === 'delivered' ? (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-green-600" />
+                                  Delivered
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleStatusChange(request)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors cursor-pointer"
+                                >
+                                  <div className="w-1.5 h-1.5 rounded-full bg-orange-600 animate-pulse" />
+                                  Requested
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
 
             {/* Footer Summary */}
             <div className="mt-6 pt-4 border-t border-border flex justify-between items-center">

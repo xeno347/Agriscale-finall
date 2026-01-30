@@ -244,7 +244,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             notificationStatus={leadsComplete ? "success" : "warning"} 
           />
           <NavItem to="/farmers" icon={UserCheck} label="Farmers" isSidebarCollapsed={isCollapsed} />
-          <NavItem to="/blocks" icon={Layers} label="Blocks" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/blocks" icon={Layers} label="Land Hierarchy" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
         {/* Group 2: Harvest Management */}
