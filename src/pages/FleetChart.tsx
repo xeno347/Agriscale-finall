@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -398,6 +398,12 @@ const FleetChart = () => {
   const [selectedCell, setSelectedCell] = useState<(TaskAssignment & { vehicle: string, date: string }) | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
+  // Keep a ref so websocket callbacks can access latest vehicles list
+  const vehiclesRef = useRef<ApiVehicle[]>([]);
+  useEffect(() => {
+    vehiclesRef.current = vehicles;
+  }, [vehicles]);
+
   const updateScheduleData = (vehicleId: string, date: string, field: string, value: any) => {
     setSchedule(prev => ({
       ...prev,
@@ -453,59 +459,187 @@ const FleetChart = () => {
   // WebSocket: listen for driver check-in events and update vehicle state in real-time
   useEffect(() => {
     const base = getBaseUrl().replace(/\/$/, '');
-    const wsUrl = base.replace(/^http/, 'ws') + '/ws/check_in';
+    const wsPath = '/ws/check_in';
 
     let ws: WebSocket | null = null;
-    try {
-      ws = new WebSocket(wsUrl);
-    } catch (err) {
-      console.warn('WS connection failed', err);
-      return;
-    }
+    let reconnectAttempts = 0;
+    let stopped = false;
 
-    ws.onopen = () => {
-      console.debug('WS connected to', wsUrl);
+    const buildWsUrl = () => {
+      // Ensure we use correct ws/wss scheme and preserve host/path
+      const isHttps = base.startsWith('https');
+      const host = base.replace(/^https?:\/\//, '');
+      return `${isHttps ? 'wss' : 'ws'}://${host}${wsPath}`;
     };
 
-    ws.onmessage = (ev) => {
+    const scheduleReconnect = () => {
+      if (stopped) return;
+      if (reconnectAttempts >= 5) {
+        console.warn('WS: max reconnect attempts reached');
+        return;
+      }
+      reconnectAttempts += 1;
+      const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+      console.debug(`WS: reconnect attempt ${reconnectAttempts} in ${delay}ms`);
+      setTimeout(() => { if (!stopped) connect(); }, delay);
+    };
+
+    const connect = () => {
+      const wsUrl = buildWsUrl();
+      console.debug('WS connecting to', wsUrl);
       try {
-        const msg = JSON.parse(ev.data);
-        const eventName = msg?.event || msg?.type || null;
-        const payload = msg?.payload || msg;
+        ws = new WebSocket(wsUrl);
+      } catch (err) {
+        console.warn('WS connection failed', err);
+        scheduleReconnect();
+        return;
+      }
 
-        if (eventName === 'USER_CHECK_IN' || eventName === 'USER_CHECKIN' || payload?.staff_id) {
-          const vehicleNumber = payload?.vehicle_number || '';
-          const staffName = payload?.staff_name || '';
+      ws.onopen = () => {
+        console.debug('WS connected to', wsUrl);
+        reconnectAttempts = 0;
+      };
 
-          if (vehicleNumber) {
-            setVehicles(prev => {
-              return prev.map(v => {
-                const vNum = (v.vehicle_information?.vehicle_number || '').toString();
-                if (vNum && vNum.toLowerCase() === vehicleNumber.toString().toLowerCase()) {
+      ws.onmessage = (ev) => {
+        // Debug: log everything we receive from the socket
+        console.log('[WS] /ws/check_in raw message:', ev.data);
+        try {
+          const msg = JSON.parse(ev.data);
+          console.log('[WS] /ws/check_in parsed message:', msg);
+          const eventName = msg?.event || msg?.type || null;
+
+          // Support several shapes: { payload }, { checkin }, or flat
+          const raw = msg?.payload ?? msg?.checkin ?? msg;
+          const checkin = msg?.checkin ?? raw;
+
+          console.log('[WS] /ws/check_in resolved payload:', {
+            eventName,
+            raw,
+            checkin,
+          });
+
+          const vehicleNumber = checkin?.vehicle_number || raw?.vehicle_number || '';
+          const staffName = checkin?.staff_name || raw?.staff_name || '';
+
+          const hasCheckin = eventName === 'USER_CHECK_IN' || eventName === 'USER_CHECKIN' || Boolean(checkin?.staff_id) || Boolean(raw?.staff_id);
+
+          if (hasCheckin && vehicleNumber) {
+            // Parse optional fields from payload (API has a known typo: intial_engine_hours)
+            const rawInitialHours =
+              checkin?.initial_engine_hours ??
+              raw?.initial_engine_hours ??
+              checkin?.intial_engine_hours ??
+              raw?.intial_engine_hours ??
+              raw?.initialEngineHours ??
+              checkin?.initialEngineHours;
+
+            const initialEngineHours = Number(rawInitialHours);
+            const safeInitialEngineHours = Number.isFinite(initialEngineHours) ? initialEngineHours : 0;
+
+            // Fuel input requested by driver during check-in
+            const rawInputFuel =
+              checkin?.input_fuel_requested ??
+              raw?.input_fuel_requested ??
+              checkin?.inputFuelRequested ??
+              raw?.inputFuelRequested ??
+              checkin?.input_fuel ??
+              raw?.input_fuel;
+            const inputFuel = Number(rawInputFuel);
+            const safeInputFuel = Number.isFinite(inputFuel) ? inputFuel : null;
+
+            const rawDate =
+              checkin?.date ||
+              raw?.date ||
+              (checkin?.timestamp ? new Date(checkin.timestamp).toISOString() : null);
+            const checkinDate = rawDate ? String(rawDate).split('T')[0] : null;
+
+            // Resolve vehicleId from the latest vehicles list (row = vehicle number)
+            const currentVehicles = vehiclesRef.current;
+            const matched = currentVehicles.find((v) => {
+              const vNum = (v.vehicle_information?.vehicle_number || '').toString().trim().toLowerCase();
+              return vNum && vNum === vehicleNumber.toString().trim().toLowerCase();
+            });
+            const matchedVehicleId = matched?.vehicle_id || vehicleNumber.toString();
+
+            console.log('[WS] /ws/check_in mapping:', {
+              vehicleNumber,
+              matchedVehicleId,
+              checkinDate,
+              safeInitialEngineHours,
+              safeInputFuel,
+            });
+
+            // Update vehicle check-in badge/name
+            setVehicles((prev) =>
+              prev.map((v) => {
+                const vNum = (v.vehicle_information?.vehicle_number || '').toString().trim().toLowerCase();
+                if (vNum && vNum === vehicleNumber.toString().trim().toLowerCase()) {
                   return {
                     ...v,
                     driver: {
-                      ...(v.driver || {}),
-                      name: staffName || v.driver?.name || '—',
+                      name: String(staffName || v.driver?.name || '—'),
+                      phone: String(v.driver?.phone || '—'),
                       checkedIn: true,
-                    }
+                    },
                   };
                 }
                 return v;
+              })
+            );
+
+            // Update the exact cell (column = date) with initial engine hours
+            if (checkinDate) {
+              setSchedule((prev) => {
+                const existingDay = prev[matchedVehicleId]?.[checkinDate];
+                const nextFuel =
+                  safeInputFuel !== null
+                    ? {
+                        input: safeInputFuel,
+                        consumed: existingDay?.fuel?.consumed ?? 0,
+                      }
+                    : existingDay?.fuel;
+                return {
+                  ...prev,
+                  [matchedVehicleId]: {
+                    ...(prev[matchedVehicleId] || {}),
+                    [checkinDate]: {
+                      date: checkinDate,
+                      tasks: existingDay?.tasks || [],
+                      fuel: nextFuel,
+                      initialEngineHours: safeInitialEngineHours,
+                      finalEngineHours: existingDay?.finalEngineHours ?? 0,
+                      damageChecklist: existingDay?.damageChecklist ?? '',
+                      totalDistance: existingDay?.totalDistance,
+                      tasksStatus: existingDay?.tasksStatus,
+                      isLocked: existingDay?.isLocked,
+                      damageChecklistTouched: existingDay?.damageChecklistTouched ?? false,
+                    },
+                  },
+                };
               });
-            });
+            }
 
             toast.success(`${staffName || 'Driver'} checked in (${vehicleNumber})`);
           }
+        } catch (e) {
+          console.debug('WS message parse error', e);
         }
-      } catch (e) {
-        console.debug('WS message parse error', e);
-      }
+      };
+
+      ws.onerror = (err) => {
+        console.warn('WS error', err);
+        toast.error('WebSocket error');
+      };
+
+      ws.onclose = (ev) => {
+        console.warn('WS closed', ev);
+        if (!stopped) scheduleReconnect();
+      };
     };
 
-    ws.onerror = (err) => console.warn('WS error', err);
+    connect();
 
-    return () => { try { ws?.close(); } catch (e) { /* ignore */ } };
+    return () => { stopped = true; try { ws?.close(); } catch (e) { /* ignore */ } };
   }, []);
 
   const days = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
@@ -822,19 +956,29 @@ const FleetChart = () => {
                         {days.map((day, dIndex) => {
                             const dateKey = formatDateKey(day);
                             const fuel = vSchedule[dateKey]?.fuel;
+                          const balance = fuel ? (Number(fuel.input) || 0) - (Number(fuel.consumed) || 0) : null;
 
                             return (
                                 <td key={`${vId}-f-${dIndex}`} className="border-r border-b border-gray-100 p-1 h-12 text-center align-middle">
                                     {fuel ? (
-                                        <div className="flex items-center justify-between px-2 text-[10px] font-medium text-gray-500">
-                                            <span className={cn("flex items-center gap-1", fuel.input > 0 ? "text-green-600 font-bold" : "")}>
-                                                In: {fuel.input > 0 ? `${fuel.input}L` : '-'}
-                                            </span>
-                                            <span className="text-gray-300">|</span>
-                                            <span className="text-gray-600">
-                                                Use: {fuel.consumed}L
-                                            </span>
-                                        </div>
+                                <div className="flex items-center justify-between px-2 text-[10px] font-medium text-gray-500">
+                                  <span className={cn(
+                                    "flex items-center gap-1",
+                                    (balance ?? 0) > 0 ? "text-emerald-700 font-bold" :
+                                    (balance ?? 0) < 0 ? "text-red-700 font-bold" :
+                                    "text-gray-600"
+                                  )}>
+                                    Balance: {balance !== null ? `${balance}L` : '-'}
+                                  </span>
+                                  <span className="text-gray-300">|</span>
+                                  <span className={cn("flex items-center gap-1", fuel.input > 0 ? "text-green-600 font-bold" : "")}> 
+                                    In: {fuel.input > 0 ? `${fuel.input}L` : '-'}
+                                  </span>
+                                  <span className="text-gray-300">|</span>
+                                  <span className="text-gray-600">
+                                    Use: {fuel.consumed}L
+                                  </span>
+                                </div>
                                     ) : (
                                         <div className="text-[10px] text-gray-300">-</div>
                                     )}

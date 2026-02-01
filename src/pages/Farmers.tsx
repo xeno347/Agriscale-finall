@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Search, Filter, Users, MapPin, Phone, FileText, ShieldCheck, Map as MapIcon, NotebookText, Wallet } from 'lucide-react';
+import { Search, Filter, Users, MapPin, Phone, FileText, ShieldCheck, Map as MapIcon, NotebookText, Wallet, Check, Flag } from 'lucide-react';
 import { MapContainer, TileLayer, Polygon, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -37,12 +37,14 @@ type FarmerRow = {
   district: string;
   state: string;
   profileImageUrl?: string;
-  kyc?: { verified: boolean };
+  // `kyc` can include the full KYC object returned by backend (adhar, pan, IFSC, etc.)
+  kyc?: any;
   landMapping?: { totalArea: number; coordinates: unknown[] };
   agreements: unknown[];
   credentials?: FarmerCredentials | null;
   blockAssigned?: string | null;
   createdAt: Date;
+  documents?: Record<string, any> | null;
 };
 
 const Farmers = () => {
@@ -51,6 +53,8 @@ const Farmers = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [credentialsDialogFarmerId, setCredentialsDialogFarmerId] = useState<string | null>(null);
+  const [flagged, setFlagged] = useState<Record<string, boolean>>({});
+  const [flagging, setFlagging] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
   useEffect(() => {
@@ -85,8 +89,14 @@ const Farmers = () => {
           taluka: fd.taluka ?? null,
           district: fd.district || 'N/A',
           state: fd.state || 'N/A',
-          profileImageUrl: undefined,
-          kyc: kyc ? { verified: true } : undefined,
+          // Try common places for profile photo URL returned by backend
+          profileImageUrl:
+            item.documents?.profile_photo?.url ||
+            item.profile_photo ||
+            fd.profile_photo_url ||
+            fd.profile_image_url ||
+            undefined,
+          kyc: kyc || undefined,
           landMapping: fd.estimated_land_area != null
             ? { totalArea: fd.estimated_land_area, coordinates: fd.land_coordinates || [] }
             : undefined,
@@ -94,15 +104,67 @@ const Farmers = () => {
           credentials: userId != null || password != null ? { userId, password, saved: true } : null,
           blockAssigned: fd.block_assigned ?? fd.block ?? fd.block_name ?? null,
           createdAt: item.created_at ? new Date(item.created_at) : new Date(),
+          documents: item.documents || null,
         };
       });
 
       setFarmers(transformed);
+      // Initialize flagged state from backend response if present
+      try {
+        const flaggedMap: Record<string, boolean> = {};
+        (result.farmers || []).forEach((it: any) => {
+          if (it?.farmer_id && it?.flagged && (it.flagged.flagged === true || it.flagged === true)) {
+            flaggedMap[it.farmer_id] = true;
+          }
+        });
+        setFlagged(flaggedMap);
+      } catch (e) {
+        // ignore
+      }
     } catch (error) {
       console.error('Failed to load farmers:', error);
       toast({ title: 'Error', description: 'Failed to load farmers', variant: 'destructive' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toggleFlag = async (farmerId: string) => {
+    // If currently flagged, just unflag locally
+    if (flagged[farmerId]) {
+      setFlagged(prev => ({ ...prev, [farmerId]: false }));
+      return;
+    }
+
+    setFlagging(prev => ({ ...prev, [farmerId]: true }));
+    try {
+      const base = getBaseUrl();
+      const resp = await fetch(`${base.replace(/\/$/, '')}/farmer_managment/make_farmer_flagged`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ farmer_id: farmerId }),
+      });
+
+      let body: any = null;
+      try { body = await resp.json(); } catch { body = null; }
+
+      if (!resp.ok || body?.success !== true) {
+        console.error('Failed to flag farmer', resp.status, body);
+        toast({ title: 'Error', description: 'Failed to flag farmer', variant: 'destructive' });
+        return;
+      }
+
+      setFlagged(prev => ({ ...prev, [farmerId]: true }));
+      toast({ title: 'Success', description: 'Farmer flagged', variant: 'success' });
+    } catch (err) {
+      console.error('Failed to call flag API', err);
+      toast({ title: 'Error', description: 'Failed to flag farmer', variant: 'destructive' });
+    } finally {
+      setFlagging(prev => {
+        const copy = { ...prev };
+        delete copy[farmerId];
+        return copy;
+      });
     }
   };
 
@@ -119,7 +181,8 @@ const Farmers = () => {
   }, [farmers, searchQuery]);
 
   const totalArea = farmers.reduce((acc, f) => acc + (f.landMapping?.totalArea || 0), 0);
-  const verifiedKYC = farmers.filter(f => f.kyc?.verified).length;
+  // consider KYC present if backend returned kyc_data
+  const verifiedKYC = farmers.filter(f => !!f.kyc).length;
   const totalAgreements = farmers.reduce((acc, f) => acc + f.agreements.length, 0);
 
   const renderDialogBody = (data: unknown) => {
@@ -183,6 +246,10 @@ const Farmers = () => {
     // @ts-ignore
     L.Marker.prototype.options.icon = DefaultIcon;
 
+    const asAny = data as any;
+    const kyc = asAny?.kyc ?? null;
+    const documents = asAny?.documents ?? null;
+
     return (
       <Dialog>
         <DialogTrigger asChild>
@@ -195,6 +262,7 @@ const Farmers = () => {
             <DialogTitle>{title}</DialogTitle>
             {description ? <DialogDescription>{description}</DialogDescription> : null}
           </DialogHeader>
+
           {normalizedCoords ? (
             <div className="h-72 w-full rounded-md overflow-hidden">
               <MapContainer
@@ -213,9 +281,136 @@ const Farmers = () => {
                 </Marker>
               </MapContainer>
             </div>
-          ) : (
-            renderDialogBody(data)
-          )}
+          ) : (() => {
+            // Agreements view: if caller passed { agreement, documents }
+            const agreementObj = (asAny?.agreement !== undefined) ? asAny.agreement : null;
+            const docs = (asAny?.documents !== undefined) ? asAny.documents : documents;
+
+            if (agreementObj) {
+              // Agreement may be object or array
+              const first = Array.isArray(agreementObj) ? agreementObj[0] : agreementObj;
+              const lease = first?.lease_rent ?? first?.leaseRent ?? null;
+              const start = first?.agreement_start_date ?? first?.agreementStart ?? null;
+              const end = first?.agreement_end_date ?? first?.agreementEnd ?? null;
+
+              return (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-muted-foreground" />
+                      <h3 className="text-sm font-medium">Agreement Details</h3>
+                    </div>
+                    {lease != null && (
+                      <div className="text-sm font-medium text-muted-foreground">Lease: ₹{Number(lease).toLocaleString('en-IN')}</div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="text-xs text-muted-foreground">Agreement Start</div>
+                    <div className="text-sm">{start ?? '—'}</div>
+                    <div className="text-xs text-muted-foreground">Agreement End</div>
+                    <div className="text-sm">{end ?? '—'}</div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-2">Agreement Document</div>
+                    {docs && (docs.agreement?.url || docs.agreement_file?.url || docs?.agreement_url) ? (
+                      <div className="flex items-center gap-2">
+                        <a href={docs.agreement?.url || docs.agreement_file?.url || docs?.agreement_url} target="_blank" rel="noreferrer">
+                          <Button size="sm" variant="outline">View Agreement</Button>
+                        </a>
+                        <Check className="w-4 h-4 text-green-600" />
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No agreement document available</div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            // Fallback to KYC/documents rendering if present
+            if (kyc || documents) {
+              return (
+                <div className="space-y-4">
+                  {/* KYC summary */}
+                  {kyc && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="w-5 h-5 text-muted-foreground" />
+                          <h3 className="text-sm font-medium">KYC Details</h3>
+                        </div>
+                        {documents && Object.keys(documents).length > 0 && (
+                          <div className="flex items-center gap-2 text-sm text-green-600">
+                            <Check className="w-4 h-4" />
+                            <span>Verified with documents</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="text-xs text-muted-foreground">Aadhaar Number</div>
+                        <div className="text-sm">{kyc.adhar_number ?? '—'}</div>
+
+                        <div className="text-xs text-muted-foreground">PAN Number</div>
+                        <div className="text-sm">{kyc.pan_numnber ?? '—'}</div>
+
+                        <div className="text-xs text-muted-foreground">Account Number</div>
+                        <div className="text-sm">{kyc.accound_number ?? '—'}</div>
+
+                        <div className="text-xs text-muted-foreground">IFSC</div>
+                        <div className="text-sm">{kyc.IFSC_code ?? '—'}</div>
+
+                        <div className="text-xs text-muted-foreground">Address</div>
+                        <div className="text-sm col-span-1">{kyc.permanent_address ?? '—'}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Documents list */}
+                  {documents && Object.keys(documents).length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <FileText className="w-4 h-4" />
+                        <span>Documents</span>
+                      </div>
+                      <div className="space-y-2">
+                        {Object.entries(documents).map(([key, val]) => (
+                          <div key={key} className="flex items-center justify-between gap-3 rounded-md border p-2">
+                            <div className="flex items-center gap-3">
+                              <div className="text-sm font-medium">{key.replace(/_/g, ' ')}</div>
+                              <div className="text-xs text-muted-foreground">{(function(key){
+                                if (!key) return '';
+                                try{
+                                  const k = String(key);
+                                  if (k.length <= 3) return k.replace(/./g, '*');
+                                  return k.slice(0,3) + '***********';
+                                }catch{ return '' }
+                              })(val?.s3_key)}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {val?.url ? (
+                                <a href={val.url} target="_blank" rel="noreferrer">
+                                  <Button size="sm" variant="outline">View</Button>
+                                </a>
+                              ) : (
+                                <Button size="sm" variant="outline" disabled>View</Button>
+                              )}
+                              {val?.url && <Check className="w-4 h-4 text-green-600" />}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            return <div className="py-6 text-center text-sm text-muted-foreground">No data found</div>;
+          })()
+          }
         </DialogContent>
       </Dialog>
     );
@@ -273,15 +468,16 @@ const Farmers = () => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>ID</TableHead>
+                <TableHead>Photo</TableHead>
                 <TableHead>Farmer&apos;s name</TableHead>
+                <TableHead className="text-center">Flag</TableHead>
                 <TableHead>Phone number</TableHead>
                 <TableHead>Location</TableHead>
-                <TableHead>Block assigned</TableHead>
+                <TableHead>Block</TableHead>
                 <TableHead className="text-center">Land</TableHead>
                 <TableHead className="text-center">KYC</TableHead>
                 <TableHead className="text-center">Agreement</TableHead>
-                <TableHead className="text-center">Harvest Logs</TableHead>
+                <TableHead className="text-center">Harvest</TableHead>
                 <TableHead className="text-center">Payment</TableHead>
                 <TableHead className="text-center">Credential</TableHead>
               </TableRow>
@@ -289,9 +485,30 @@ const Farmers = () => {
 
             <TableBody>
               {filteredFarmers.map((farmer) => (
-                <TableRow key={farmer.id}>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{farmer.id}</TableCell>
-                  <TableCell className="font-medium">{farmer.fullName}</TableCell>
+                <TableRow key={farmer.id} className={flagged[farmer.id] ? 'bg-red-50' : undefined}>
+                  <TableCell className="py-2">
+                    {farmer.profileImageUrl ? (
+                      <img src={farmer.profileImageUrl} alt="profile" className="h-10 w-10 rounded-full object-cover" />
+                    ) : (
+                      <div className="h-10 w-10 rounded-full bg-muted/20" />
+                    )}
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    <div>{farmer.fullName}</div>
+                    <div className="text-xs text-muted-foreground">ID: {farmer.id}</div>
+                  </TableCell>
+
+                  <TableCell className="text-center">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => toggleFlag(farmer.id)}
+                      disabled={!!flagging[farmer.id]}
+                      className={flagged[farmer.id] ? 'text-red-600' : 'text-muted-foreground'}
+                    >
+                      <Flag className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Phone className="h-4 w-4 text-muted-foreground" />
@@ -322,18 +539,18 @@ const Farmers = () => {
                   <TableCell className="text-center">
                     <IconPopup
                       title="KYC"
-                      description={farmer.kyc?.verified ? 'Verified' : undefined}
+                      description={farmer.kyc ? 'KYC data available' : undefined}
                       icon={<ShieldCheck className="h-4 w-4" />}
-                      data={farmer.kyc ?? null}
+                      data={{ kyc: farmer.kyc ?? null, documents: farmer.documents ?? null }}
                     />
                   </TableCell>
 
                   <TableCell className="text-center">
                     <IconPopup
                       title="Agreements"
-                      description={farmer.agreements?.length ? `${farmer.agreements.length} agreement(s)` : undefined}
+                      description={farmer.agreements && (Array.isArray(farmer.agreements) ? (farmer.agreements.length ? `${farmer.agreements.length} agreement(s)` : undefined) : 'Agreement details')}
                       icon={<FileText className="h-4 w-4" />}
-                      data={farmer.agreements ?? []}
+                      data={{ agreement: farmer.agreements ?? null, documents: farmer.documents ?? null }}
                     />
                   </TableCell>
 

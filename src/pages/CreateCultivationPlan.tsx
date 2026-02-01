@@ -468,6 +468,7 @@ const CreateCultivationPlan: React.FC = () => {
   const [highlighted, setHighlighted] = useState<{ [date: string]: string }>({});
   const [highlightCounts, setHighlightCounts] = useState<{ [date: string]: number }>({});
   const [savingPlan, setSavingPlan] = useState(false);
+  const [blockedDates, setBlockedDates] = useState<{ [date: string]: boolean }>({});
 
   const [livePlanProgressOpen, setLivePlanProgressOpen] = useState(false);
   const [livePlanStep, setLivePlanStep] = useState<1 | 2 | 3 | 4 | 5>(1);
@@ -597,6 +598,24 @@ const CreateCultivationPlan: React.FC = () => {
       })
       .catch(err => {
         console.error('Failed to fetch rental services:', err);
+      });
+
+    // Fetch blocked dates
+    fetch(`${BASE_URL}/admin_cultivation/blocked_dates`)
+      .then(res => {
+        if (!res.ok) throw new Error('Network response was not ok');
+        return res.json();
+      })
+      .then(data => {
+        if (data && Array.isArray(data.blocked_dates)) {
+          const map: { [date: string]: boolean } = {};
+          data.blocked_dates.forEach((d: string) => { if (d) map[String(d)] = true; });
+          setBlockedDates(map);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to fetch blocked dates:', err);
+        setBlockedDates({});
       });
   }, []);
 
@@ -884,17 +903,7 @@ const CreateCultivationPlan: React.FC = () => {
     return Array.from({ length: 13 }, (_, i) => addMonths(startOfMonth(today), i));
   }, []);
 
-  // Generate random blocked dates for demo
-  const blockedDates = useMemo(() => {
-    const result: { [date: string]: boolean } = {};
-    const today = new Date();
-    for (let i = 0; i < 10; i++) {
-      const offset = Math.floor(Math.random() * 365);
-      const d = addDays(today, offset);
-      result[format(d, 'yyyy-MM-dd')] = true;
-    }
-    return result;
-  }, []);
+  // `blockedDates` is populated from the API (`/admin_cultivation/blocked_dates`)
 
   return (
     <div className="min-h-screen bg-background px-4 py-8">

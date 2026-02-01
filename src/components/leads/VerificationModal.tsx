@@ -1,7 +1,8 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Lead } from '@/types/farm';
-import { Check, X, MapPin, Phone, Droplets, FileText } from 'lucide-react';
+import { Check, X, MapPin, Phone, Droplets, FileText, Clock } from 'lucide-react';
 import { MapContainer, TileLayer, Polygon, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -14,10 +15,14 @@ interface VerificationModalProps {
   lead: Lead | null;
   onVerify: () => void;
   onReject: () => void;
+  onFollowUp?: (note: string) => void;
 }
 
-const VerificationModal = ({ open, onClose, lead, onVerify, onReject }: VerificationModalProps) => {
+const VerificationModal = ({ open, onClose, lead, onVerify, onReject, onFollowUp }: VerificationModalProps) => {
   if (!lead) return null;
+
+  const [showFollowUpForm, setShowFollowUpForm] = useState(false);
+  const [followUpNote, setFollowUpNote] = useState('');
 
   // Fix default marker icon paths for Leaflet
   const DefaultIcon = L.icon({
@@ -126,7 +131,37 @@ const VerificationModal = ({ open, onClose, lead, onVerify, onReject }: Verifica
           )}
 
           {/* Actions */}
-          <div className="flex gap-3 pt-4 border-t">
+          <div className="pt-4 border-t">
+            {showFollowUpForm ? (
+              <div className="space-y-3">
+                <textarea
+                  value={followUpNote}
+                  onChange={(e) => setFollowUpNote(e.target.value)}
+                  placeholder="Enter reason for follow-up..."
+                  className="w-full h-28 p-2 border rounded resize-y"
+                />
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => { setShowFollowUpForm(false); setFollowUpNote(''); }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    className="flex-1 bg-amber-600 hover:bg-amber-700"
+                    onClick={() => {
+                      onFollowUp?.(followUpNote.trim());
+                      setShowFollowUpForm(false);
+                      setFollowUpNote('');
+                    }}
+                  >
+                    Save Note
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-3">
             <Button
               variant="outline"
               className="flex-1 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
@@ -135,6 +170,16 @@ const VerificationModal = ({ open, onClose, lead, onVerify, onReject }: Verifica
               <X className="w-4 h-4 mr-2" />
               Reject
             </Button>
+
+            <Button
+              variant="outline"
+              className="flex-1 border-amber-200 text-amber-700 hover:bg-amber-50"
+              onClick={() => setShowFollowUpForm(true)}
+            >
+              <Clock className="w-4 h-4 mr-2" />
+              Follow Up
+            </Button>
+
             <Button
               className="flex-1"
               onClick={onVerify}
@@ -142,6 +187,8 @@ const VerificationModal = ({ open, onClose, lead, onVerify, onReject }: Verifica
               <Check className="w-4 h-4 mr-2" />
               Verify
             </Button>
+              </div>
+            )}
           </div>
         </div>
       </DialogContent>
