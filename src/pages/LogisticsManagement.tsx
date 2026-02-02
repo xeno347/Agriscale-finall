@@ -5,7 +5,9 @@ import {
   Trash2, X, User, 
   ArrowLeft, LayoutList, Download, 
   ShieldCheck, AlertTriangle, Clock,
-  ChevronRight, Fuel, Navigation, Play
+  ChevronRight, Fuel, Navigation, Play,
+  Search, Filter, ArrowUpDown, ChevronDown,
+  FileText, Phone, Package
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -20,6 +22,25 @@ type LocationType = 'Plant' | 'Field' | 'Hub' | 'Deposit';
 type PlanStatus = 'Draft' | 'Live' | 'Completed';
 type TripStep = 1 | 2 | 3;
 type TripStatusBackend = 'created' | 'started' | 'completed' | string;
+type RequestStatus = 'pending' | 'approved' | 'in_progress' | 'completed' | 'rejected';
+type RequestPriority = 'urgent' | 'high' | 'medium' | 'low';
+
+interface LogisticsRequest {
+  id: string;
+  requesterId: string;
+  requesterName: string;
+  requesterPhone: string;
+  vehicleType: string;
+  fromLocation: string;
+  toLocation: string;
+  requestDate: string;
+  preferredDate: string;
+  status: RequestStatus;
+  priority: RequestPriority;
+  description: string;
+  loadDetails?: string;
+  createdAt: string;
+}
 
 interface CalendarEntry {
   date: string;
@@ -117,7 +138,6 @@ const STANDARD_CHECKS = [
 const BASE_COORD: [number, number] = [19.0760, 72.8777];
 
 // --- MAP FIX COMPONENT ---
-// This ensures the map renders correctly inside cards/modals
 const MapUpdater = () => {
   const map = useMap();
   useEffect(() => {
@@ -208,7 +228,6 @@ const MapPreview = ({ plan }: { plan: LogisticsPlan }) => {
           />
         ))}
       </MapContainer>
-      {/* Gradient Overlay for better UI integration */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/5 to-transparent pointer-events-none" />
     </div>
   );
@@ -293,7 +312,6 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
   useEffect(() => {
     const fetchVehicleCalendar = async () => {
       try {
-        // API CALL: Fetch Vehicle Calendar
         const response = await fetch(`${getBaseUrl()}/admin_vehicles/get_vehicle_calander`);
         const data = await response.json();
         setVehicleData(data);
@@ -410,7 +428,6 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
 
     setSaving(true);
     try {
-      // API CALL: Save Logistics Plan
       const response = await fetch(`${getBaseUrl()}/admin_vehicles/save_logistics_plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -687,193 +704,6 @@ const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, 
   );
 };
 
-// --- TASK PANEL ---
-const TaskPanel = ({ onCreatePlan }: { onCreatePlan: () => void }) => {
-  const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
-
-  const toggleTaskComplete = (taskId: string) => {
-    const newCompleted = new Set(completedTasks);
-    if (newCompleted.has(taskId)) {
-      newCompleted.delete(taskId);
-    } else {
-      newCompleted.add(taskId);
-    }
-    setCompletedTasks(newCompleted);
-  };
-
-  const tasks = [
-    {
-      id: 'jd-start',
-      title: 'Start of Day - JD-Link Data',
-      description: 'Enter engine hours at day start',
-      type: 'start',
-      icon: <Play className="w-4 h-4" />,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
-      borderColor: 'border-blue-200',
-      action: () => {
-        toast.info('JD-Link integration coming soon!');
-      }
-    },
-    {
-      id: 'create-plans',
-      title: 'Create Cultivation Plans',
-      description: 'Make new plans for assigned activities',
-      type: 'plan',
-      icon: <Plus className="w-4 h-4" />,
-      color: 'text-emerald-600', 
-      bgColor: 'bg-emerald-50',
-      borderColor: 'border-emerald-200',
-      action: onCreatePlan
-    },
-    {
-      id: 'jd-end',
-      title: 'End of Day - JD-Link Data',
-      description: 'Enter diesel consumption & engine hours',
-      type: 'end',
-      icon: <Fuel className="w-4 h-4" />,
-      color: 'text-orange-600',
-      bgColor: 'bg-orange-50', 
-      borderColor: 'border-orange-200',
-      action: () => {
-        toast.info('JD-Link integration coming soon!');
-      }
-    }
-  ];
-
-  return (
-    <div className="w-80 bg-white border-l border-gray-200 flex flex-col">
-      {/* Header */}
-      <div className="p-6 border-b border-gray-100">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-            <CheckCircle2 className="w-4 h-4 text-white" />
-          </div>
-          <h2 className="font-semibold text-lg text-gray-900">Daily Tasks</h2>
-        </div>
-        <p className="text-sm text-gray-600">Complete your logistics tasks for today</p>
-        <div className="mt-3 flex items-center gap-2">
-          <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-          <span className="text-xs text-gray-500">
-            {completedTasks.size} of {tasks.length} completed
-          </span>
-        </div>
-      </div>
-
-      {/* Tasks List */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {tasks.map((task) => {
-          const isCompleted = completedTasks.has(task.id);
-          return (
-            <div
-              key={task.id}
-              className={cn(
-                "border rounded-xl p-4 transition-all duration-200 cursor-pointer hover:shadow-sm",
-                isCompleted 
-                  ? "bg-gray-50 border-gray-200 opacity-75" 
-                  : `${task.bgColor} ${task.borderColor}`
-              )}
-            >
-              <div className="flex items-start gap-3">
-                <div 
-                  className={cn(
-                    "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
-                    isCompleted ? "bg-gray-200 text-gray-500" : `${task.bgColor} ${task.color}`
-                  )}
-                >
-                  {task.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className={cn(
-                      "font-medium text-sm",
-                      isCompleted ? "text-gray-500 line-through" : "text-gray-900"
-                    )}>
-                      {task.title}
-                    </h3>
-                    {task.type === 'start' && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded font-medium">AM</span>}
-                    {task.type === 'end' && <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded font-medium">PM</span>}
-                  </div>
-                  <p className={cn(
-                    "text-xs mb-3",
-                    isCompleted ? "text-gray-400" : "text-gray-600"
-                  )}>
-                    {task.description}
-                  </p>
-                  
-                  {/* Action Buttons */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        task.action();
-                      }}
-                      disabled={isCompleted}
-                      className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex-1",
-                        isCompleted
-                          ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                          : task.id === 'create-plans'
-                            ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                            : "bg-slate-900 hover:bg-slate-800 text-white"
-                      )}
-                    >
-                      {task.id === 'create-plans' ? 'Create Plans' : 'Start Task'}
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleTaskComplete(task.id);
-                        if (!isCompleted) {
-                          toast.success(`${task.title} marked as completed!`);
-                        }
-                      }}
-                      className={cn(
-                        "p-1.5 rounded-md transition-colors",
-                        isCompleted
-                          ? "bg-gray-200 text-gray-600 hover:bg-gray-300"
-                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                      )}
-                      title={isCompleted ? "Mark as incomplete" : "Mark as complete"}
-                    >
-                      {isCompleted ? (
-                        <X className="w-3 h-3" />
-                      ) : (
-                        <CheckCircle2 className="w-3 h-3" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Progress Footer */}
-      <div className="p-6 border-t border-gray-100 bg-gray-50">
-        <div className="mb-2">
-          <div className="flex justify-between text-xs text-gray-600 mb-1">
-            <span>Daily Progress</span>
-            <span>{Math.round((completedTasks.size / tasks.length) * 100)}%</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div 
-              className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${(completedTasks.size / tasks.length) * 100}%` }}
-            ></div>
-          </div>
-        </div>
-        {completedTasks.size === tasks.length && (
-          <div className="text-center py-2">
-            <span className="text-xs font-medium text-emerald-600">🎉 All tasks completed!</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 // --- MONITOR SECTION ---
 const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: LogisticsPlan[], onUpdate: (p: LogisticsPlan) => void, onCreateClick: () => void, onDelete: (id: string) => void }) => {
   const [activePlan, setActivePlan] = useState<LogisticsPlan | null>(null);
@@ -906,7 +736,6 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
             return (
               <div key={plan.id} className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 group relative">
                 
-                {/* DELETE BUTTON */}
                 <button 
                   onClick={(e) => { e.stopPropagation(); if(confirm('Delete plan?')) onDelete(plan.id); }}
                   className="absolute top-3 right-3 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors z-10"
@@ -926,7 +755,6 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
                         <p className="text-xs text-gray-500 mt-0.5">{plan.vehicleType} • {plan.createdAt}</p>
                       </div>
                     </div>
-                    {/* Status Pill */}
                     <div className={`px-2.5 py-1 rounded-md text-xs font-medium ${statusConfig.bg} ${statusConfig.color} ${statusConfig.border} border mr-6`}>
                       {statusConfig.label}
                     </div>
@@ -944,7 +772,6 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
                   </div>
                 </div>
 
-                {/* Map Preview */}
                 <div className="px-6 pt-4">
                   <div className="relative">
                     <MapPreview plan={plan} />
@@ -954,7 +781,6 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
                   </div>
                 </div>
 
-                {/* Driver & Status Rows */}
                 <div className="p-6 pt-4 space-y-3">
                   <div className="flex items-center gap-3">
                     <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center">
@@ -967,7 +793,6 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center">
-                       {/* Alert Icon Logic */}
                        {hasIncompleteTasks ? <AlertTriangle className="w-3.5 h-3.5 text-orange-600" /> : renderTripStatusIcon(plan.tripStatus)}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -979,16 +804,13 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
                   </div>
                 </div>
 
-                {/* Footer Buttons */}
                 <div className="p-6 pt-0 space-y-2">
-                  {/* Start Button */}
                   {plan.status !== 'Completed' && plan.status !== 'Live' && (
                      <button onClick={() => setActivePlan(plan)} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2">
                        <Play className="w-4 h-4" /> Start Operation
                      </button>
                   )}
 
-                  {/* Manage/Download Button */}
                   <button onClick={plan.status === 'Completed' ? () => generateTripSheetPDF(plan) : () => setActivePlan(plan)} className="w-full bg-slate-900 hover:bg-slate-800 text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2">
                     {plan.status === 'Completed' ? <><Download className="w-4 h-4" /> Download Report</> : <><LayoutList className="w-4 h-4" /> Manage Operation</>}
                   </button>
@@ -1009,139 +831,473 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
   );
 };
 
-// --- MAIN LAYOUT ---
-const LogisticsManagement = () => {
-  const [plans, setPlans] = useState<LogisticsPlan[]>([]);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [loadingPlans, setLoadingPlans] = useState(true);
+// --- REQUESTS SECTION ---
+const RequestsSection = ({ requests, onApprove, onReject }: { 
+  requests: LogisticsRequest[], 
+  onApprove: (id: string) => void,
+  onReject: (id: string) => void 
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'date' | 'priority' | 'status'>('date');
+  const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'none'>('status');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['pending', 'approved', 'in_progress']));
 
-  const buildStopsFromBackendPlan = (plan: Record<string, BackendPlanEntry>): RouteStop[] => {
-    const dates = Object.keys(plan).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-    if (dates.length === 0) return [];
-    
-    const builtStops: RouteStop[] = [];
-    const firstDate = dates[0];
-    
-    builtStops.push({
-      id: `s-${Date.now()}-start`,
-      date: firstDate,
-      type: (plan[firstDate].start.toLowerCase().includes('hub') ? 'Hub' : 'Plant'),
-      locationName: plan[firstDate].start,
-      isReached: false,
-    });
-
-    dates.forEach((date, idx) => {
-      const p = plan[date];
-      builtStops.push({
-        id: `s-${Date.now()}-${idx}-f`,
-        date,
-        type: 'Field',
-        locationName: `Field ${p.feild_id}`,
-        isReached: false,
-      });
-      builtStops.push({
-        id: `s-${Date.now()}-${idx}-h`,
-        date,
-        type: 'Hub',
-        locationName: p.end_hub,
-        isReached: false,
-        inspection: { completed: false, items: STANDARD_CHECKS.map(c => ({ ...c })) },
-      });
-    });
-    return builtStops;
+  const toggleGroup = (group: string) => {
+    const newExpanded = new Set(expandedGroups);
+    if (newExpanded.has(group)) {
+      newExpanded.delete(group);
+    } else {
+      newExpanded.add(group);
+    }
+    setExpandedGroups(newExpanded);
   };
 
-  const fetchPlans = async () => {
-    setLoadingPlans(true);
+  const filteredRequests = requests.filter(req => 
+    req.requesterName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.fromLocation.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.toLocation.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.vehicleType.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.id.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const sortedRequests = [...filteredRequests].sort((a, b) => {
+    if (sortBy === 'date') return new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime();
+    if (sortBy === 'priority') {
+      const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    }
+    return a.status.localeCompare(b.status);
+  });
+
+  const groupedRequests: Record<string, LogisticsRequest[]> = {};
+  if (groupBy !== 'none') {
+    sortedRequests.forEach(req => {
+      const key = groupBy === 'status' ? req.status : req.priority;
+      if (!groupedRequests[key]) groupedRequests[key] = [];
+      groupedRequests[key].push(req);
+    });
+  } else {
+    groupedRequests['all'] = sortedRequests;
+  }
+
+  const getStatusConfig = (status: RequestStatus) => {
+    switch (status) {
+      case 'pending': return { color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', label: 'Pending' };
+      case 'approved': return { color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', label: 'Approved' };
+      case 'in_progress': return { color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', label: 'In Progress' };
+      case 'completed': return { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Completed' };
+      case 'rejected': return { color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200', label: 'Rejected' };
+    }
+  };
+
+  const getPriorityConfig = (priority: RequestPriority) => {
+    switch (priority) {
+      case 'urgent': return { color: 'text-red-700', bg: 'bg-red-50', icon: '🔴' };
+      case 'high': return { color: 'text-orange-700', bg: 'bg-orange-50', icon: '🟠' };
+      case 'medium': return { color: 'text-yellow-700', bg: 'bg-yellow-50', icon: '🟡' };
+      case 'low': return { color: 'text-gray-700', bg: 'bg-gray-50', icon: '⚪' };
+    }
+  };
+
+  const getGroupLabel = (key: string) => {
+    if (groupBy === 'status') return getStatusConfig(key as RequestStatus).label;
+    if (groupBy === 'priority') return key.charAt(0).toUpperCase() + key.slice(1);
+    return 'All Requests';
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+        <div className="flex flex-col lg:flex-row gap-4">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search by requester, location, vehicle, or ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+            />
+          </div>
+
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+          >
+            <option value="date">Sort by Date</option>
+            <option value="priority">Sort by Priority</option>
+            <option value="status">Sort by Status</option>
+          </select>
+
+          <select
+            value={groupBy}
+            onChange={(e) => setGroupBy(e.target.value as any)}
+            className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+          >
+            <option value="status">Group by Status</option>
+            <option value="priority">Group by Priority</option>
+            <option value="none">No Grouping</option>
+          </select>
+        </div>
+
+        <div className="mt-4 flex gap-4 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">Total:</span>
+            <span className="font-semibold text-gray-900">{requests.length}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">Filtered:</span>
+            <span className="font-semibold text-gray-900">{filteredRequests.length}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">Pending:</span>
+            <span className="font-semibold text-amber-700">{requests.filter(r => r.status === 'pending').length}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">In Progress:</span>
+            <span className="font-semibold text-purple-700">{requests.filter(r => r.status === 'in_progress').length}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {Object.entries(groupedRequests).map(([groupKey, groupRequests]) => {
+          const isExpanded = expandedGroups.has(groupKey);
+          
+          return (
+            <div key={groupKey} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              {groupBy !== 'none' && (
+                <button
+                  onClick={() => toggleGroup(groupKey)}
+                  className="w-full px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <ChevronDown className={cn("w-5 h-5 text-gray-400 transition-transform", !isExpanded && "-rotate-90")} />
+                    <h3 className="font-semibold text-gray-900">{getGroupLabel(groupKey)}</h3>
+                    <span className="px-2.5 py-1 bg-white rounded-full text-xs font-medium text-gray-600 border border-gray-200">
+                      {groupRequests.length}
+                    </span>
+                  </div>
+                </button>
+              )}
+
+              {isExpanded && (
+                <div className="divide-y divide-gray-100">
+                  {groupRequests.map((req) => {
+                    const statusConfig = getStatusConfig(req.status);
+                    const priorityConfig = getPriorityConfig(req.priority);
+
+                    return (
+                      <div key={req.id} className="p-6 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start gap-6">
+                          <div className="flex-1 space-y-3">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <div className="flex items-center gap-3 mb-2">
+                                  <h4 className="font-semibold text-gray-900 text-lg">{req.requesterName}</h4>
+                                  <span className="text-xs text-gray-500 font-mono">{req.id}</span>
+                                  <span className={cn("px-2.5 py-1 rounded-md text-xs font-medium border", priorityConfig.bg, priorityConfig.color)}>
+                                    {priorityConfig.icon} {req.priority.toUpperCase()}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                  <Phone className="w-3.5 h-3.5" />
+                                  <span>{req.requesterPhone}</span>
+                                </div>
+                              </div>
+                              <div className={cn("px-3 py-1.5 rounded-lg text-sm font-medium border", statusConfig.bg, statusConfig.color, statusConfig.border)}>
+                                {statusConfig.label}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+                              <div className="flex items-center gap-2 flex-1">
+                                <MapPin className="w-4 h-4 text-green-600" />
+                                <div>
+                                  <p className="text-xs text-gray-500">From</p>
+                                  <p className="font-medium text-gray-900">{req.fromLocation}</p>
+                                </div>
+                              </div>
+                              <ChevronRight className="w-5 h-5 text-gray-400" />
+                              <div className="flex items-center gap-2 flex-1">
+                                <MapPin className="w-4 h-4 text-red-600" />
+                                <div>
+                                  <p className="text-xs text-gray-500">To</p>
+                                  <p className="font-medium text-gray-900">{req.toLocation}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4">
+                              <div className="flex items-center gap-2">
+                                <Truck className="w-4 h-4 text-gray-400" />
+                                <div>
+                                  <p className="text-xs text-gray-500">Vehicle Type</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.vehicleType}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <CalendarIcon className="w-4 h-4 text-gray-400" />
+                                <div>
+                                  <p className="text-xs text-gray-500">Preferred Date</p>
+                                  <p className="text-sm font-medium text-gray-900">{new Date(req.preferredDate).toLocaleDateString()}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Package className="w-4 h-4 text-gray-400" />
+                                <div>
+                                  <p className="text-xs text-gray-500">Load</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.loadDetails || 'Standard'}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {req.description && (
+                              <div className="pt-2">
+                                <p className="text-sm text-gray-600 italic">"{req.description}"</p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-col gap-2 min-w-[140px]">
+                            {req.status === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() => onApprove(req.id)}
+                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() => onReject(req.id)}
+                                  className="px-4 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            {req.status === 'approved' && (
+                              <button className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium">
+                                Create Plan
+                              </button>
+                            )}
+                            <button className="px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg text-sm font-medium">
+                              Details
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {groupRequests.length === 0 && (
+                    <div className="p-12 text-center text-gray-500">
+                      <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                      <p>No requests in this category</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {filteredRequests.length === 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <Search className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+            <p className="text-gray-500">No requests found matching your search</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- BUILD STOPS FUNCTION ---
+const buildStopsFromBackendPlan = (plan: Record<string, BackendPlanEntry>): RouteStop[] => {
+  const dates = Object.keys(plan).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+  if (dates.length === 0) return [];
+  
+  const builtStops: RouteStop[] = [];
+  const firstDate = dates[0];
+  
+  builtStops.push({
+    id: `s-${Date.now()}-start`,
+    date: firstDate,
+    type: (plan[firstDate].start.toLowerCase().includes('hub') ? 'Hub' : 'Plant'),
+    locationName: plan[firstDate].start,
+    isReached: false,
+  });
+
+  dates.forEach((date, idx) => {
+    const p = plan[date];
+    builtStops.push({
+      id: `s-${Date.now()}-${idx}-f`,
+      date,
+      type: 'Field',
+      locationName: `Field ${p.feild_id}`,
+      isReached: false,
+    });
+    builtStops.push({
+      id: `s-${Date.now()}-${idx}-h`,
+      date,
+      type: 'Hub',
+      locationName: p.end_hub,
+      isReached: false,
+      inspection: { completed: false, items: STANDARD_CHECKS.map(c => ({ ...c })) },
+    });
+  });
+  return builtStops;
+};
+
+// --- MAIN LAYOUT ---
+const LogisticsManagement = () => {
+  const [requests, setRequests] = useState<LogisticsRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+
+  const fetchRequests = async () => {
+    setLoadingRequests(true);
     try {
-      // API CALL: Get Logistics Plan
-      const response = await fetch(`${getBaseUrl()}/admin_vehicles/get_logistics_plan`);
-      if (!response.ok) throw new Error(`Request failed (${response.status})`);
-      const data = (await response.json()) as BackendLogisticsPlan[];
-      
-      const mapped: LogisticsPlan[] = (Array.isArray(data) ? data : []).map((item) => {
-        const internalStatus: PlanStatus = item.trip_status === 'completed' ? 'Completed' : item.trip_status === 'started' ? 'Live' : 'Draft';
-        const currentStep: TripStep = item.trip_status === 'completed' ? 3 : item.trip_status === 'started' ? 2 : 1;
-        const stops = buildStopsFromBackendPlan(item.plan || {});
-        if (item.trip_status === 'completed') {
-          stops.forEach(s => { s.isReached = true; });
-        }
-        const createdAt = new Date(item.created_at).toLocaleDateString();
-        const vehicleReg = item.vehicle_id ? item.vehicle_id.slice(0, 8) : 'Vehicle';
-        
-        return {
-          id: item.plan_id,
-          vehicleId: item.vehicle_id,
-          vehicleReg,
-          vehicleType: 'Logistics',
-          driverName: '—',
-          driverPhone: '—',
-          stops,
-          status: internalStatus,
-          currentStep,
-          createdAt,
-          tripStatus: item.trip_status,
-        };
-      });
-      setPlans(mapped);
+      const mockRequests: LogisticsRequest[] = [
+        {
+          id: 'REQ-001',
+          requesterId: 'U001',
+          requesterName: 'Ramesh Kumar',
+          requesterPhone: '+91 98765 43210',
+          vehicleType: 'Tractor',
+          fromLocation: 'Plant A',
+          toLocation: 'Field 12-B',
+          requestDate: '2026-02-02T10:30:00',
+          preferredDate: '2026-02-05',
+          status: 'pending',
+          priority: 'urgent',
+          description: 'Need tractor for cultivation. Monsoon preparation.',
+          loadDetails: 'Cultivation Equipment',
+          createdAt: '2026-02-02T10:30:00',
+        },
+        {
+          id: 'REQ-002',
+          requesterId: 'U002',
+          requesterName: 'Suresh Patil',
+          requesterPhone: '+91 98765 43211',
+          vehicleType: 'Truck',
+          fromLocation: 'Field 8-A',
+          toLocation: 'Hub 1',
+          requestDate: '2026-02-01T14:00:00',
+          preferredDate: '2026-02-04',
+          status: 'approved',
+          priority: 'high',
+          description: 'Transport harvested produce to storage',
+          loadDetails: '5 tons produce',
+          createdAt: '2026-02-01T14:00:00',
+        },
+        {
+          id: 'REQ-003',
+          requesterId: 'U003',
+          requesterName: 'Vijay Deshmukh',
+          requesterPhone: '+91 98765 43212',
+          vehicleType: 'JCB',
+          fromLocation: 'Hub 2',
+          toLocation: 'Field 15-C',
+          requestDate: '2026-02-02T09:00:00',
+          preferredDate: '2026-02-03',
+          status: 'in_progress',
+          priority: 'medium',
+          description: 'Land leveling required',
+          loadDetails: 'Heavy machinery',
+          createdAt: '2026-02-02T09:00:00',
+        },
+        {
+          id: 'REQ-004',
+          requesterId: 'U004',
+          requesterName: 'Anil Sharma',
+          requesterPhone: '+91 98765 43213',
+          vehicleType: 'Pickup',
+          fromLocation: 'Plant B',
+          toLocation: 'Field 3-A',
+          requestDate: '2026-01-30T11:00:00',
+          preferredDate: '2026-02-01',
+          status: 'completed',
+          priority: 'low',
+          description: 'Fertilizer delivery',
+          loadDetails: '500kg fertilizer',
+          createdAt: '2026-01-30T11:00:00',
+        },
+      ];
+      setRequests(mockRequests);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load plans');
-      setPlans([]);
+      toast.error('Failed to load requests');
     } finally {
-      setLoadingPlans(false);
+      setLoadingRequests(false);
     }
   };
 
   useEffect(() => {
-    fetchPlans();
+    fetchRequests();
   }, []);
 
-  const handleCreate = (p: LogisticsPlan) => {
-    setPlans([...plans, p]);
+  const handleApproveRequest = (id: string) => {
+    setRequests(prev => prev.map(req => 
+      req.id === id ? { ...req, status: 'approved' as RequestStatus } : req
+    ));
+    toast.success('Request approved');
   };
 
-  const handleUpdate = (p: LogisticsPlan) => setPlans(plans.map(plan => plan.id === p.id ? p : plan));
-  
-  const handleDelete = (id: string) => {
-    setPlans(plans.filter(p => p.id !== id));
-    toast.success('Plan deleted');
+  const handleRejectRequest = (id: string) => {
+    setRequests(prev => prev.map(req => 
+      req.id === id ? { ...req, status: 'rejected' as RequestStatus } : req
+    ));
+    toast.error('Request rejected');
   };
+
+  const pendingRequestsCount = requests.filter(r => r.status === 'pending').length;
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 flex flex-col">
       <div className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="px-8 py-6 flex justify-between">
-           <div className="flex items-center gap-3">
-             <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-                <Truck className="w-4 h-4 text-white" />
-             </div>
-             <h1 className="text-2xl font-semibold text-gray-900">Logistics Operations</h1>
-           </div>
-           <div className="flex items-center gap-4">
-             {/* Unplanned Orders Alert */}
-             <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg">
-               <AlertTriangle className="w-4 h-4 text-amber-600" />
-               <span className="text-sm font-medium text-amber-800">3 unplanned orders</span>
-             </div>
-             <button onClick={() => setShowCreateModal(true)} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2">
-               <Plus className="w-4 h-4" /> New Operation
-             </button>
-           </div>
+        <div className="px-8 py-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
+                <Truck className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold text-gray-900">Logistics Management</h1>
+                <p className="text-sm text-gray-600 mt-0.5">Manage requests and operations</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              {pendingRequestsCount > 0 && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span className="text-sm font-medium text-amber-800">
+                    {pendingRequestsCount} pending request{pendingRequestsCount !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
       
-      {/* Main Content with Task Panel */}
-      <div className="flex-1 flex">
-        {/* Left: Main Content */}
-        <div className="flex-1 px-8 py-8">
-          {loadingPlans ? <div>Loading...</div> : <MonitorSection plans={plans} onUpdate={handleUpdate} onCreateClick={() => setShowCreateModal(true)} onDelete={handleDelete} />}
-        </div>
-        
-        {/* Right: Task Panel */}
-        <TaskPanel onCreatePlan={() => setShowCreateModal(true)} />
+      <div className="flex-1 px-8 py-8">
+        {loadingRequests ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="w-8 h-8 border-4 border-slate-900 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-gray-500">Loading requests...</p>
+            </div>
+          </div>
+        ) : (
+          <RequestsSection 
+            requests={requests} 
+            onApprove={handleApproveRequest}
+            onReject={handleRejectRequest}
+          />
+        )}
       </div>
-      
-      {showCreateModal && <CreatePlanModal onClose={() => setShowCreateModal(false)} onCreate={handleCreate} />}
     </div>
   );
 };

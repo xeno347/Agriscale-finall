@@ -156,6 +156,9 @@ const Leads = () => {
         const newLead = await leadsApi.create({
           ...data,
           status: 'contacted',
+          isFlagged: false,
+          stopPayments: false,
+          stopInputs: false,
         });
         setLeads(prev => [newLead, ...prev]);
         toast({
@@ -298,6 +301,7 @@ const Leads = () => {
     aadhaarNumber: string;
     aadhaarPhoto?: File | null;
     profilePhoto?: File | null;
+    leaseRent?: number;
     panNumber: string;
     panPhoto?: File | null;
     address: string;

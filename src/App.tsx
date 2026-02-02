@@ -17,6 +17,7 @@ import CultivationCalendar from "./pages/CultivationCalendar";
 import HarvestOrders from "./pages/HarvestOrders";
 import StaffOnboarding from "./pages/StaffOnboarding";
 import LogisticsManagement from "./pages/LogisticsManagement";
+import AdminRequestPage from "./pages/AdminRequestPage";
 import Blocks from "./pages/Blocks";
 import TasksBeta from "./pages/TasksBeta";
 import VehicleManagement from "./pages/VehicleManagement";
@@ -55,6 +56,7 @@ const App = () => (
           {/* Management */}
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
           <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
+          <Route path="/admin-request" element={<AppLayout><AdminRequestPage /></AppLayout>} /> {/* [NEW ROUTE] */}
           <Route path="/resource-management" element={<AppLayout><FleetChart /></AppLayout>} />
           <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
           <Route path="/fleet-chart" element={<AppLayout><FleetChart /></AppLayout>} />

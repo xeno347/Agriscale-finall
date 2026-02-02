@@ -20,7 +20,8 @@ import {
   Map,
   AlertCircle, // Imported AlertCircle icon
   User,
-  MoreHorizontal
+  MoreHorizontal,
+  ClipboardCheck
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -274,6 +275,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             isSidebarCollapsed={isCollapsed} 
             notificationStatus="warning"
           />
+          <NavItem to="/admin-request" icon={ClipboardCheck} label="Admin Request" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/staff-onboarding" icon={UserPlus} label="Staff Onboarding" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 

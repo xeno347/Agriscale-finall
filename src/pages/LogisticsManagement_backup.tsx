@@ -2,23 +2,45 @@ import { useState, useEffect } from 'react';
 import { 
   Truck, MapPin, Calendar as CalendarIcon, 
   Plus, CheckCircle2, 
-  Trash2, X, User, Check, 
-  ArrowLeft, Save, LayoutList, Download, 
-  ShieldCheck, AlertTriangle, FileText, Activity, MoreHorizontal, Clock,
-  ChevronRight, Fuel, Navigation
+  Trash2, X, User, 
+  ArrowLeft, LayoutList, Download, 
+  ShieldCheck, AlertTriangle, Clock,
+  ChevronRight, Fuel, Navigation, Play,
+  Search, Filter, ArrowUpDown, ChevronDown,
+  FileText, Phone, Package
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import VehicleBusyCalendar from '@/components/logistics/VehicleBusyCalendar';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { getBaseUrl } from '@/lib/config';
+import 'leaflet/dist/leaflet.css';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
 
 // --- TYPES ---
-
 type LocationType = 'Plant' | 'Field' | 'Hub' | 'Deposit';
 type PlanStatus = 'Draft' | 'Live' | 'Completed';
-type TripStep = 1 | 2 | 3; // Step 1: Info, Step 2: Timeline/Checks, Step 3: Finalize
+type TripStep = 1 | 2 | 3;
+type TripStatusBackend = 'created' | 'started' | 'completed' | string;
+type RequestStatus = 'pending' | 'approved' | 'in_progress' | 'completed' | 'rejected';
+type RequestPriority = 'urgent' | 'high' | 'medium' | 'low';
+
+interface LogisticsRequest {
+  id: string;
+  requesterId: string;
+  requesterName: string;
+  requesterPhone: string;
+  vehicleType: string;
+  fromLocation: string;
+  toLocation: string;
+  requestDate: string;
+  preferredDate: string;
+  status: RequestStatus;
+  priority: RequestPriority;
+  description: string;
+  loadDetails?: string;
+  createdAt: string;
+}
 
 interface CalendarEntry {
   date: string;
@@ -48,7 +70,6 @@ interface RouteStop {
   type: LocationType;
   locationName: string;
   isReached: boolean;
-  // Inspection is only for resting stops (Hub/Plant)
   inspection?: {
     completed: boolean;
     items: ChecklistItem[];
@@ -64,67 +85,236 @@ interface LogisticsPlan {
   driverPhone: string;
   stops: RouteStop[];
   status: PlanStatus;
-  currentStep: TripStep; // 1, 2, or 3
+  currentStep: TripStep;
   createdAt: string;
-  
-  // Final Data
+  tripStatus?: TripStatusBackend;
+  startFuelLevel?: string;
   finalData?: {
     finalChecklist: ChecklistItem[];
     vehicleDropLocation: string;
     equipmentDropLocation: string;
-    fuelConsumed: string;
+    endFuelLevel: string;
     totalDistance: string;
     completedAt: string;
   };
 }
 
-// --- MOCK DATA ---
+type BackendPlanEntry = {
+  start: string;
+  end_hub: string;
+  feild_id: string;
+  check_point: Array<{
+    physical_damange: boolean;
+    fuel_level: number;
+    equipment_damange: boolean;
+  }>;
+};
 
-const AVAILABLE_VEHICLES = [
-  { id: 'v1', reg: 'MH-12-AB-1234', driver: 'Raju Singh', phone: '+91 98765 43210', type: 'Truck (10 Ton)' },
-  { id: 'v2', reg: 'MH-14-XY-9999', driver: 'Sham Lal', phone: '+91 90000 11111', type: 'Tractor' },
-  { id: 'v3', reg: 'MH-04-DL-5555', driver: 'Vikram Rao', phone: '+91 99887 77665', type: 'Pickup Van' },
-];
+type BackendLogisticsPlan = {
+  plan: Record<string, BackendPlanEntry>;
+  plan_id: string;
+  trip_status: TripStatusBackend;
+  created_at: string;
+  vehicle_id: string;
+};
 
+interface DayPlan {
+  id: string;
+  dayIndex: number;
+  date: string;
+  dateISO?: string;
+  start: string;
+  fieldId: string;
+  endHub: string;
+}
+
+// --- CONFIG ---
 const STANDARD_CHECKS = [
   { id: 'c1', label: 'No Fresh Dents/Scratches', checked: false },
   { id: 'c2', label: 'Tires & Pressure OK', checked: false },
   { id: 'c3', label: 'Lights/Indicators Working', checked: false },
 ];
 
+const BASE_COORD: [number, number] = [19.0760, 72.8777];
+
+// --- MAP FIX COMPONENT ---
+// This ensures the map renders correctly inside cards/modals
+const MapUpdater = () => {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+};
+
 // --- PDF GENERATOR ---
 const generateTripSheetPDF = (plan: LogisticsPlan) => {
   const doc = new jsPDF();
+  doc.setFontSize(18);
   doc.text(`TRIP SHEET: ${plan.id}`, 14, 20);
+  doc.setFontSize(12);
+  doc.text(`Vehicle: ${plan.vehicleReg}`, 14, 30);
+  doc.text(`Driver: ${plan.driverName}`, 14, 38);
+  doc.text(`Start Fuel: ${plan.startFuelLevel || 'N/A'}`, 14, 46);
+  doc.text(`End Fuel: ${plan.finalData?.endFuelLevel || 'N/A'}`, 100, 46);
+  doc.text(`Total Distance: ${plan.finalData?.totalDistance || 'N/A'}`, 14, 54);
+
+  const tableData = plan.stops.map(s => [
+    s.date, 
+    s.type, 
+    s.locationName, 
+    s.isReached ? 'Reached' : 'Pending'
+  ]);
+
+  autoTable(doc, {
+    startY: 60,
+    head: [['Date', 'Type', 'Location', 'Status']],
+    body: tableData,
+  });
+
   doc.save(`TripSheet_${plan.id}.pdf`);
   toast.success("Trip Sheet PDF Downloaded");
 };
 
-// --- COMPONENTS ---
+// --- MAP HELPERS ---
+const getDummyCoordsForStop = (stop: RouteStop, index: number): [number, number] => {
+  const name = (stop.locationName || '').trim();
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash + name.charCodeAt(i)) % 1024;
+  const lat = BASE_COORD[0] + ((hash % 40) * 0.0015) + (index * 0.002);
+  const lng = BASE_COORD[1] + (((hash >> 3) % 40) * 0.0015);
+  return [lat, lng];
+};
 
-// Day Plan Interface
-interface DayPlan {
-  id: string;
-  dayIndex: number;
-  date: string;
-  start: string; // Plant/Hub name
-  fieldId: string;
-  endHub: string;
-}
+const typeColor = (t: LocationType) => {
+  if (t === 'Plant') return '#16a34a';
+  if (t === 'Field') return '#f59e0b';
+  if (t === 'Hub') return '#8b5cf6';
+  return '#64748b';
+};
 
-// 1. CREATE PLAN MODAL (2-STEP PROCESS)
+// --- SUB-COMPONENTS ---
+
+const MapPreview = ({ plan }: { plan: LogisticsPlan }) => {
+  const points = plan.stops.map((s, i) => ({ ...s, coords: getDummyCoordsForStop(s, i) }));
+  const center = points[0]?.coords || BASE_COORD;
+  
+  return (
+    <div className="h-28 w-full rounded-lg overflow-hidden bg-gray-100 relative z-0 border border-gray-100">
+      <MapContainer 
+        center={center} 
+        zoom={12} 
+        style={{ height: '100%', width: '100%' }}
+        zoomControl={false}
+        dragging={false}
+        scrollWheelZoom={false}
+        doubleClickZoom={false}
+        touchZoom={false}
+      >
+        <MapUpdater />
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <Polyline positions={points.map(p => p.coords)} color="#2563eb" weight={3} />
+        {points.map((p) => (
+          <CircleMarker 
+            key={p.id} 
+            center={p.coords} 
+            radius={4} 
+            color={typeColor(p.type)} 
+            fillColor={typeColor(p.type)} 
+            fillOpacity={0.8}
+            stroke={false}
+          />
+        ))}
+      </MapContainer>
+      {/* Gradient Overlay for better UI integration */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/5 to-transparent pointer-events-none" />
+    </div>
+  );
+};
+
+const MapModal = ({ plan, onClose }: { plan: LogisticsPlan; onClose: () => void }) => {
+  const points = plan.stops.map((s, i) => ({ ...s, coords: getDummyCoordsForStop(s, i) }));
+  const center = points[0]?.coords || BASE_COORD;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-7xl h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-200">
+        <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
+              <Navigation className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-xl text-gray-900">Route Visualization</h2>
+              <p className="text-gray-600 text-sm">{plan.vehicleReg} • {plan.stops.length} waypoints</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center transition-colors">
+            <X className="w-5 h-5 text-gray-600" />
+          </button>
+        </div>
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-0">
+          <div className="lg:col-span-2 relative">
+            <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
+              <MapUpdater />
+              <TileLayer
+                attribution='&copy; OpenStreetMap contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              <Polyline positions={points.map(p => p.coords)} color="#2563eb" weight={4} />
+              {points.map((p) => (
+                <CircleMarker key={p.id} center={p.coords} radius={8} color={typeColor(p.type)} fillColor={typeColor(p.type)} fillOpacity={0.8}>
+                  <Popup>
+                    <div className="text-sm">
+                      <div className="font-bold">{p.type}</div>
+                      <div>{p.locationName}</div>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              ))}
+            </MapContainer>
+          </div>
+          <div className="bg-gray-50 border-l border-gray-200 p-6 overflow-y-auto">
+            <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">Route Details</h3>
+            <div className="space-y-3">
+              {points.map((p, idx) => (
+                <div key={`pd-${p.id}`} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-gray-100">
+                  <div className="px-2.5 py-1 rounded-md text-xs font-medium bg-slate-50 text-slate-700 border border-slate-200 whitespace-nowrap">
+                    Stop {idx + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate">{p.locationName}</div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-gray-600">{p.type}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate: (p: LogisticsPlan) => void }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleCalendar | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
+  const [isPrefilledFromCalendar, setIsPrefilledFromCalendar] = useState(false);
   const [dayPlans, setDayPlans] = useState<DayPlan[]>([]);
   const [vehicleData, setVehicleData] = useState<VehicleCalendar[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  // Fetch vehicle calendar data on mount
   useEffect(() => {
     const fetchVehicleCalendar = async () => {
       try {
+        // API CALL: Fetch Vehicle Calendar
         const response = await fetch(`${getBaseUrl()}/admin_vehicles/get_vehicle_calander`);
         const data = await response.json();
         setVehicleData(data);
@@ -138,66 +328,63 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
     fetchVehicleCalendar();
   }, []);
 
-  // Group calendar entries by activity
   const groupByActivity = (calendar: CalendarEntry[]) => {
     const grouped: Record<string, CalendarEntry[]> = {};
     calendar.forEach(entry => {
-      if (!grouped[entry.activity]) {
-        grouped[entry.activity] = [];
-      }
+      if (!grouped[entry.activity]) grouped[entry.activity] = [];
       grouped[entry.activity].push(entry);
     });
-    // Sort dates within each activity
     Object.keys(grouped).forEach(activity => {
       grouped[activity].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     });
     return grouped;
-  }
-      { date: makeDat& Activity Selection
+  };
+
   const handleVehicleActivitySelect = (vehicle: VehicleCalendar, activity: string) => {
     setSelectedVehicle(vehicle);
-    setSelectedActivity(activitytivity: 'Transport', block_name: 'Block G' },
-      { date: makeDate(20), activity: 'Maintenance', block_name: 'Block I' },
-      { date: makeDate(28), activity: 'Equipment Pickup', block_name: 'Block H' },
-    ],
-  };
-  
-  return (schedules[vehicleId] || []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-};
+    setSelectedActivity(activity);
+    const matchingEntries = (vehicle.calander || [])
+      .filter(e => e.activity === activity)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-// 1. CREATE PLAN MODAL (2-STEP PROCESS)
-const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate: (p: LogisticsPlan) => void }) => {
-  const [step, setStep] = useState<1 | 2>(1);
-  const [selectedVehicle, setSelectedVehicle] = useState<typeof AVAILABLE_VEHICLES[0] | null>(null);
-  const [dayPlans, setDayPlans] = useState<DayPlan[]>([]);
-
-  // STEP 1: Vehicle Selection
-  const handleVehicleSelect = (vehicle: typeof AVAILABLE_VEHICLES[0]) => {
-    setSelectedVehicle(vehicle);
-    // Initialize a 3-day planning scaffold
-    const base = new Date();
-    const makeDateLabel = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    const initialPlans: DayPlan[] = Array.from({ length: 3 }).map((_, i) => {
-      const d = new Date(base);
-      d.setDate(base.getDate() + i);
-      return {
+    if (matchingEntries.length > 0) {
+      const makeDateLabel = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const initialPlans: DayPlan[] = matchingEntries.map((entry, i) => ({
         id: `dp-${Date.now()}-${i}`,
         dayIndex: i + 1,
-        date: makeDateLabel(d),
+        date: makeDateLabel(entry.date),
+        dateISO: entry.date,
         start: i === 0 ? 'Plant' : '',
-        fieldId: '',
+        fieldId: entry.farm_id,
         endHub: ''
-      };
-    });
-    setDayPlans(initialPlans);
+      }));
+      setIsPrefilledFromCalendar(true);
+      setDayPlans(initialPlans);
+    } else {
+      const base = new Date();
+      const makeDateLabel = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const initialPlans: DayPlan[] = Array.from({ length: 3 }).map((_, i) => {
+        const d = new Date(base);
+        d.setDate(base.getDate() + i);
+        return {
+          id: `dp-${Date.now()}-${i}`,
+          dayIndex: i + 1,
+          date: makeDateLabel(d),
+          dateISO: d.toISOString().slice(0, 10),
+          start: i === 0 ? 'Plant' : '',
+          fieldId: '',
+          endHub: ''
+        };
+      });
+      setIsPrefilledFromCalendar(false);
+      setDayPlans(initialPlans);
+    }
     setStep(2);
   };
 
-  // STEP 2: Trip Planning
   const updateDayPlan = (id: string, field: keyof DayPlan, value: string) => {
     setDayPlans(prev => {
       const next = prev.map(p => p.id === id ? { ...p, [field]: value } : p);
-      // Auto propagate start from previous day's endHub
       for (let i = 1; i < next.length; i++) {
         if (next[i - 1].endHub) next[i].start = next[i - 1].endHub;
       }
@@ -206,6 +393,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
   };
 
   const addDay = () => {
+    if (isPrefilledFromCalendar) return toast.message('Days are pre-populated');
     setDayPlans(prev => {
       const last = prev[prev.length - 1];
       const base = new Date();
@@ -216,6 +404,7 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
         id: `dp-${Date.now()}-${prev.length}`,
         dayIndex: prev.length + 1,
         date: makeDateLabel(d),
+        dateISO: d.toISOString().slice(0, 10),
         start: last?.endHub || last?.start || 'Hub 1',
         fieldId: '',
         endHub: ''
@@ -224,100 +413,107 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
     });
   };
 
-  const handleLivePlan = () => {
-    if (!selectedVehicle) {
-      toast.error('Please select a vehicle');
-      return;
-    }
-    if (dayPlans.length === 0) {
-      toast.error('Please add at least one day');
-      return;
-    }
-    if (dayPlans.some(p => !p.start || !p.fieldId || !p.endHub)) {
-      toast.error('Please fill Start, Field ID and End Hub for all days');
-      return;
+  const handleLivePlan = async () => {
+    if (!selectedVehicle) return toast.error('Please select a vehicle');
+    if (dayPlans.length === 0) return toast.error('Please add at least one day');
+    if (dayPlans.some(p => !p.start || !p.fieldId || !p.endHub)) return toast.error('Please fill all fields');
+
+    const plan: Record<string, any> = {};
+    for (const p of dayPlans) {
+      const dateKey = (p.dateISO && p.dateISO.trim()) ? p.dateISO.trim() : p.date;
+      plan[dateKey] = {
+        start: p.start,
+        feild_id: p.fieldId,
+        end_hub: p.endHub,
+        check_point: [{ physical_damange: false, equipment_damange: false, fuel_level: 0 }],
+      };
     }
 
-    // Build stops from day plans
-    const builtStops: RouteStop[] = [];
-    const first = dayPlans[0];
-    builtStops.push({
-      id: `s-${Date.now()}-start`,
-      date: first.date,
-      type: (first.start.toLowerCase().includes('hub') ? 'Hub' : 'Plant'),
-      locationName: first.start,
-      isReached: false
-    });
+    setSaving(true);
+    try {
+      // API CALL: Save Logistics Plan
+      const response = await fetch(`${getBaseUrl()}/admin_vehicles/save_logistics_plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan, vehicle_id: selectedVehicle.vehicle_id }),
+      });
 
-    dayPlans.forEach((p, idx) => {
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+      const result = await response.json();
+      if (!result || result.success !== true) throw new Error('Save failed');
+
+      const builtStops: RouteStop[] = [];
+      const first = dayPlans[0];
       builtStops.push({
-        id: `s-${Date.now()}-${idx}-f`,
-        date: p.date,
-        type: 'Field',
-        locationName: `Field ${p.fieldId}`,
+        id: `s-${Date.now()}-start`,
+        date: first.date,
+        type: (first.start.toLowerCase().includes('hub') ? 'Hub' : 'Plant'),
+        locationName: first.start,
         isReached: false
       });
-      builtStops.push({
-        id: `s-${Date.now()}-${idx}-h`,
-        date: p.date,
-        type: 'Hub',
-        locationName: p.endHub,
-        isReached: false,
-        inspection: { completed: false, items: STANDARD_CHECKS.map(c => ({ ...c })) }
-      });
-    });
 
-    onCreate({
-      id: `TRIP-${Math.floor(Math.random() * 10000)}`,
-      vehicleId: selectedVehicle.vehicle_id,
-      vehicleReg: selectedVehicle.vehicle_number,
-      vehicleType: selectedActivity || 'General',
-      driverName: selectedVehicle.driver_name || 'Driver',
-      driverPhone: selectedVehicle.driver,
-      stops: builtStops,
-      status: 'Live',
-      currentStep: 1,
-      createdAt: new Date().toLocaleDateString(),
-    });
-    toast.success("Trip Created & Live!");
-    onClose();
+      dayPlans.forEach((p, idx) => {
+        builtStops.push({
+          id: `s-${Date.now()}-${idx}-f`,
+          date: p.date,
+          type: 'Field',
+          locationName: `${isPrefilledFromCalendar ? 'Farm' : 'Field'} ${p.fieldId}`,
+          isReached: false
+        });
+        builtStops.push({
+          id: `s-${Date.now()}-${idx}-h`,
+          date: p.date,
+          type: 'Hub',
+          locationName: p.endHub,
+          isReached: false,
+          inspection: { completed: false, items: STANDARD_CHECKS.map(c => ({ ...c })) }
+        });
+      });
+
+      onCreate({
+        id: `TRIP-${Math.floor(Math.random() * 10000)}`,
+        vehicleId: selectedVehicle.vehicle_id,
+        vehicleReg: selectedVehicle.vehicle_number,
+        vehicleType: selectedActivity || 'General',
+        driverName: selectedVehicle.driver_name || 'Driver',
+        driverPhone: selectedVehicle.driver,
+        stops: builtStops,
+        status: 'Draft',
+        currentStep: 1,
+        createdAt: new Date().toLocaleDateString(),
+        tripStatus: 'created'
+      });
+      toast.success('Operation Created!');
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save plan');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-5xl max-h-[90vh] rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95">
-        
-        {/* Header */}
-        <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <h2 className="font-bold text-xl text-gray-900">Create New Trip</h2>
-            <div className="flex items-center gap-2 text-sm">
-              <span className={cn("px-3 py-1 rounded-full font-bold", step === 1 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>1. Choose Vehicle</span>
-              <ChevronRight className="w-4 h-4 text-gray-300" />
-              <span className={cn("px-3 py-1 rounded-full font-bold", step === 2 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>2. Plan Trip</span>
-            </div>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-5xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-200">
+        <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center">
+          <div className="flex items-center gap-6">
+            <h2 className="font-semibold text-xl text-gray-900">Create New Operation</h2>
           </div>
-          <button onClick={onClose}><X className="w-6 h-6 text-gray-400 hover:text-gray-600" /></button>
+          <button onClick={onClose} className="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center transition-colors">
+            <X className="w-5 h-5 text-gray-600" />
+          </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-8 bg-gray-50/30">
-          
-          {/* STEP 1: Vehicle Selection */}
+        <div className="flex-1 overflow-y-auto p-8 bg-gray-50">
           {step === 1 && (
             <div className="max-w-6xl mx-auto">
-              <h3 className="text-lg font-bold text-gray-900 mb-6">Select Vehicle & Activity</h3>
               {loading ? (
-                <div className="text-center py-20">
-                  <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-                  <p className="text-gray-500">Loading vehicles...</p>
-                </div>
+                 <div className="text-center py-20"><p>Loading...</p></div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {vehicleData.map(vehicle => {
                     const activityGroups = groupByActivity(vehicle.calander);
                     const hasSchedule = vehicle.calander.length > 0;
-                    
                     return (
                       <div key={vehicle.vehicle_id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
                         <div className="p-6 border-b border-gray-100 bg-gradient-to-br from-blue-50 to-white">
@@ -328,39 +524,19 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
                               <div className="text-sm text-gray-500">Vehicle</div>
                             </div>
                           </div>
-                          <div className="space-y-2 text-sm">
-                            <div className="flex items-center gap-2 text-gray-700">
-                              <User className="w-4 h-4 text-gray-400" />
-                              <span className="font-medium">{vehicle.driver_name || 'Driver'}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-gray-600">
-                              <span className="text-xs">{vehicle.driver}</span>
-                            </div>
-                          </div>
                         </div>
                         <div className="p-4">
                           {hasSchedule ? (
-                            <>
-                              <div className="text-xs font-bold uppercase text-gray-500 mb-3">Select Activity</div>
-                              <div className="space-y-3 max-h-64 overflow-y-auto">
-                                {Object.entries(activityGroups).map(([activity, entries]) => (
-                                  <div 
-                                    key={activity} 
-                                    className="bg-gray-50 rounded-lg p-3 border border-gray-100 hover:bg-blue-50 hover:border-blue-200 cursor-pointer transition-all"
-                                    onClick={() => handleVehicleActivitySelect(vehicle, activity)}
-                                  >
-                                    <div className="flex items-center justify-between mb-2">
-                                      <div className="text-sm font-bold text-gray-900">{activity}</div>
-                                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-fu
+                            <div className="space-y-3 max-h-64 overflow-y-auto">
+                               {Object.entries(activityGroups).map(([activity, entries]) => (
+                                 <div key={activity} className="bg-gray-50 rounded-lg p-3 border border-gray-100 hover:bg-blue-50 cursor-pointer" onClick={() => handleVehicleActivitySelect(vehicle, activity)}>
+                                   <div className="text-sm font-bold text-gray-900">{activity}</div>
+                                 </div>
+                               ))}
+                            </div>
                           ) : (
                             <div className="text-center py-8">
-                              <div className="text-xs text-gray-400 mb-2">No scheduled work</div>
-                              <button 
-                                onClick={() => handleVehicleActivitySelect(vehicle, 'General')}
-                                className="text-xs text-blue-600 hover:underline font-medium"
-                              >
-                                Plan New Trip
-                              </button>
+                               <button onClick={() => handleVehicleActivitySelect(vehicle, 'General')} className="text-xs text-blue-600 hover:underline font-medium">Plan New Trip</button>
                             </div>
                           )}
                         </div>
@@ -372,121 +548,54 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
             </div>
           )}
 
-          {/* STEP 2: Trip Planning */}
-          {step === 2 && selectedVehicle && selectedActivity && (
+          {step === 2 && (
             <div className="max-w-4xl mx-auto">
-              {/* Selected Vehicle Info */}
-              <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Truck className="w-6 h-6" /></div>
-                    <div>
-                      <div className="text-lg font-bold text-gray-900">{selectedVehicle.vehicle_number}</div>
-                      <div className="text-sm text-gray-500">Driver: {selectedVehicle.driver_name || selectedVehicle.driver} • Activity: <span className="font-medium text-blue-600">{selectedActivity}</span></div>
-                    </div>
-                  </div>
-                  <button onClick={() => { setStep(1); setSelectedVehicle(null); setSelectedActivity(null); }
-              </div>
-            </div>
-          )}
-
-          {/* STEP 2: Trip Planning */}
-          {step === 2 && selectedVehicle && (
-            <div className="max-w-4xl mx-auto">
-              {/* Selected Vehicle Info */}
-              <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Truck className="w-6 h-6" /></div>
-                    <div>
-                      <div className="text-lg font-bold text-gray-900">{selectedVehicle.reg}</div>
-                      <div className="text-sm text-gray-500">{selectedVehicle.type} • Driver: {selectedVehicle.driver}</div>
-                    </div>
-                  </div>
-                  <button onClick={() => setStep(1)} className="text-sm text-blue-600 hover:underline flex items-center gap-1">
-                    <ArrowLeft className="w-4 h-4" /> Change Vehicle
-                  </button>
-                </div>
-              </div>
-
-              {/* Trip Planning Form */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-gray-100 bg-gray-50/50">
-                  <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><CalendarIcon className="w-5 h-5 text-[#2F5233]" /> Daily Trip Plan</h2>
-                  <p className="text-sm text-gray-500">Define daily movements: Start → Field → Hub</p>
-                </div>
-                <div className="p-8 space-y-6">
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-gray-50 border-b border-gray-100 text-gray-500">
-                        <tr>
-                          <th className="p-3 font-medium pl-6">Day</th>
-                          <th className="p-3 font-medium">Date</th>
-                          <th className="p-3 font-medium">Start</th>
-                          <th className="p-3 font-medium">Field ID</th>
-                          <th className="p-3 font-medium">End Hub</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {dayPlans.map((dp, idx) => (
-                          <tr key={dp.id} className="group">
-                            <td className="p-3 pl-6 text-gray-700 font-mono">Day {dp.dayIndex}</td>
-                            <td className="p-3 text-gray-500">{dp.date}</td>
-                            <td className="p-3">
-                              {idx === 0 ? (
-                                <select className="w-full p-2 border border-gray-200 rounded bg-white text-sm" value={dp.start} onChange={e => updateDayPlan(dp.id, 'start', e.target.value)}>
-                                  <option value="Plant">Plant</option>
-                                  <option value="Depot">Depot</option>
-                                  <option value="Hub 1">Hub 1</option>
-                                  <option value="Hub 2">Hub 2</option>
-                                </select>
-                              ) : (
-                                <div className="text-gray-700">{dp.start || '—'}</div>
-                              )}
-                            </td>
-                            <td className="p-3">
-                              <input className="w-full p-2 border border-gray-200 rounded bg-white text-sm" placeholder="e.g. 123456" value={dp.fieldId} onChange={e => updateDayPlan(dp.id, 'fieldId', e.target.value)} />
-                            </td>
-                            <td className="p-3">
-                              <input className="w-full p-2 border border-gray-200 rounded bg-white text-sm" placeholder="e.g. Hub 3" value={dp.endHub} onChange={e => updateDayPlan(dp.id, 'endHub', e.target.value)} />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <button type="button" onClick={addDay} className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">+ Add Day</button>
-                    <div className="text-xs text-gray-500">Start auto-fills from previous day's hub</div>
-                  </div>
-
-                  {/* Visual Preview */}
-                  <div className="border border-gray-200 rounded-lg p-4 bg-gray-50/50">
-                    <div className="text-xs font-bold uppercase text-gray-500 mb-3">Plan Preview</div>
-                    <div className="space-y-3">
-                      {dayPlans.map((dp) => (
-                        <div key={`pv-${dp.id}`} className="flex items-center gap-2 text-sm">
-                          <span className="px-2 py-1 rounded bg-gray-100 text-gray-700 font-mono">Day {dp.dayIndex}</span>
-                          <span className="text-gray-500">{dp.date}</span>
-                          <div className="flex items-center gap-2 ml-2">
-                            <span className="px-2 py-1 rounded bg-blue-50 text-blue-700">{dp.start || '—'}</span>
-                            <ChevronRight className="w-4 h-4 text-gray-400" />
-                            <span className="px-2 py-1 rounded bg-green-50 text-green-700">Field {dp.fieldId || '—'}</span>
-                            <ChevronRight className="w-4 h-4 text-gray-400" />
-                            <span className="px-2 py-1 rounded bg-purple-50 text-purple-700">{dp.endHub || '—'}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end">
-                <button onClick={handleLivePlan} className="bg-[#2F5233] text-white px-8 py-3 rounded-lg text-sm font-bold hover:bg-[#1a331d] shadow-sm flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4" /> Make Live
-                </button>
-              </div>
+               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                 <div className="p-6 border-b border-gray-100">
+                   <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">Daily Trip Plan</h2>
+                 </div>
+                 <div className="p-8 space-y-6">
+                   <div className="border border-gray-200 rounded-lg overflow-hidden">
+                     <table className="w-full text-sm text-left">
+                       <thead className="bg-gray-50 border-b border-gray-100 text-gray-500">
+                         <tr>
+                           <th className="p-3 font-medium pl-6">Day</th>
+                           <th className="p-3 font-medium">Date</th>
+                           <th className="p-3 font-medium">Start</th>
+                           <th className="p-3 font-medium">Field ID</th>
+                           <th className="p-3 font-medium">End Hub</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-100">
+                         {dayPlans.map((dp, idx) => (
+                           <tr key={dp.id} className="group">
+                             <td className="p-3 pl-6 text-gray-700 font-mono">Day {dp.dayIndex}</td>
+                             <td className="p-3 text-gray-500">{dp.date}</td>
+                             <td className="p-3">
+                               {idx === 0 ? (
+                                 <select className="w-full p-2 border border-gray-200 rounded bg-white text-sm" value={dp.start} onChange={e => updateDayPlan(dp.id, 'start', e.target.value)}>
+                                   <option value="Plant">Plant</option>
+                                   <option value="Hub 1">Hub 1</option>
+                                 </select>
+                               ) : <div className="text-gray-700">{dp.start || '—'}</div>}
+                             </td>
+                             <td className="p-3">
+                               <input className="w-full p-2 border border-gray-200 rounded text-sm" value={dp.fieldId} onChange={e => !isPrefilledFromCalendar && updateDayPlan(dp.id, 'fieldId', e.target.value)} readOnly={isPrefilledFromCalendar} />
+                             </td>
+                             <td className="p-3">
+                               <input className="w-full p-2 border border-gray-200 rounded bg-white text-sm" value={dp.endHub} onChange={e => updateDayPlan(dp.id, 'endHub', e.target.value)} />
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   </div>
+                   <button type="button" onClick={addDay} className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium">+ Add Day</button>
+                 </div>
+                 <div className="mt-6 flex justify-end p-6 bg-gray-50">
+                    <button onClick={handleLivePlan} disabled={saving} className="bg-emerald-700 text-white px-8 py-3 rounded-lg text-sm font-bold shadow-sm">{saving ? 'Saving…' : 'Create Operation'}</button>
+                 </div>
+               </div>
             </div>
           )}
         </div>
@@ -495,53 +604,34 @@ const CreatePlanModal = ({ onClose, onCreate }: { onClose: () => void; onCreate:
   );
 };
 
-// --- TRIP EXECUTION MODAL (THE 3-STEP FLOW) ---
 const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, onClose: () => void, onUpdate: (p: LogisticsPlan) => void }) => {
-  // Step 3 Local State
   const [finalLocs, setFinalLocs] = useState({ vDrop: '', eDrop: '', fuel: '', dist: '' });
+  const [startFuel, setStartFuel] = useState(plan.startFuelLevel || '');
 
-  // -- Handlers --
   const handleStartTrip = () => {
-    onUpdate({ ...plan, currentStep: 2 });
-    toast.success("Trip Started! Moving to Timeline.");
+    if (!startFuel) return toast.error("Please enter Start of Day Fuel Level");
+    onUpdate({ ...plan, currentStep: 2, status: 'Live', tripStatus: 'started', startFuelLevel: startFuel });
+    toast.success("Trip Started!");
   };
 
   const handleStopReach = (idx: number) => {
     if (idx > 0 && !plan.stops[idx - 1].isReached) return toast.error("Complete previous stops first");
     const newStops = [...plan.stops];
     newStops[idx].isReached = !newStops[idx].isReached;
-    
-    // Check if all stops reached to allow moving to Step 3? 
-    // Usually user clicks a button to go to Step 3
     onUpdate({ ...plan, stops: newStops });
-  };
-
-  const handleChecklistToggle = (stopIdx: number, itemId: string) => {
-    const newStops = [...plan.stops];
-    const stop = newStops[stopIdx];
-    if (stop.inspection) {
-      stop.inspection.items = stop.inspection.items.map(i => i.id === itemId ? { ...i, checked: !i.checked } : i);
-      stop.inspection.completed = stop.inspection.items.every(i => i.checked);
-      onUpdate({ ...plan, stops: newStops });
-    }
-  };
-
-  const handleGoToFinalize = () => {
-    const allReached = plan.stops.every(s => s.isReached);
-    if (!allReached) return toast.error("Please mark all stops as Reached first.");
-    onUpdate({ ...plan, currentStep: 3 });
   };
 
   const handleSubmitFinal = () => {
     if (!finalLocs.vDrop || !finalLocs.fuel) return toast.error("Please fill all fields");
-    const completed = {
+    const completed: LogisticsPlan = {
       ...plan,
-      status: 'Completed' as PlanStatus,
+      status: 'Completed',
+      tripStatus: 'completed',
       finalData: {
-        finalChecklist: [], // Simplified for this view
+        finalChecklist: [],
         vehicleDropLocation: finalLocs.vDrop,
         equipmentDropLocation: finalLocs.eDrop,
-        fuelConsumed: finalLocs.fuel,
+        endFuelLevel: finalLocs.fuel,
         totalDistance: finalLocs.dist,
         completedAt: new Date().toLocaleString()
       }
@@ -552,215 +642,64 @@ const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-5xl h-[85vh] rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95">
-        
-        {/* Header with Steps Indicator */}
-        <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <h2 className="font-bold text-xl text-gray-900">Trip Execution</h2>
-            <div className="flex items-center gap-2 text-sm">
-              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 1 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>1. Info</span>
-              <ChevronRight className="w-4 h-4 text-gray-300" />
-              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 2 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>2. Timeline</span>
-              <ChevronRight className="w-4 h-4 text-gray-300" />
-              <span className={cn("px-3 py-1 rounded-full font-bold", plan.currentStep === 3 ? "bg-black text-white" : "bg-gray-200 text-gray-500")}>3. Finalize</span>
-            </div>
-          </div>
-          <button onClick={onClose}><X className="w-6 h-6 text-gray-400 hover:text-gray-600" /></button>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="bg-white border-b p-6 flex justify-between items-center">
+          <h2 className="font-semibold text-xl">Operation Execution: {plan.vehicleReg}</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5" /></button>
         </div>
-
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-8 bg-gray-50/30">
-          
-          {/* STEP 1: PRE-TRIP INFO (Diagram Step 1) */}
+        
+        <div className="flex-1 overflow-y-auto p-8 bg-gray-50">
           {plan.currentStep === 1 && (
-            <div className="flex flex-col h-full justify-center max-w-4xl mx-auto">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                {/* Box 1: Vehicle & Driver */}
-                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold uppercase text-gray-400 mb-4">Vehicle Details & Driver Info</h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Truck className="w-6 h-6" /></div>
-                      <div>
-                        <div className="text-xl font-bold text-gray-900">{plan.vehicleReg}</div>
-                        <div className="text-sm text-gray-500">{plan.vehicleType}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center text-green-600"><User className="w-6 h-6" /></div>
-                      <div>
-                        <div className="text-lg font-bold text-gray-900">{plan.driverName}</div>
-                        <div className="text-sm text-gray-500">{plan.driverPhone}</div>
-                      </div>
-                    </div>
-                  </div>
+            <div className="max-w-2xl mx-auto space-y-6">
+              <div className="bg-white p-6 rounded-xl border shadow-sm">
+                <h3 className="font-bold text-lg mb-4">Pre-Trip Checks</h3>
+                <div className="mb-4">
+                   <label className="block text-sm font-medium text-gray-700 mb-1">Start of Day Fuel Level</label>
+                   <div className="relative">
+                      <Fuel className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                      <input className="w-full pl-10 p-2 border rounded-md" placeholder="e.g. 100% or 50L" value={startFuel} onChange={(e) => setStartFuel(e.target.value)} />
+                   </div>
                 </div>
-
-                {/* Box 2: Field Info */}
-                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold uppercase text-gray-400 mb-4">Route Info</h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between border-b pb-2">
-                      <span className="text-gray-500">Start Point</span>
-                      <span className="font-medium">{plan.stops[0].locationName}</span>
-                    </div>
-                    <div className="flex justify-between border-b pb-2">
-                      <span className="text-gray-500">End Point</span>
-                      <span className="font-medium">{plan.stops[plan.stops.length-1].locationName}</span>
-                    </div>
-                    <div className="flex justify-between border-b pb-2">
-                      <span className="text-gray-500">Total Stops</span>
-                      <span className="font-medium">{plan.stops.length}</span>
-                    </div>
-                  </div>
-                </div>
+                <button onClick={handleStartTrip} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800">Start Operation</button>
               </div>
-
-              {/* Checkpoints Summary */}
-              <div className="bg-orange-50 border border-orange-100 p-4 rounded-xl flex items-center justify-between mb-8">
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="w-5 h-5 text-orange-600" />
-                  <span className="font-bold text-orange-800">Pre-Trip Checkpoints</span>
-                </div>
-                <span className="text-sm text-orange-700">Vehicle & Equipment Verification Required</span>
-              </div>
-
-              <button 
-                onClick={handleStartTrip}
-                className="w-full bg-black text-white py-4 rounded-xl text-lg font-bold hover:bg-gray-800 shadow-lg flex items-center justify-center gap-2"
-              >
-                Start Trip <ChevronRight className="w-5 h-5" />
-              </button>
             </div>
           )}
 
-          {/* STEP 2: TIMELINE / CHECKLIST (Diagram Step 2) */}
           {plan.currentStep === 2 && (
             <div className="max-w-3xl mx-auto">
-              <div className="mb-6 flex justify-between items-center">
-                <h3 className="font-bold text-xl">Journey Timeline</h3>
-                <button onClick={handleGoToFinalize} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700">
-                  Next: Finalize
-                </button>
+              <div className="flex justify-between items-center mb-6">
+                 <h3 className="font-bold text-lg">Timeline</h3>
+                 <button onClick={() => onUpdate({...plan, currentStep: 3})} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium">Finalize Trip</button>
               </div>
-
-              <div className="relative border-l-2 border-gray-200 ml-6 space-y-10 py-4">
-                {plan.stops.map((stop, idx) => (
-                  <div key={stop.id} className="pl-10 relative">
-                    {/* Node */}
-                    <button 
-                      onClick={() => handleStopReach(idx)}
-                      className={cn(
-                        "absolute left-[-9px] top-1 w-6 h-6 rounded-full border-4 transition-all z-10",
-                        stop.isReached ? "bg-white border-green-500" : "bg-white border-gray-300"
-                      )}
-                    />
-                    
-                    <div className={cn("p-4 rounded-xl border transition-all", stop.isReached ? "bg-white border-green-200 shadow-sm" : "bg-gray-50 border-gray-100 opacity-70")}>
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                           <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase mb-1">
-                             <CalendarIcon className="w-3 h-3" /> {stop.date} • {stop.type}
-                           </div>
-                           <h4 className="text-lg font-bold text-gray-900">{stop.locationName}</h4>
-                        </div>
-                        {stop.isReached && <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">REACHED</span>}
-                      </div>
-
-                      {/* RESTING CHECKLIST (The 'Checks' part of diagram) */}
-                      {stop.type === 'Hub' && stop.inspection && (
-                        <div className="mt-4 bg-orange-50 border border-orange-100 rounded-lg p-4">
-                          <h5 className="text-sm font-bold text-orange-800 mb-3 flex items-center gap-2">
-                            <ShieldCheck className="w-4 h-4" /> Physical Damage Check
-                          </h5>
-                          <div className="space-y-2">
-                            {stop.inspection.items.map(item => (
-                              <label key={item.id} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-orange-100/50 rounded transition-colors">
-                                <input 
-                                  type="checkbox" 
-                                  className="w-5 h-5 rounded text-orange-600 focus:ring-orange-500"
-                                  checked={item.checked}
-                                  onChange={() => handleChecklistToggle(idx, item.id)}
-                                />
-                                <span className={cn("text-sm", item.checked ? "text-gray-900 font-medium" : "text-gray-500")}>{item.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+              <div className="space-y-4">
+                 {plan.stops.map((stop, idx) => (
+                    <div key={idx} className={cn("p-4 bg-white border rounded-xl flex items-center justify-between", stop.isReached ? "border-green-200 bg-green-50" : "border-gray-200")}>
+                       <div>
+                          <p className="font-bold">{stop.locationName}</p>
+                          <p className="text-xs text-gray-500">{stop.type}</p>
+                       </div>
+                       <button onClick={() => handleStopReach(idx)} className={cn("px-3 py-1.5 rounded text-sm font-medium", stop.isReached ? "bg-green-200 text-green-800" : "bg-gray-100 hover:bg-gray-200")}>{stop.isReached ? "Reached" : "Mark Reached"}</button>
                     </div>
-                  </div>
-                ))}
+                 ))}
               </div>
             </div>
           )}
 
-          {/* STEP 3: FINALIZE (Diagram Step 3) */}
           {plan.currentStep === 3 && (
-            <div className="max-w-2xl mx-auto flex flex-col h-full justify-center">
-              <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-lg">
-                <h3 className="text-xl font-bold text-gray-900 mb-6">Final Trip Data</h3>
-                
-                <div className="space-y-6">
+            <div className="max-w-2xl mx-auto bg-white p-6 rounded-xl border shadow-sm space-y-4">
+               <h3 className="font-bold text-lg">Finalize Trip</h3>
+               <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Vehicle's Last Location</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <input 
-                        className="w-full pl-10 p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black"
-                        placeholder="Enter location..."
-                        value={finalLocs.vDrop} onChange={e => setFinalLocs({...finalLocs, vDrop: e.target.value})}
-                      />
-                    </div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">End Fuel Level</label>
+                    <input className="w-full p-2 border rounded" value={finalLocs.fuel} onChange={e => setFinalLocs({...finalLocs, fuel: e.target.value})} placeholder="e.g. 45L" />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Equipment's Last Location</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <input 
-                        className="w-full pl-10 p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black"
-                        placeholder="Enter location..."
-                        value={finalLocs.eDrop} onChange={e => setFinalLocs({...finalLocs, eDrop: e.target.value})}
-                      />
-                    </div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">Total Distance</label>
+                    <input className="w-full p-2 border rounded" value={finalLocs.dist} onChange={e => setFinalLocs({...finalLocs, dist: e.target.value})} placeholder="e.g. 120km" />
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-2">Fuel Consumed</label>
-                      <div className="relative">
-                        <Fuel className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                        <input 
-                          className="w-full pl-10 p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black"
-                          placeholder="e.g. 45 L"
-                          value={finalLocs.fuel} onChange={e => setFinalLocs({...finalLocs, fuel: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-2">Total Distance</label>
-                      <div className="relative">
-                        <Navigation className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                        <input 
-                          className="w-full pl-10 p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black"
-                          placeholder="e.g. 300 KM"
-                          value={finalLocs.dist} onChange={e => setFinalLocs({...finalLocs, dist: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={handleSubmitFinal}
-                    className="w-full mt-4 bg-black text-white py-4 rounded-xl text-lg font-bold hover:bg-gray-800 shadow-lg flex items-center justify-center gap-2"
-                  >
-                    SUBMIT & DOWNLOAD PDF <Download className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
+               </div>
+               <button onClick={handleSubmitFinal} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold">Submit & Download Report</button>
             </div>
           )}
         </div>
@@ -769,104 +708,934 @@ const TripExecutionModal = ({ plan, onClose, onUpdate }: { plan: LogisticsPlan, 
   );
 };
 
+// --- TASK PANEL ---
+const TaskPanel = ({ onCreatePlan }: { onCreatePlan: () => void }) => {
+  const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
 
-// 2. MONITOR SECTION (The Grid View)
-const MonitorSection = ({ plans, onUpdate }: { plans: LogisticsPlan[], onUpdate: (p: LogisticsPlan) => void }) => {
+  const toggleTaskComplete = (taskId: string) => {
+    const newCompleted = new Set(completedTasks);
+    if (newCompleted.has(taskId)) {
+      newCompleted.delete(taskId);
+    } else {
+      newCompleted.add(taskId);
+    }
+    setCompletedTasks(newCompleted);
+  };
+
+  const tasks = [
+    {
+      id: 'jd-start',
+      title: 'Start of Day - JD-Link Data',
+      description: 'Enter engine hours at day start',
+      type: 'start',
+      icon: <Play className="w-4 h-4" />,
+      color: 'text-blue-600',
+      bgColor: 'bg-blue-50',
+      borderColor: 'border-blue-200',
+      action: () => {
+        toast.info('JD-Link integration coming soon!');
+      }
+    },
+    {
+      id: 'create-plans',
+      title: 'Create Cultivation Plans',
+      description: 'Make new plans for assigned activities',
+      type: 'plan',
+      icon: <Plus className="w-4 h-4" />,
+      color: 'text-emerald-600', 
+      bgColor: 'bg-emerald-50',
+      borderColor: 'border-emerald-200',
+      action: onCreatePlan
+    },
+    {
+      id: 'jd-end',
+      title: 'End of Day - JD-Link Data',
+      description: 'Enter diesel consumption & engine hours',
+      type: 'end',
+      icon: <Fuel className="w-4 h-4" />,
+      color: 'text-orange-600',
+      bgColor: 'bg-orange-50', 
+      borderColor: 'border-orange-200',
+      action: () => {
+        toast.info('JD-Link integration coming soon!');
+      }
+    }
+  ];
+
+  return (
+    <div className="w-80 bg-white border-l border-gray-200 flex flex-col">
+      {/* Header */}
+      <div className="p-6 border-b border-gray-100">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+            <CheckCircle2 className="w-4 h-4 text-white" />
+          </div>
+          <h2 className="font-semibold text-lg text-gray-900">Daily Tasks</h2>
+        </div>
+        <p className="text-sm text-gray-600">Complete your logistics tasks for today</p>
+        <div className="mt-3 flex items-center gap-2">
+          <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+          <span className="text-xs text-gray-500">
+            {completedTasks.size} of {tasks.length} completed
+          </span>
+        </div>
+      </div>
+
+      {/* Tasks List */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {tasks.map((task) => {
+          const isCompleted = completedTasks.has(task.id);
+          return (
+            <div
+              key={task.id}
+              className={cn(
+                "border rounded-xl p-4 transition-all duration-200 cursor-pointer hover:shadow-sm",
+                isCompleted 
+                  ? "bg-gray-50 border-gray-200 opacity-75" 
+                  : `${task.bgColor} ${task.borderColor}`
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div 
+                  className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                    isCompleted ? "bg-gray-200 text-gray-500" : `${task.bgColor} ${task.color}`
+                  )}
+                >
+                  {task.icon}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className={cn(
+                      "font-medium text-sm",
+                      isCompleted ? "text-gray-500 line-through" : "text-gray-900"
+                    )}>
+                      {task.title}
+                    </h3>
+                    {task.type === 'start' && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded font-medium">AM</span>}
+                    {task.type === 'end' && <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded font-medium">PM</span>}
+                  </div>
+                  <p className={cn(
+                    "text-xs mb-3",
+                    isCompleted ? "text-gray-400" : "text-gray-600"
+                  )}>
+                    {task.description}
+                  </p>
+                  
+                  {/* Action Buttons */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        task.action();
+                      }}
+                      disabled={isCompleted}
+                      className={cn(
+                        "px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex-1",
+                        isCompleted
+                          ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                          : task.id === 'create-plans'
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                            : "bg-slate-900 hover:bg-slate-800 text-white"
+                      )}
+                    >
+                      {task.id === 'create-plans' ? 'Create Plans' : 'Start Task'}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleTaskComplete(task.id);
+                        if (!isCompleted) {
+                          toast.success(`${task.title} marked as completed!`);
+                        }
+                      }}
+                      className={cn(
+                        "p-1.5 rounded-md transition-colors",
+                        isCompleted
+                          ? "bg-gray-200 text-gray-600 hover:bg-gray-300"
+                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                      )}
+                      title={isCompleted ? "Mark as incomplete" : "Mark as complete"}
+                    >
+                      {isCompleted ? (
+                        <X className="w-3 h-3" />
+                      ) : (
+                        <CheckCircle2 className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Progress Footer */}
+      <div className="p-6 border-t border-gray-100 bg-gray-50">
+        <div className="mb-2">
+          <div className="flex justify-between text-xs text-gray-600 mb-1">
+            <span>Daily Progress</span>
+            <span>{Math.round((completedTasks.size / tasks.length) * 100)}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div 
+              className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${(completedTasks.size / tasks.length) * 100}%` }}
+            ></div>
+          </div>
+        </div>
+        {completedTasks.size === tasks.length && (
+          <div className="text-center py-2">
+            <span className="text-xs font-medium text-emerald-600">🎉 All tasks completed!</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- MONITOR SECTION ---
+const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: LogisticsPlan[], onUpdate: (p: LogisticsPlan) => void, onCreateClick: () => void, onDelete: (id: string) => void }) => {
   const [activePlan, setActivePlan] = useState<LogisticsPlan | null>(null);
+  const [activeMapPlan, setActiveMapPlan] = useState<LogisticsPlan | null>(null);
+
+  const renderTripStatusIcon = (status?: TripStatusBackend) => {
+    if (status === 'started') return <AlertTriangle className="w-4 h-4 text-yellow-600" />;
+    if (status === 'completed') return <CheckCircle2 className="w-4 h-4 text-green-600" />;
+    return <Clock className="w-4 h-4 text-slate-500" />;
+  };
 
   return (
     <div>
-      {/* Grid */}
       {plans.length === 0 ? (
-        <div className="text-center py-20">
-          <Truck className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500 text-lg font-medium">No active trips yet</p>
-          <p className="text-gray-400 text-sm mt-2">Click "Create Plan" to start planning a new trip</p>
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <button onClick={onCreateClick} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium">Create Operation</button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {plans.map(plan => (
-            <div key={plan.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col h-full">
-              <div className="flex items-start gap-4 mb-3">
-                <div className="mt-1"><Truck className="w-5 h-5 text-[#2F5233]" /></div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{plan.vehicleReg}</h3>
-                  <p className="text-xs text-gray-500 mt-1">{plan.stops.length} stops • {plan.createdAt}</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          {plans.map(plan => {
+            const getStatusConfig = () => {
+              if (plan.tripStatus === 'completed') return { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Completed' };
+              if (plan.tripStatus === 'started') return { color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', label: 'In Progress' };
+              return { color: 'text-slate-700', bg: 'bg-slate-50', border: 'border-slate-200', label: 'Pending' };
+            };
+            const statusConfig = getStatusConfig();
+            
+            const hasIncompleteTasks = plan.tripStatus === 'started' && plan.stops.some(s => !s.isReached);
+
+            return (
+              <div key={plan.id} className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 group relative">
+                
+                {/* DELETE BUTTON */}
+                <button 
+                  onClick={(e) => { e.stopPropagation(); if(confirm('Delete plan?')) onDelete(plan.id); }}
+                  className="absolute top-3 right-3 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors z-10"
+                  title="Delete Plan"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+
+                <div className="p-6 border-b border-gray-100">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
+                        <Truck className="w-5 h-5 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900 text-base">{plan.vehicleReg}</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">{plan.vehicleType} • {plan.createdAt}</p>
+                      </div>
+                    </div>
+                    {/* Status Pill */}
+                    <div className={`px-2.5 py-1 rounded-md text-xs font-medium ${statusConfig.bg} ${statusConfig.color} ${statusConfig.border} border mr-6`}>
+                      {statusConfig.label}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                      <span className="text-xs font-medium text-gray-700">Route Overview</span>
+                      <span className="text-xs text-gray-500">• {plan.stops.length} stops</span>
+                    </div>
+                    <p className="text-xs text-gray-600 leading-relaxed truncate">
+                      {plan.stops.slice(0,3).map(s => s.locationName).join(' → ')}{plan.stops.length > 3 ? ' …' : ''}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Map Preview */}
+                <div className="px-6 pt-4">
+                  <div className="relative">
+                    <MapPreview plan={plan} />
+                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setActiveMapPlan(plan); }} className="absolute top-2 right-2 bg-white/90 hover:bg-white text-gray-700 p-1.5 rounded-md shadow-sm">
+                      <Navigation className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Driver & Status Rows */}
+                <div className="p-6 pt-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center">
+                      <User className="w-3.5 h-3.5 text-gray-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{plan.driverName}</p>
+                      <p className="text-xs text-gray-500">Assigned Driver</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center">
+                       {/* Alert Icon Logic */}
+                       {hasIncompleteTasks ? <AlertTriangle className="w-3.5 h-3.5 text-orange-600" /> : renderTripStatusIcon(plan.tripStatus)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${hasIncompleteTasks ? 'text-orange-600' : statusConfig.color}`}>
+                         {hasIncompleteTasks ? 'In Progress' : statusConfig.label}
+                      </p>
+                      <p className="text-xs text-gray-500">Current Status</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="p-6 pt-0 space-y-2">
+                  {/* Start Button */}
+                  {plan.status !== 'Completed' && plan.status !== 'Live' && (
+                     <button onClick={() => setActivePlan(plan)} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2">
+                       <Play className="w-4 h-4" /> Start Operation
+                     </button>
+                  )}
+
+                  {/* Manage/Download Button */}
+                  <button onClick={plan.status === 'Completed' ? () => generateTripSheetPDF(plan) : () => setActivePlan(plan)} className="w-full bg-slate-900 hover:bg-slate-800 text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2">
+                    {plan.status === 'Completed' ? <><Download className="w-4 h-4" /> Download Report</> : <><LayoutList className="w-4 h-4" /> Manage Operation</>}
+                  </button>
                 </div>
               </div>
-              <div className="mt-2 mb-6 text-sm text-gray-600 space-y-1">
-                <p className="flex items-center gap-2"><User className="w-3 h-3 text-gray-400" /> Driver: {plan.driverName}</p>
-                <p className="flex items-center gap-2">
-                  <Activity className="w-3 h-3 text-gray-400" /> Status: <span className={cn("font-medium", plan.status === 'Completed' ? "text-blue-600" : "text-green-600")}>{plan.status}</span>
-                </p>
-              </div>
-              
-              <div className="mt-auto">
-                {plan.status === 'Completed' ? (
-                  <button onClick={() => generateTripSheetPDF(plan)} className="w-full border border-gray-200 rounded-lg py-2 flex items-center justify-center gap-2 text-sm font-medium text-purple-700 hover:bg-purple-50">
-                    <Download className="w-4 h-4" /> Download PDF
-                  </button>
-                ) : (
-                  <button onClick={() => setActivePlan(plan)} className="w-full border border-gray-200 rounded-lg py-2 flex items-center justify-center gap-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                    <LayoutList className="w-4 h-4" /> Trip Timeline / Execute
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-
-      {/* RENDER THE MODAL IF ACTIVE */}
+      
       {activePlan && (
-        <TripExecutionModal 
-          plan={activePlan} 
-          onClose={() => setActivePlan(null)} 
-          onUpdate={(p) => { onUpdate(p); setActivePlan(p); }} 
-        />
+        <TripExecutionModal plan={activePlan} onClose={() => setActivePlan(null)} onUpdate={(p) => { onUpdate(p); setActivePlan(p); }} />
+      )}
+      {activeMapPlan && (
+        <MapModal plan={activeMapPlan} onClose={() => setActiveMapPlan(null)} />
       )}
     </div>
   );
 };
 
-// --- MAIN LAYOUT ---
+// --- REQUESTS SECTION ---
+const RequestsSection = ({ requests, onApprove, onReject }: { 
+  requests: LogisticsRequest[], 
+  onApprove: (id: string) => void,
+  onReject: (id: string) => void 
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'date' | 'priority' | 'status'>('date');
+  const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'none'>('status');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['pending', 'approved', 'in_progress']));
 
-const LogisticsManagement = () => {
-  const [plans, setPlans] = useState<LogisticsPlan[]>([]);
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const toggleGroup = (group: string) => {
+    const newExpanded = new Set(expandedGroups);
+    if (newExpanded.has(group)) {
+      newExpanded.delete(group);
+    } else {
+      newExpanded.add(group);
+    }
+    setExpandedGroups(newExpanded);
+  };
+
+  const filteredRequests = requests.filter(req => 
+    req.requesterName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.fromLocation.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.toLocation.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.vehicleType.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    req.id.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const sortedRequests = [...filteredRequests].sort((a, b) => {
+    if (sortBy === 'date') return new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime();
+    if (sortBy === 'priority') {
+      const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    }
+    return a.status.localeCompare(b.status);
+  });
+
+  const groupedRequests: Record<string, LogisticsRequest[]> = {};
+  if (groupBy !== 'none') {
+    sortedRequests.forEach(req => {
+      const key = groupBy === 'status' ? req.status : req.priority;
+      if (!groupedRequests[key]) groupedRequests[key] = [];
+      groupedRequests[key].push(req);
+    });
+  } else {
+    groupedRequests['all'] = sortedRequests;
+  }
+
+  const getStatusConfig = (status: RequestStatus) => {
+    switch (status) {
+      case 'pending': return { color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', label: 'Pending' };
+      case 'approved': return { color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', label: 'Approved' };
+      case 'in_progress': return { color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', label: 'In Progress' };
+      case 'completed': return { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Completed' };
+      case 'rejected': return { color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200', label: 'Rejected' };
+    }
+  };
+
+  const getPriorityConfig = (priority: RequestPriority) => {
+    switch (priority) {
+      case 'urgent': return { color: 'text-red-700', bg: 'bg-red-50', icon: '🔴' };
+      case 'high': return { color: 'text-orange-700', bg: 'bg-orange-50', icon: '🟠' };
+      case 'medium': return { color: 'text-yellow-700', bg: 'bg-yellow-50', icon: '🟡' };
+      case 'low': return { color: 'text-gray-700', bg: 'bg-gray-50', icon: '⚪' };
+    }
+  };
+
+  const getGroupLabel = (key: string) => {
+    if (groupBy === 'status') return getStatusConfig(key as RequestStatus).label;
+    if (groupBy === 'priority') return key.charAt(0).toUpperCase() + key.slice(1);
+    return 'All Requests';
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Search and Filters */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+        <div className="flex flex-col lg:flex-row gap-4">
+          {/* Search */}
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+  const fetchRequests = async () => {
+    setLoadingRequests(true);
+    try {
+      // Mock data for now - replace with actual API call
+      const mockRequests: LogisticsRequest[] = [
+        {
+          id: 'REQ-001',
+          requesterId: 'U001',
+          requesterName: 'Ramesh Kumar',
+          requesterPhone: '+91 98765 43210',
+          vehicleType: 'Tractor',
+          fromLocation: 'Plant A',
+          toLocation: 'Field 12-B',
+          requestDate: '2026-02-02T10:30:00',
+          preferredDate: '2026-02-05',
+          status: 'pending',
+          priority: 'urgent',
+          description: 'Need tractor for cultivation. Monsoon preparation.',
+          loadDetails: 'Cultivation Equipment',
+          createdAt: '2026-02-02T10:30:00',
+        },
+        {
+          id: 'REQ-002',
+          requesterId: 'U002',
+          requesterName: 'Suresh Patil',
+          requesterPhone: '+91 98765 43211',
+          vehicleType: 'Truck',
+          fromLocation: 'Field 8-A',
+          toLocation: 'Hub 1',
+          requestDate: '2026-02-01T14:00:00',
+          preferredDate: '2026-02-04',
+          status: 'approved',
+          priority: 'high',
+          description: 'Transport harvested produce to storage',
+          loadDetails: '5 tons produce',
+          createdAt: '2026-02-01T14:00:00',
+        },
+        {
+          id: 'REQ-003',
+          requesterId: 'U003',
+          requesterName: 'Vijay Deshmukh',
+          requesterPhone: '+91 98765 43212',
+          vehicleType: 'JCB',
+          fromLocation: 'Hub 2',
+          toLocation: 'Field 15-C',
+          requestDate: '2026-02-02T09:00:00',
+          preferredDate: '2026-02-03',
+          status: 'in_progress',
+          priority: 'medium',
+          description: 'Land leveling required',
+          loadDetails: 'Heavy machinery',
+          createdAt: '2026-02-02T09:00:00',
+        },
+        {
+          id: 'REQ-004',
+          requesterId: 'U004',
+          requesterName: 'Anil Sharma',
+          requesterPhone: '+91 98765 43213',
+          vehicleType: 'Pickup',
+          fromLocation: 'Plant B',
+          toLocation: 'Field 3-A',
+          requestDate: '2026-01-30T11:00:00',
+          preferredDate: '2026-02-01',
+          status: 'completed',
+          priority: 'low',
+          description: 'Fertilizer delivery',
+          loadDetails: '500kg fertilizer',
+          createdAt: '2026-01-30T11:00:00',
+        },
+      ];
+      setRequests(mockRequests);
+    } catch (e) {
+      toast.error('Failed to load requests');
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPlans();
+    fetchRequests();
+  }, []);
 
   const handleCreate = (p: LogisticsPlan) => {
     setPlans([...plans, p]);
   };
 
   const handleUpdate = (p: LogisticsPlan) => setPlans(plans.map(plan => plan.id === p.id ? p : plan));
+  
+  const handleDelete = (id: string) => {
+    setPlans(plans.filter(p => p.id !== id));
+    toast.success('Plan deleted');
+  };
 
-  return (
-    <div className="min-h-screen bg-[#FDFDFD] p-8 font-sans text-slate-900">
-      <div className="w-full space-y-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-[#1a1a1a] tracking-tight">Logistics Master</h1>
-            <p className="text-gray-500 mt-1">Unified Fleet Management System</p>
-          </div>
-          <button 
-            onClick={() => setShowCreateModal(true)}
-            className="bg-[#2F5233] text-white px-6 py-3 rounded-lg text-sm font-bold hover:bg-[#1a331d] shadow-sm flex items-center gap-2 w-fit"
+  const handleApproveRequest = (id: string) => {
+    setRequests(prev => prev.map(req => 
+      req.id === id ? { ...req, status: 'approved' as RequestStatus } : req
+    ));
+    toast.success('Request approved');
+  };
+
+  const handleRejectRequest = (id: string) => {
+    setRequests(prev => prev.map(req => 
+      req.id === id ? { ...req, status: 'rejected' as RequestStatus } : req
+    ));
+    toast.error('Request rejected');
+  };
+
+  const pendingRequestsCount = requests.filter(r => r.status === 'pending').length       >
+            <option value="date">Sort by Date</option>
+            <option value="priority">Sort by Priority</option>
+            <option value="status">Sort by Status</option>
+          </select>
+
+          {/* Group By */}
+          <select
+            value={groupBy}
+            onChange={(e) => setGroupBy(e.target.value as any)}
+            className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
           >
-            <Plus className="w-5 h-5" /> Create Plan
-          </button>
+            <option value="status">Group by Status</option>
+            <option value="priority">Group by Priority</option>
+            <option value="none">No Grouping</option>
+          </select>
         </div>
-        
-        <MonitorSection plans={plans} onUpdate={handleUpdate} />
+
+        {/* Stats */}
+        <div className="mt-4 flex gap-4 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">Total:</span>
+            <span className="font-semibold text-gray-900">{requests.length}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">Filtered:</span>
+            <span className="font-semibold text-gray-900">{filteredRequests.length}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">Pending:</span>
+            <span className="font-semibold text-amber-700">{requests.filter(r => r.status === 'pending').length}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">In Progress:</span>
+            <span className="font-semibold text-purple-700">{requests.filter(r => r.status === 'in_progress').length}</span>
+          </div>
+        </div>
       </div>
 
-      {/* Create Plan Modal */}
-      {showCreateModal && (
-        <CreatePlanModal 
-          onClose={() => setShowCreateModal(false)} 
-          onCreate={handleCreate} 
-        />
-      )}
+      {/* Grouped Requests */}
+      <div className="space-y-4">
+        {Object.entries(groupedRequests).map(([groupKey, groupRequests]) => {
+          const isExpanded = expandedGroups.has(groupKey);
+          
+          return (
+            <div key={groupKey} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              {/* Group Header */}
+              {groupBy !== 'none' && (
+                <button
+                  onClick={() => toggleGroup(groupKey)}
+                  className="w-full px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <ChevronDown className={cn("w-5 h-5 text-gray-400 transition-transform", !isExpanded && "-rotate-90")} />
+                    <h3 className="font-semibold text-gray-900">{getGroupLabel(groupKey)}</h3>
+                    <span className="px-2.5 py-1 bg-white rounded-full text-xs font-medium text-gray-600 border border-gray-200">
+                      {groupRequests.length}
+                    </span>
+                  </div>
+                </button>
+              )}
+
+              {/* Request Rows */}
+              {isExpanded && (
+                <div className="divide-y divide-gray-100">
+                  {groupRequests.map((req) => {
+                    const statusConfig = getStatusConfig(req.status);
+                    const priorityConfig = getPriorityConfig(req.priority);
+
+                    return (
+                      <div key={req.id} className="p-6 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start gap-6">
+                          {/* Left: Main Info */}
+                          <div className="flex-1 space-y-3">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <div className="flex items-center gap-3 mb-2">
+                                  <h4 className="font-semibold text-gray-900 text-lg">{req.requesterName}</h4>
+                                  <span className="text-xs text-gray-500 font-mono">{req.id}</span>
+                                  <span className={cn("px-2.5 py-1 rounded-md text-xs font-medium border", priorityConfig.bg, priorityConfig.color)}>
+                                    {priorityConfig.icon} {req.priority.toUpperCase()}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                  <Phone className="w-3.5 h-3.5" />
+                                  <span>{req.requesterPhone}</span>
+                                </div>
+                              </div>
+                              <div className={cn("px-3 py-1.5 rounded-lg text-sm font-medium border", statusConfig.bg, statusConfig.color, statusConfig.border)}>
+                                {statusConfig.label}
+                              </div>
+                            </div>
+
+                            {/* Route Info */}
+                            <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+                              <div className="flex items-center gap-2 flex-1">
+                                <MapPin className="w-4 h-4 text-green-600" />
+                                <div>
+                                  <p className="text-xs text-gray-500">From</p>
+                                  <p className="font-medium text-gray-900">{req.fromLocation}</p>
+                                </div>
+                              </div>
+                              <ChevronRight className="w-5 h-5 text-gray-400" />
+                              <div className="flex items-center gap-2 flex-1">
+                                <MapPin className="w-4 h-4 text-red-600" />
+                                <div>
+                                  <p className="text-xs text-gray-500">To</p>
+                                  <p className="font-medium text-gray-900">{req.toLocation}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Details Grid */}
+                            <div className="grid grid-cols-3 gap-4">
+                              <div className="flex items-center gap-2">
+                                <Truck className="w-4 h-4 text-gray-400" />
+                                <div>
+                                  <p className="text-xs text-gray-500">Vehicle Type</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.vehicleType}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <CalendarIcon className="w-4 h-4 text-gray-400" />
+                                <div>
+                                  <p className="text-xs text-gray-500">Preferred Date</p>
+                                  <p className="text-sm font-medium text-gray-900">{new Date(req.preferredDate).toLocaleDateString()}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Package className="w-4 h-4 text-gray-400" />
+                                <div>
+                                  <p className="text-xs text-gray-500">Load</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.loadDetails || 'Standard'}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Description */}
+                            {req.description && (
+                              <div className="pt-2">
+                                <p className="text-sm text-gray-600 italic">"{req.description}"</p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Right: Actions */}
+                          <div className="flex flex-col gap-2 min-w-[140px]">
+                            {req.status === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() => onApprove(req.id)}
+                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() => onReject(req.id)}
+                                  className="px-4 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            {req.status === 'approved' && (
+                              <button className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium">
+                                Create Plan
+                              </button>
+                            )}
+                            <button className="px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg text-sm font-medium">
+                              Details
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {groupRequests.length === 0 && (
+                    <div className="p-12 text-center text-gray-500">
+                      <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                      <p>No requests in this category</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {filteredRequests.length === 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <Search className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+            <p className="text-gray-500">No requests found matching your search</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN LAYOUT ---
+const LogisticsManagement = () => {
+  const [plans, setPlans] = useState<LogisticsPlan[]>([]);
+  const [requests, setRequests] = useState<LogisticsRequest[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [loadingPlans, setLoadingPlans] = useState(true);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [activeTab, setActiveTab] = useState<'requests' | 'operations'>('requests');
+{/* Header */}
+      <div className="bg-white border-b border-gray-200 shadow-sm">
+        <div className="px-8 py-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
+                <Truck className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold text-gray-900">Logistics Management</h1>
+                <p className="text-sm text-gray-600 mt-0.5">Manage requests and operations</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              {/* Pending Requests Alert */}
+              {pendingRequestsCount > 0 && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span className="text-sm font-medium text-amber-800">
+                    {pendingRequestsCount} pending request{pendingRequestsCount !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              )}
+              <button 
+                onClick={() => setShowCreateModal(true)} 
+                className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> New Operation
+              </button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-2 border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('requests')}
+              className={cn(
+                "px-6 py-3 font-medium text-sm transition-colors relative",
+                activeTab === 'requests'
+                  ? "text-slate-900 border-b-2 border-slate-900"
+                  : "text-gray-500 hover:text-gray-700"
+              )}
+            >
+              Incoming Requests
+              {pendingRequestsCount > 0 && (
+                <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold">
+                  {pendingRequestsCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('operations')}
+              className={cn(
+                "px-6 py-3 font-medium text-sm transition-colors relative",
+                activeTab === 'operations'
+                  ? "text-slate-900 border-b-2 border-slate-900"
+                  : "text-gray-500 hover:text-gray-700"
+              )}
+            >
+              Active Operations
+              <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">
+                {plans.filter(p => p.status !== 'Completed').length}
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      {/* Main Content with Task Panel */}
+      <div className="flex-1 flex">
+        {/* Left: Main Content */}
+        <div className="flex-1 px-8 py-8">
+          {activeTab === 'requests' ? (
+            loadingRequests ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="text-center">
+                  <div className="w-8 h-8 border-4 border-slate-900 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-gray-500">Loading requests...</p>
+                </div>
+              </div>
+            ) : (
+              <RequestsSection 
+                requests={requests} 
+                onApprove={handleApproveRequest}
+                onReject={handleRejectRequest}
+              />
+            )
+          ) : (
+            loadingPlans ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="text-center">
+                  <div className="w-8 h-8 border-4 border-slate-900 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-gray-500">Loading operations...</p>
+                </div>
+              </div>
+            ) : (
+              <MonitorSection 
+                plans={plans} 
+                onUpdate={handleUpdate} 
+                onCreateClick={() => setShowCreateModal(true)} 
+                onDelete={handleDelete} 
+              />
+            )
+          )
+        id: `s-${Date.now()}-${idx}-h`,
+        date,
+        type: 'Hub',
+        locationName: p.end_hub,
+        isReached: false,
+        inspection: { completed: false, items: STANDARD_CHECKS.map(c => ({ ...c })) },
+      });
+    });
+    return builtStops;
+  };
+
+  const fetchPlans = async () => {
+    setLoadingPlans(true);
+    try {
+      // API CALL: Get Logistics Plan
+      const response = await fetch(`${getBaseUrl()}/admin_vehicles/get_logistics_plan`);
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+      const data = (await response.json()) as BackendLogisticsPlan[];
+      
+      const mapped: LogisticsPlan[] = (Array.isArray(data) ? data : []).map((item) => {
+        const internalStatus: PlanStatus = item.trip_status === 'completed' ? 'Completed' : item.trip_status === 'started' ? 'Live' : 'Draft';
+        const currentStep: TripStep = item.trip_status === 'completed' ? 3 : item.trip_status === 'started' ? 2 : 1;
+        const stops = buildStopsFromBackendPlan(item.plan || {});
+        if (item.trip_status === 'completed') {
+          stops.forEach(s => { s.isReached = true; });
+        }
+        const createdAt = new Date(item.created_at).toLocaleDateString();
+        const vehicleReg = item.vehicle_id ? item.vehicle_id.slice(0, 8) : 'Vehicle';
+        
+        return {
+          id: item.plan_id,
+          vehicleId: item.vehicle_id,
+          vehicleReg,
+          vehicleType: 'Logistics',
+          driverName: '—',
+          driverPhone: '—',
+          stops,
+          status: internalStatus,
+          currentStep,
+          createdAt,
+          tripStatus: item.trip_status,
+        };
+      });
+      setPlans(mapped);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load plans');
+      setPlans([]);
+    } finally {
+      setLoadingPlans(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPlans();
+  }, []);
+
+  const handleCreate = (p: LogisticsPlan) => {
+    setPlans([...plans, p]);
+  };
+
+  const handleUpdate = (p: LogisticsPlan) => setPlans(plans.map(plan => plan.id === p.id ? p : plan));
+  
+  const handleDelete = (id: string) => {
+    setPlans(plans.filter(p => p.id !== id));
+    toast.success('Plan deleted');
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 flex flex-col">
+      <div className="bg-white border-b border-gray-200 shadow-sm">
+        <div className="px-8 py-6 flex justify-between">
+           <div className="flex items-center gap-3">
+             <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+                <Truck className="w-4 h-4 text-white" />
+             </div>
+             <h1 className="text-2xl font-semibold text-gray-900">Logistics Operations</h1>
+           </div>
+           <div className="flex items-center gap-4">
+             {/* Unplanned Orders Alert */}
+             <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+               <AlertTriangle className="w-4 h-4 text-amber-600" />
+               <span className="text-sm font-medium text-amber-800">3 unplanned orders</span>
+             </div>
+             <button onClick={() => setShowCreateModal(true)} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2">
+               <Plus className="w-4 h-4" /> New Operation
+             </button>
+           </div>
+        </div>
+      </div>
+      
+      {/* Main Content with Task Panel */}
+      <div className="flex-1 flex">
+        {/* Left: Main Content */}
+        <div className="flex-1 px-8 py-8">
+          {loadingPlans ? <div>Loading...</div> : <MonitorSection plans={plans} onUpdate={handleUpdate} onCreateClick={() => setShowCreateModal(true)} onDelete={handleDelete} />}
+        </div>
+        
+        {/* Right: Task Panel */}
+        <TaskPanel onCreatePlan={() => setShowCreateModal(true)} />
+      </div>
+      
+      {showCreateModal && <CreatePlanModal onClose={() => setShowCreateModal(false)} onCreate={handleCreate} />}
     </div>
   );
 };
