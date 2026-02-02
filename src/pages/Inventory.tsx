@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { 
-  Search, Filter, Plus, Minus, 
-  Package, AlertTriangle, History, 
+  Search, Plus, Minus, 
+  Package, AlertTriangle, 
   ArrowUpRight, ArrowDownLeft, X,
   FileText, TrendingUp, Download, Edit, RefreshCw,
-  Calendar, User, MapPin, Tag, Fuel
+  Calendar, User, MapPin, Tag, Fuel, ChevronDown, ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -18,6 +18,8 @@ import getBaseUrl from '@/lib/config';
 type ItemCategory = 'Fertilizer' | 'Pesticide' | 'Seeds' | 'Fuel' | 'Spare Parts' | 'Equipment';
 type UnitType = 'kg' | 'L' | 'g' | 'units' | 'bags';
 type FuelRequestStatus = 'requested' | 'delivered';
+type RequestStatus = 'pending' | 'approved' | 'in_progress' | 'completed' | 'rejected';
+type RequestPriority = 'urgent' | 'high' | 'medium' | 'low';
 
 interface InventoryItem {
   id: string;
@@ -57,6 +59,30 @@ interface FuelRequest {
   requestedAmount: number;
   status: FuelRequestStatus;
   requestDate: string;
+}
+
+interface InventoryRequest {
+  id: string;
+  requesterId: string;
+  requesterName: string;
+  requesterPhone: string;
+  itemCategory: ItemCategory;
+  itemName: string;
+  quantity: number;
+  unit: UnitType;
+  purpose: string;
+  requestDate: string;
+  requiredDate: string;
+  status: RequestStatus;
+  priority: RequestPriority;
+  description: string;
+  createdAt: string;
+  receiverId?: string;
+  receiverName?: string;
+  receiverDepartment?: string;
+  adminNote?: string;
+  forwardedBy?: string;
+  forwardedAt?: string;
 }
 
 // ============================================================================
@@ -116,12 +142,21 @@ const Inventory = () => {
   const [transactions, setTransactions] = useState<Transaction[]>(MOCK_TRANSACTIONS);
   const [fuelRequests, setFuelRequests] = useState<FuelRequest[]>(MOCK_FUEL_REQUESTS);
   const [isFuelLoading, setIsFuelLoading] = useState<boolean>(true);
+  const [inventoryRequests, setInventoryRequests] = useState<InventoryRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
   
   // State for UI
-  const [activeTab, setActiveTab] = useState<'stock' | 'history'>('stock');
-  const [searchQuery, setSearchQuery] = useState('');
   const [fuelSearchQuery, setFuelSearchQuery] = useState('');
-  const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('date');
+  const [groupBy, setGroupBy] = useState('status');
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    pending: true,
+    approved: false,
+    in_progress: false,
+    completed: false,
+    rejected: false,
+  });
   
   // Modal States
   const [isAddStockOpen, setIsAddStockOpen] = useState(false);
@@ -129,8 +164,21 @@ const Inventory = () => {
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
   const [isFuelRequestsOpen, setIsFuelRequestsOpen] = useState(false);
   const [isConfirmDeliveryOpen, setIsConfirmDeliveryOpen] = useState(false);
+  const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [selectedFuelRequest, setSelectedFuelRequest] = useState<FuelRequest | null>(null);
+  const [newRequest, setNewRequest] = useState({
+    requesterName: '',
+    requesterPhone: '',
+    itemCategory: 'Fertilizer' as ItemCategory,
+    itemName: '',
+    quantity: '',
+    unit: 'kg' as UnitType,
+    purpose: '',
+    requiredDate: '',
+    priority: 'medium' as RequestPriority,
+    description: '',
+  });
 
   // --- ACTIONS ---
   const handleStockAction = (e: React.FormEvent, type: 'IN' | 'OUT' | 'UPDATE') => {
@@ -229,19 +277,157 @@ const Inventory = () => {
 
   useEffect(() => {
     fetchFuelRequests();
+    fetchInventoryRequests();
   }, []);
+
+  // Fetch inventory requests
+  const fetchInventoryRequests = async () => {
+    setLoadingRequests(true);
+    try {
+      // Mock data for inventory requests
+      const mockRequests: InventoryRequest[] = [
+        {
+          id: 'IR-001',
+          requesterId: 'U001',
+          requesterName: 'Ramesh Kumar',
+          requesterPhone: '+91 98765 43210',
+          itemCategory: 'Fertilizer',
+          itemName: 'NPK Fertilizer',
+          quantity: 100,
+          unit: 'bags',
+          purpose: 'Field 12-A Cultivation',
+          requestDate: '2026-01-30T08:00:00',
+          requiredDate: '2026-02-05',
+          status: 'pending',
+          priority: 'high',
+          description: 'Need NPK fertilizer for upcoming cultivation season',
+          createdAt: '2026-01-30T08:00:00',
+        },
+        {
+          id: 'IR-002',
+          requesterId: 'U002',
+          requesterName: 'Priya Sharma',
+          requesterPhone: '+91 98765 43211',
+          itemCategory: 'Pesticide',
+          itemName: 'Organic Pesticide',
+          quantity: 20,
+          unit: 'L',
+          purpose: 'Pest Control - Block B',
+          requestDate: '2026-01-29T10:30:00',
+          requiredDate: '2026-02-02',
+          status: 'approved',
+          priority: 'urgent',
+          description: 'Urgent pest control needed in Block B',
+          createdAt: '2026-01-29T10:30:00',
+          receiverId: 'I001',
+          receiverName: 'Inventory Manager',
+          receiverDepartment: 'Inventory',
+          adminNote: 'Approved - High priority',
+          forwardedBy: 'Admin Verma',
+          forwardedAt: '2026-01-29T12:00:00',
+        },
+      ];
+      setInventoryRequests(mockRequests);
+    } catch (e) {
+      toast.error('Failed to load inventory requests');
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  const handleSubmitNewRequest = () => {
+    // Validate required fields
+    if (!newRequest.requesterName || !newRequest.requesterPhone || !newRequest.itemName || 
+        !newRequest.quantity || !newRequest.requiredDate || !newRequest.description) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    const newReq: InventoryRequest = {
+      id: `IR-${String(inventoryRequests.length + 1).padStart(3, '0')}`,
+      requesterId: 'U' + String(Math.floor(Math.random() * 1000)).padStart(3, '0'),
+      requesterName: newRequest.requesterName,
+      requesterPhone: newRequest.requesterPhone,
+      itemCategory: newRequest.itemCategory,
+      itemName: newRequest.itemName,
+      quantity: parseInt(newRequest.quantity),
+      unit: newRequest.unit,
+      purpose: newRequest.purpose,
+      requestDate: new Date().toISOString(),
+      requiredDate: newRequest.requiredDate,
+      status: 'pending',
+      priority: newRequest.priority,
+      description: newRequest.description,
+      createdAt: new Date().toISOString(),
+      receiverId: 'ADMIN',
+      receiverName: 'Admin Review Pending',
+      receiverDepartment: 'Administration',
+    };
+
+    setInventoryRequests(prev => [newReq, ...prev]);
+    setIsNewRequestModalOpen(false);
+    
+    // Reset form
+    setNewRequest({
+      requesterName: '',
+      requesterPhone: '',
+      itemCategory: 'Fertilizer',
+      itemName: '',
+      quantity: '',
+      unit: 'kg',
+      purpose: '',
+      requiredDate: '',
+      priority: 'medium',
+      description: '',
+    });
+    
+    toast.success('Request sent to Admin for review!');
+  };
+
+  const handleApproveRequest = (id: string) => {
+    setInventoryRequests(prev => prev.map(req => 
+      req.id === id ? { ...req, status: 'approved' as RequestStatus } : req
+    ));
+    toast.success('Request approved');
+  };
+
+  const handleRejectRequest = (id: string) => {
+    setInventoryRequests(prev => prev.map(req => 
+      req.id === id ? { ...req, status: 'rejected' as RequestStatus } : req
+    ));
+    toast.error('Request rejected');
+  };
 
   // Stats
   const pendingFuelRequests = fuelRequests.filter(req => req.status === 'requested').length;
   const totalValue = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
   const lowStockCount = items.filter(item => item.quantity <= item.reorderLevel).length;
 
-  // Filter
-  const filteredItems = items.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || item.sku.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = filterCategory === 'all' || item.category === filterCategory;
-    return matchesSearch && matchesCategory;
+  // Filter and group requests
+  const filteredRequests = inventoryRequests.filter(req => {
+    const query = searchQuery.toLowerCase();
+    return (
+      req.id.toLowerCase().includes(query) ||
+      req.requesterName.toLowerCase().includes(query) ||
+      req.itemName.toLowerCase().includes(query) ||
+      req.purpose.toLowerCase().includes(query)
+    );
   });
+
+  const groupedRequests: Record<RequestStatus, InventoryRequest[]> = {
+    pending: filteredRequests.filter(r => r.status === 'pending'),
+    approved: filteredRequests.filter(r => r.status === 'approved'),
+    in_progress: filteredRequests.filter(r => r.status === 'in_progress'),
+    completed: filteredRequests.filter(r => r.status === 'completed'),
+    rejected: filteredRequests.filter(r => r.status === 'rejected'),
+  };
+
+  const toggleSection = (status: string) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [status]: !prev[status]
+    }));
+  };
 
   const filteredFuelRequests = fuelRequests.filter(request => {
     const query = fuelSearchQuery.toLowerCase();
@@ -312,167 +498,486 @@ const Inventory = () => {
 
       {/* TABS & LIST */}
       <div className="flex flex-col space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 border-b border-border pb-4">
-          <div className="flex gap-6 w-full sm:w-auto overflow-x-auto">
-            <button 
-              onClick={() => setActiveTab('stock')}
-              className={cn(
-                "pb-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2",
-                activeTab === 'stock' ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Package className="w-4 h-4" /> Current Stock
-            </button>
-            <button 
-              onClick={() => setActiveTab('history')}
-              className={cn(
-                "pb-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2",
-                activeTab === 'history' ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <History className="w-4 h-4" /> Transaction Log
-            </button>
-          </div>
-
-          {activeTab === 'stock' && (
-            <div className="flex gap-3 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-4 py-2 w-full text-sm border border-border rounded-md bg-background"
-                />
-              </div>
-              <select 
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="px-3 py-2 text-sm border border-border rounded-md bg-background"
+        {/* SEARCH AND FILTERS */}
+        <div className="bg-white border border-border rounded-xl p-4 shadow-sm">
+          <div className="flex flex-col md:flex-row gap-4 items-center">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search by requester, location, vehicle, or ID..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-2.5 w-full text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-slate-900"
+              />
+            </div>
+            <div className="flex gap-3 w-full md:w-auto">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="px-4 py-2.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-slate-900"
               >
-                <option value="all">All Categories</option>
-                <option value="Fertilizer">Fertilizer</option>
-                <option value="Pesticide">Pesticide</option>
-                <option value="Fuel">Fuel</option>
+                <option value="date">Sort by Date</option>
+                <option value="priority">Sort by Priority</option>
+                <option value="requester">Sort by Requester</option>
+              </select>
+              <select
+                value={groupBy}
+                onChange={(e) => setGroupBy(e.target.value)}
+                className="px-4 py-2.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-slate-900"
+              >
+                <option value="status">Group by Status</option>
+                <option value="priority">Group by Priority</option>
               </select>
             </div>
-          )}
+          </div>
+
+          {/* STATS ROW */}
+          <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border text-sm">
+            <div>
+              <span className="text-muted-foreground">Total: </span>
+              <span className="font-semibold">{inventoryRequests.length}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Filtered: </span>
+              <span className="font-semibold">{filteredRequests.length}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Pending: </span>
+              <span className="font-semibold text-amber-600">{groupedRequests.pending.length}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">In Progress: </span>
+              <span className="font-semibold text-purple-600">{groupedRequests.in_progress.length}</span>
+            </div>
+          </div>
         </div>
 
-        {/* CURRENT STOCK TABLE */}
-        {activeTab === 'stock' && (
-          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 border-b border-border">
-                <tr>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Item</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Location</th>
-                  <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Stock</th>
-                  <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Value</th>
-                  <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filteredItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-muted/20 group">
-                    <td className="px-6 py-4">
-                      <div>
-                        <p className="font-medium text-foreground">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">SKU: {item.sku} • {item.category}</p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-muted-foreground">{item.location}</td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex flex-col items-end">
-                        <span className={cn("font-bold", item.quantity <= item.reorderLevel ? "text-orange-600" : "text-foreground")}>
-                          {item.quantity} {item.unit}
-                        </span>
-                        {item.quantity <= item.reorderLevel && (
-                          <span className="text-[10px] text-orange-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> Low</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-right">₹{(item.quantity * item.unitPrice).toLocaleString()}</td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        <button 
-                          onClick={() => { setSelectedItem(item); setIsEditItemOpen(true); }}
-                          className="p-2 hover:bg-blue-50 text-blue-600 rounded-md border border-transparent hover:border-blue-100 transition-all"
-                          title="Edit Details"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => { setSelectedItem(item); setIsIssueStockOpen(true); }}
-                          className="p-2 hover:bg-orange-50 text-orange-600 rounded-md border border-transparent hover:border-orange-100 transition-all" 
-                          title="Issue Stock"
-                        >
-                          <ArrowUpRight className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => { setSelectedItem(item); setIsAddStockOpen(true); }}
-                          className="p-2 hover:bg-green-50 text-green-600 rounded-md border border-transparent hover:border-green-100 transition-all" 
-                          title="Add Stock"
-                        >
-                          <ArrowDownLeft className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {/* SEND TO ADMIN BUTTON */}
+        <div className="flex justify-end">
+          <button
+            onClick={() => setIsNewRequestModalOpen(true)}
+            className="flex items-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
+          >
+            <FileText className="w-4 h-4" />
+            Send to Admin Request
+          </button>
+        </div>
 
-        {/* TRANSACTION LOG TABLE */}
-        {activeTab === 'history' && (
-          <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 border-b border-border">
-                <tr>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Date</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Type</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Item</th>
-                  <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Details</th>
-                  <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Quantity</th>
-                  <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Invoice/Bill</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {transactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-muted/20">
-                    <td className="px-6 py-4 text-muted-foreground">{format(new Date(tx.date), 'dd MMM yyyy')}</td>
-                    <td className="px-6 py-4">
-                      <span className={cn(
-                        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium",
-                        tx.type === 'IN' ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
-                      )}>
-                        {tx.type === 'IN' ? <ArrowDownLeft className="w-3 h-3" /> : <ArrowUpRight className="w-3 h-3" />}
-                        {tx.type === 'IN' ? 'Inward' : 'Issued'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 font-medium text-foreground">{tx.itemName}</td>
-                    <td className="px-6 py-4 text-muted-foreground">
-                      {tx.type === 'IN' ? `Inv: ${tx.invoiceNo || 'N/A'}` : `To: ${tx.issuedTo}`}
-                    </td>
-                    <td className="px-6 py-4 text-right font-bold">{tx.quantity}</td>
-                    <td className="px-6 py-4 text-right">
-                      <button 
-                        onClick={() => handleDownloadBill(tx.id)}
-                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                      >
-                        <Download className="w-3 h-3" /> Download Bill
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* GROUPED REQUESTS */}
+        {loadingRequests ? (
+          <div className="flex items-center justify-center p-12 bg-white border border-border rounded-xl">
+            <div className="text-center">
+              <div className="w-8 h-8 border-4 border-slate-900 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-muted-foreground">Loading requests...</p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* PENDING SECTION */}
+            {groupedRequests.pending.length > 0 && (
+              <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
+                <button
+                  onClick={() => toggleSection('pending')}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    {expandedSections.pending ? (
+                      <ChevronDown className="w-5 h-5 text-gray-600" />
+                    ) : (
+                      <ChevronRight className="w-5 h-5 text-gray-600" />
+                    )}
+                    <h3 className="text-lg font-semibold">Pending</h3>
+                    <span className="px-2.5 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full">
+                      {groupedRequests.pending.length}
+                    </span>
+                  </div>
+                </button>
+                
+                {expandedSections.pending && (
+                  <div className="divide-y divide-border">
+                    {groupedRequests.pending.map((req) => (
+                      <div key={req.id} className="p-6 hover:bg-gray-50 transition-colors">
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                          {/* REQUEST ID */}
+                          <div className="lg:col-span-2">
+                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Request ID</div>
+                            <div className="font-mono text-sm font-semibold">{req.id}</div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              User ID: {req.requesterId}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {format(new Date(req.createdAt), 'dd/MM/yyyy, HH:mm a')}
+                            </div>
+                          </div>
+
+                          {/* SENDER DETAILS */}
+                          <div className="lg:col-span-2">
+                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Sender Details</div>
+                            <div className="flex items-start gap-2">
+                              <User className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <div className="font-medium text-sm">{req.requesterName}</div>
+                                <div className="text-xs text-muted-foreground mt-1">{req.requesterPhone}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* RECEIVER DETAILS */}
+                          <div className="lg:col-span-2">
+                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Receiver Details</div>
+                            <div className="flex items-start gap-2">
+                              <User className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <div className="font-medium text-sm">{req.receiverName || 'Admin Review'}</div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {req.receiverDepartment || 'Administration'}
+                                </div>
+                                {req.receiverId && (
+                                  <div className="text-xs text-muted-foreground">ID: {req.receiverId}</div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* REQUEST DETAILS */}
+                          <div className="lg:col-span-3">
+                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Request Details</div>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex items-start gap-2">
+                                <Package className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                <div>
+                                  <span className="text-xs text-muted-foreground">Item Category</span>
+                                  <div className="font-medium">{req.itemCategory}</div>
+                                </div>
+                              </div>
+                              <div className="flex items-start gap-2">
+                                <MapPin className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                <div>
+                                  <span className="text-xs text-muted-foreground">Purpose</span>
+                                  <div className="font-medium">{req.purpose}</div>
+                                </div>
+                              </div>
+                              <div className="flex items-start gap-2">
+                                <Calendar className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                <div>
+                                  <span className="text-xs text-muted-foreground">Preferred Date</span>
+                                  <div className="font-medium">{format(new Date(req.requiredDate), 'dd/MM/yyyy')}</div>
+                                </div>
+                              </div>
+                              <div className="flex items-start gap-2">
+                                <Tag className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                <div>
+                                  <span className="text-xs text-muted-foreground">Load</span>
+                                  <div className="font-medium">{req.itemName}</div>
+                                </div>
+                              </div>
+                            </div>
+                            {req.description && (
+                              <div className="mt-2 p-2 bg-gray-50 rounded text-xs italic text-muted-foreground">
+                                "{req.description}"
+                              </div>
+                            )}
+                          </div>
+
+                          {/* PRIORITY */}
+                          <div className="lg:col-span-1">
+                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Priority</div>
+                            <span className={cn(
+                              "inline-flex px-3 py-1 rounded-full text-xs font-semibold",
+                              req.priority === 'urgent' && 'bg-red-100 text-red-700',
+                              req.priority === 'high' && 'bg-orange-100 text-orange-700',
+                              req.priority === 'medium' && 'bg-yellow-100 text-yellow-700',
+                              req.priority === 'low' && 'bg-gray-100 text-gray-700'
+                            )}>
+                              {req.priority.toUpperCase()}
+                            </span>
+                          </div>
+
+                          {/* STATUS */}
+                          <div className="lg:col-span-1">
+                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Status</div>
+                            <span className="inline-flex px-3 py-1 rounded bg-amber-100 text-amber-700 text-xs font-semibold border border-amber-200">
+                              Pending
+                            </span>
+                          </div>
+
+                          {/* ACTIONS */}
+                          <div className="lg:col-span-1">
+                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Actions</div>
+                            <div className="flex flex-col gap-2">
+                              {req.receiverId !== 'ADMIN' ? (
+                                <button
+                                  onClick={() => {
+                                    setInventoryRequests(prev => prev.map(r => 
+                                      r.id === req.id ? { ...r, receiverId: 'ADMIN', receiverName: 'Admin Review Pending' } : r
+                                    ));
+                                    toast.success('Request sent to Admin for review');
+                                  }}
+                                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1"
+                                >
+                                  <FileText className="w-3 h-3" />
+                                  Send to Admin Request
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleApproveRequest(req.id)}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleRejectRequest(req.id)}
+                                    className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium transition-colors"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* IN PROGRESS SECTION */}
+            {groupedRequests.in_progress.length > 0 && (
+              <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
+                <button
+                  onClick={() => toggleSection('in_progress')}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    {expandedSections.in_progress ? (
+                      <ChevronDown className="w-5 h-5 text-gray-600" />
+                    ) : (
+                      <ChevronRight className="w-5 h-5 text-gray-600" />
+                    )}
+                    <h3 className="text-lg font-semibold">In Progress</h3>
+                    <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">
+                      {groupedRequests.in_progress.length}
+                    </span>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* APPROVED SECTION */}
+            {groupedRequests.approved.length > 0 && (
+              <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
+                <button
+                  onClick={() => toggleSection('approved')}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    {expandedSections.approved ? (
+                      <ChevronDown className="w-5 h-5 text-gray-600" />
+                    ) : (
+                      <ChevronRight className="w-5 h-5 text-gray-600" />
+                    )}
+                    <h3 className="text-lg font-semibold">Approved</h3>
+                    <span className="px-2.5 py-0.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+                      {groupedRequests.approved.length}
+                    </span>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {filteredRequests.length === 0 && (
+              <div className="p-12 text-center text-muted-foreground bg-white border border-border rounded-xl">
+                <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p>No inventory requests found</p>
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </div>      {/* --- MODAL: NEW REQUEST (SEND TO ADMIN) --- */}
+      {isNewRequestModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-xl text-gray-900">Send Request to Admin</h3>
+                <p className="text-sm text-gray-600 mt-1">Submit an inventory request for admin approval</p>
+              </div>
+              <button 
+                onClick={() => setIsNewRequestModalOpen(false)}
+                className="w-10 h-10 bg-white hover:bg-gray-100 rounded-lg flex items-center justify-center transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-600" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Requester Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newRequest.requesterName}
+                    onChange={(e) => setNewRequest({...newRequest, requesterName: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                    placeholder="Enter your name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Phone Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={newRequest.requesterPhone}
+                    onChange={(e) => setNewRequest({...newRequest, requesterPhone: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                    placeholder="+91 98765 43210"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Item Category <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newRequest.itemCategory}
+                    onChange={(e) => setNewRequest({...newRequest, itemCategory: e.target.value as ItemCategory})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                  >
+                    <option value="Fertilizer">Fertilizer</option>
+                    <option value="Pesticide">Pesticide</option>
+                    <option value="Seeds">Seeds</option>
+                    <option value="Fuel">Fuel</option>
+                    <option value="Spare Parts">Spare Parts</option>
+                    <option value="Equipment">Equipment</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Item Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newRequest.itemName}
+                    onChange={(e) => setNewRequest({...newRequest, itemName: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                    placeholder="e.g., NPK Fertilizer"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantity <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={newRequest.quantity}
+                    onChange={(e) => setNewRequest({...newRequest, quantity: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Unit <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newRequest.unit}
+                    onChange={(e) => setNewRequest({...newRequest, unit: e.target.value as UnitType})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                  >
+                    <option value="kg">kg</option>
+                    <option value="L">L</option>
+                    <option value="g">g</option>
+                    <option value="units">units</option>
+                    <option value="bags">bags</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Priority <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newRequest.priority}
+                    onChange={(e) => setNewRequest({...newRequest, priority: e.target.value as RequestPriority})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Purpose <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newRequest.purpose}
+                  onChange={(e) => setNewRequest({...newRequest, purpose: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                  placeholder="e.g., Field 12-A Cultivation"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Required Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={newRequest.requiredDate}
+                  onChange={(e) => setNewRequest({...newRequest, requiredDate: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={newRequest.description}
+                  onChange={(e) => setNewRequest({...newRequest, description: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none resize-none"
+                  rows={3}
+                  placeholder="Describe the purpose and urgency of this request..."
+                />
+              </div>
+            </div>
+
+            <div className="p-6 bg-gray-50 border-t border-gray-200 flex gap-3">
+              <button
+                onClick={() => setIsNewRequestModalOpen(false)}
+                className="flex-1 px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitNewRequest}
+                className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-lg font-semibold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+              >
+                <FileText className="w-5 h-5" />
+                Send to Admin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --- MODAL 1: ADD STOCK (INWARD) --- */}
       {isAddStockOpen && (

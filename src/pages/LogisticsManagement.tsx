@@ -17,6 +17,20 @@ import { getBaseUrl } from '@/lib/config';
 import 'leaflet/dist/leaflet.css';
 import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
 
+/**
+ * LOGISTICS REQUEST WORKFLOW:
+ * 
+ * 1. CREATE REQUEST → User clicks "New Request" button and fills in details
+ * 2. SUBMIT TO ADMIN → Request is sent to Admin Request Management (status: 'pending')
+ * 3. ADMIN REVIEWS → Admin reviews in Admin Request Management page
+ * 4. ADMIN FORWARDS → Admin forwards back to Logistics department (status: 'in_progress')
+ * 5. LOGISTICS HANDLES → Request appears here for logistics team to process
+ * 
+ * This page shows:
+ * - New requests created here (before admin review)
+ * - Approved requests forwarded back from admin (ready for action)
+ */
+
 // --- TYPES ---
 type LocationType = 'Plant' | 'Field' | 'Hub' | 'Deposit';
 type PlanStatus = 'Draft' | 'Live' | 'Completed';
@@ -40,6 +54,12 @@ interface LogisticsRequest {
   description: string;
   loadDetails?: string;
   createdAt: string;
+  receiverId?: string;
+  receiverName?: string;
+  receiverDepartment?: string;
+  adminNote?: string;
+  forwardedBy?: string;
+  forwardedAt?: string;
 }
 
 interface CalendarEntry {
@@ -841,6 +861,14 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
   const [sortBy, setSortBy] = useState<'date' | 'priority' | 'status'>('date');
   const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'none'>('status');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['pending', 'approved', 'in_progress']));
+  const [isCreatePlanModalOpen, setIsCreatePlanModalOpen] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<LogisticsRequest | null>(null);
+  const [selectedVehicles, setSelectedVehicles] = useState<string[]>([]);
+  const [planDetails, setPlanDetails] = useState({
+    driver: '',
+    startDate: '',
+    notes: '',
+  });
 
   const toggleGroup = (group: string) => {
     const newExpanded = new Set(expandedGroups);
@@ -889,6 +917,53 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
       case 'rejected': return { color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200', label: 'Rejected' };
     }
   };
+
+  const handleOpenCreatePlan = (req: LogisticsRequest) => {
+    setSelectedRequest(req);
+    setIsCreatePlanModalOpen(true);
+  };
+
+  const handleCloseCreatePlan = () => {
+    setIsCreatePlanModalOpen(false);
+    setSelectedRequest(null);
+    setSelectedVehicles([]);
+    setPlanDetails({ driver: '', startDate: '', notes: '' });
+  };
+
+  const toggleVehicleSelection = (vehicleId: string) => {
+    setSelectedVehicles(prev => 
+      prev.includes(vehicleId) 
+        ? prev.filter(id => id !== vehicleId)
+        : [...prev, vehicleId]
+    );
+  };
+
+  const handleCreatePlan = () => {
+    if (!selectedRequest) return;
+    
+    if (selectedVehicles.length === 0) {
+      toast.error('Please select at least one vehicle');
+      return;
+    }
+
+    if (!planDetails.driver || !planDetails.startDate) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    // Create the logistics plan
+    toast.success(`Logistics plan created for request ${selectedRequest.id}`);
+    handleCloseCreatePlan();
+  };
+
+  // Mock vehicle data
+  const availableVehicles = [
+    { id: 'V001', number: 'MH-12-AB-1234', type: 'Tractor', status: 'Available' },
+    { id: 'V002', number: 'MH-12-CD-5678', type: 'Truck', status: 'Available' },
+    { id: 'V003', number: 'MH-12-EF-9012', type: 'Van', status: 'Available' },
+    { id: 'V004', number: 'MH-12-GH-3456', type: 'Pickup', status: 'Available' },
+    { id: 'V005', number: 'MH-12-IJ-7890', type: 'Truck', status: 'Busy' },
+  ];
 
   const getPriorityConfig = (priority: RequestPriority) => {
     switch (priority) {
@@ -983,117 +1058,183 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
               )}
 
               {isExpanded && (
-                <div className="divide-y divide-gray-100">
-                  {groupRequests.map((req) => {
-                    const statusConfig = getStatusConfig(req.status);
-                    const priorityConfig = getPriorityConfig(req.priority);
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Request ID</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Sender Details</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Receiver Details</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Request Details</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Priority</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white">
+                      {groupRequests.map((req) => {
+                        const statusConfig = getStatusConfig(req.status);
+                        const priorityConfig = getPriorityConfig(req.priority);
 
-                    return (
-                      <div key={req.id} className="p-6 hover:bg-gray-50 transition-colors">
-                        <div className="flex items-start gap-6">
-                          <div className="flex-1 space-y-3">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <div className="flex items-center gap-3 mb-2">
-                                  <h4 className="font-semibold text-gray-900 text-lg">{req.requesterName}</h4>
-                                  <span className="text-xs text-gray-500 font-mono">{req.id}</span>
-                                  <span className={cn("px-2.5 py-1 rounded-md text-xs font-medium border", priorityConfig.bg, priorityConfig.color)}>
-                                    {priorityConfig.icon} {req.priority.toUpperCase()}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
-                                  <Phone className="w-3.5 h-3.5" />
-                                  <span>{req.requesterPhone}</span>
-                                </div>
+                        return (
+                          <tr key={req.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-4">
+                              <div className="space-y-1">
+                                <p className="font-mono text-sm font-semibold text-gray-900">{req.id}</p>
+                                <p className="text-xs text-gray-500">User ID: {req.requesterId}</p>
+                                <p className="text-xs text-gray-500">{new Date(req.createdAt).toLocaleString()}</p>
                               </div>
-                              <div className={cn("px-3 py-1.5 rounded-lg text-sm font-medium border", statusConfig.bg, statusConfig.color, statusConfig.border)}>
+                            </td>
+                            
+                            <td className="px-4 py-4">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <User className="w-3.5 h-3.5 text-gray-400" />
+                                  <p className="font-medium text-gray-900">{req.requesterName}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Phone className="w-3.5 h-3.5 text-gray-400" />
+                                  <p className="text-sm text-gray-600">{req.requesterPhone}</p>
+                                </div>
+                                <p className="text-xs text-gray-500">ID: {req.requesterId}</p>
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-4">
+                              <div className="space-y-1">
+                                {req.receiverName ? (
+                                  <>
+                                    <div className="flex items-center gap-2">
+                                      <User className="w-3.5 h-3.5 text-gray-400" />
+                                      <p className="font-medium text-gray-900">{req.receiverName}</p>
+                                    </div>
+                                    <p className="text-sm text-gray-600">{req.receiverDepartment || 'Logistics Dept.'}</p>
+                                    {req.receiverId && <p className="text-xs text-gray-500">ID: {req.receiverId}</p>}
+                                  </>
+                                ) : (
+                                  <p className="text-sm text-gray-500 italic">Not assigned</p>
+                                )}
+                                {req.forwardedBy && (
+                                  <p className="text-xs text-blue-600 mt-2">
+                                    Forwarded by {req.forwardedBy}
+                                  </p>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-4">
+                              <div className="space-y-2 max-w-xs">
+                                <div className="flex items-start gap-2">
+                                  <Truck className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                  <div>
+                                    <p className="text-xs text-gray-500">Vehicle Type</p>
+                                    <p className="text-sm font-medium text-gray-900">{req.vehicleType}</p>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-start gap-2">
+                                  <MapPin className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                                  <div>
+                                    <p className="text-xs text-gray-500">Route</p>
+                                    <p className="text-sm text-gray-900">{req.fromLocation} → {req.toLocation}</p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-start gap-2">
+                                  <CalendarIcon className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                  <div>
+                                    <p className="text-xs text-gray-500">Preferred Date</p>
+                                    <p className="text-sm text-gray-900">{new Date(req.preferredDate).toLocaleDateString()}</p>
+                                  </div>
+                                </div>
+
+                                {req.loadDetails && (
+                                  <div className="flex items-start gap-2">
+                                    <Package className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                                    <div>
+                                      <p className="text-xs text-gray-500">Load</p>
+                                      <p className="text-sm text-gray-900">{req.loadDetails}</p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {req.description && (
+                                  <div className="mt-2 p-2 bg-gray-50 rounded border border-gray-100">
+                                    <p className="text-xs text-gray-600 italic">"{req.description}"</p>
+                                  </div>
+                                )}
+
+                                {req.adminNote && (
+                                  <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-100">
+                                    <p className="text-xs font-semibold text-blue-900 mb-1">Admin Note:</p>
+                                    <p className="text-xs text-blue-700">{req.adminNote}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-4">
+                              <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border", priorityConfig.bg, priorityConfig.color)}>
+                                <span>{priorityConfig.icon}</span>
+                                <span>{req.priority.toUpperCase()}</span>
+                              </span>
+                            </td>
+
+                            <td className="px-4 py-4">
+                              <span className={cn("inline-flex px-3 py-1.5 rounded-lg text-xs font-medium border", statusConfig.bg, statusConfig.color, statusConfig.border)}>
                                 {statusConfig.label}
-                              </div>
-                            </div>
+                              </span>
+                            </td>
 
-                            <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
-                              <div className="flex items-center gap-2 flex-1">
-                                <MapPin className="w-4 h-4 text-green-600" />
-                                <div>
-                                  <p className="text-xs text-gray-500">From</p>
-                                  <p className="font-medium text-gray-900">{req.fromLocation}</p>
-                                </div>
+                            <td className="px-4 py-4">
+                              <div className="flex flex-col gap-2 min-w-[140px]">
+                                {req.status === 'pending' && req.receiverId !== 'ADMIN' && (
+                                  <button
+                                    onClick={() => {
+                                      // Send request to admin for review
+                                      toast.success('Request sent to Admin for review');
+                                    }}
+                                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                                  >
+                                    <FileText className="w-3.5 h-3.5" />
+                                    Send to Admin Request
+                                  </button>
+                                )}
+                                {req.status === 'pending' && req.receiverId === 'ADMIN' && (
+                                  <>
+                                    <button
+                                      onClick={() => onApprove(req.id)}
+                                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                                    >
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      Approve
+                                    </button>
+                                    <button
+                                      onClick={() => onReject(req.id)}
+                                      className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium transition-colors"
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
+                                {req.status === 'approved' && (
+                                  <button 
+                                    onClick={() => handleOpenCreatePlan(req)}
+                                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium"
+                                  >
+                                    Create Plan
+                                  </button>
+                                )}
                               </div>
-                              <ChevronRight className="w-5 h-5 text-gray-400" />
-                              <div className="flex items-center gap-2 flex-1">
-                                <MapPin className="w-4 h-4 text-red-600" />
-                                <div>
-                                  <p className="text-xs text-gray-500">To</p>
-                                  <p className="font-medium text-gray-900">{req.toLocation}</p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-4">
-                              <div className="flex items-center gap-2">
-                                <Truck className="w-4 h-4 text-gray-400" />
-                                <div>
-                                  <p className="text-xs text-gray-500">Vehicle Type</p>
-                                  <p className="text-sm font-medium text-gray-900">{req.vehicleType}</p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <CalendarIcon className="w-4 h-4 text-gray-400" />
-                                <div>
-                                  <p className="text-xs text-gray-500">Preferred Date</p>
-                                  <p className="text-sm font-medium text-gray-900">{new Date(req.preferredDate).toLocaleDateString()}</p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Package className="w-4 h-4 text-gray-400" />
-                                <div>
-                                  <p className="text-xs text-gray-500">Load</p>
-                                  <p className="text-sm font-medium text-gray-900">{req.loadDetails || 'Standard'}</p>
-                                </div>
-                              </div>
-                            </div>
-
-                            {req.description && (
-                              <div className="pt-2">
-                                <p className="text-sm text-gray-600 italic">"{req.description}"</p>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex flex-col gap-2 min-w-[140px]">
-                            {req.status === 'pending' && (
-                              <>
-                                <button
-                                  onClick={() => onApprove(req.id)}
-                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-                                >
-                                  <CheckCircle2 className="w-4 h-4" />
-                                  Approve
-                                </button>
-                                <button
-                                  onClick={() => onReject(req.id)}
-                                  className="px-4 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium transition-colors"
-                                >
-                                  Reject
-                                </button>
-                              </>
-                            )}
-                            {req.status === 'approved' && (
-                              <button className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium">
-                                Create Plan
-                              </button>
-                            )}
-                            <button className="px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg text-sm font-medium">
-                              Details
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
 
                   {groupRequests.length === 0 && (
-                    <div className="p-12 text-center text-gray-500">
+                    <div className="p-12 text-center text-gray-500 bg-white">
                       <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                       <p>No requests in this category</p>
                     </div>
@@ -1111,6 +1252,155 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
           </div>
         )}
       </div>
+
+      {/* Create Plan Modal */}
+      {isCreatePlanModalOpen && selectedRequest && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-3xl rounded-xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-xl text-gray-900">Create Logistics Plan</h3>
+                <p className="text-sm text-gray-600 mt-1">Request ID: {selectedRequest.id}</p>
+              </div>
+              <button 
+                onClick={handleCloseCreatePlan}
+                className="w-10 h-10 bg-white hover:bg-gray-100 rounded-lg flex items-center justify-center transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-600" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Request Summary */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="font-semibold text-blue-900 mb-3">Request Summary</h4>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-blue-600">Requester:</p>
+                    <p className="font-medium text-blue-900">{selectedRequest.requesterName}</p>
+                  </div>
+                  <div>
+                    <p className="text-blue-600">Vehicle Type:</p>
+                    <p className="font-medium text-blue-900">{selectedRequest.vehicleType}</p>
+                  </div>
+                  <div>
+                    <p className="text-blue-600">Route:</p>
+                    <p className="font-medium text-blue-900">{selectedRequest.fromLocation} → {selectedRequest.toLocation}</p>
+                  </div>
+                  <div>
+                    <p className="text-blue-600">Preferred Date:</p>
+                    <p className="font-medium text-blue-900">{new Date(selectedRequest.preferredDate).toLocaleDateString()}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Vehicle Selection */}
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Truck className="w-5 h-5" />
+                  Select Vehicle(s)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {availableVehicles.map(vehicle => (
+                    <button
+                      key={vehicle.id}
+                      onClick={() => toggleVehicleSelection(vehicle.id)}
+                      disabled={vehicle.status === 'Busy'}
+                      className={cn(
+                        "p-4 rounded-lg border-2 text-left transition-all",
+                        selectedVehicles.includes(vehicle.id)
+                          ? "border-slate-900 bg-slate-50"
+                          : "border-gray-200 bg-white hover:border-gray-300",
+                        vehicle.status === 'Busy' && "opacity-50 cursor-not-allowed"
+                      )}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-semibold text-gray-900">{vehicle.number}</p>
+                        {selectedVehicles.includes(vehicle.id) && (
+                          <CheckCircle2 className="w-5 h-5 text-slate-900" />
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">{vehicle.type}</span>
+                        <span className={cn(
+                          "px-2 py-0.5 rounded text-xs font-medium",
+                          vehicle.status === 'Available' 
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-red-100 text-red-700"
+                        )}>
+                          {vehicle.status}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Plan Details */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-900">Plan Details</h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Driver Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={planDetails.driver}
+                      onChange={(e) => setPlanDetails({...planDetails, driver: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                      placeholder="Enter driver name"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Start Date <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={planDetails.startDate}
+                      onChange={(e) => setPlanDetails({...planDetails, startDate: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                      min={new Date().toISOString().split('T')[0]}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Additional Notes (Optional)
+                  </label>
+                  <textarea
+                    value={planDetails.notes}
+                    onChange={(e) => setPlanDetails({...planDetails, notes: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none resize-none"
+                    rows={3}
+                    placeholder="Add any special instructions or notes..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 bg-gray-50 border-t border-gray-200 flex gap-3">
+              <button
+                onClick={handleCloseCreatePlan}
+                className="flex-1 px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreatePlan}
+                className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-lg font-semibold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-5 h-5" />
+                Create Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1156,6 +1446,18 @@ const buildStopsFromBackendPlan = (plan: Record<string, BackendPlanEntry>): Rout
 const LogisticsManagement = () => {
   const [requests, setRequests] = useState<LogisticsRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(true);
+  const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
+  const [newRequest, setNewRequest] = useState({
+    requesterName: '',
+    requesterPhone: '',
+    vehicleType: '',
+    fromLocation: '',
+    toLocation: '',
+    preferredDate: '',
+    priority: 'medium' as RequestPriority,
+    description: '',
+    loadDetails: '',
+  });
 
   const fetchRequests = async () => {
     setLoadingRequests(true);
@@ -1176,6 +1478,9 @@ const LogisticsManagement = () => {
           description: 'Need tractor for cultivation. Monsoon preparation.',
           loadDetails: 'Cultivation Equipment',
           createdAt: '2026-02-02T10:30:00',
+          receiverId: 'L001',
+          receiverName: 'Logistics Department',
+          receiverDepartment: 'Logistics & Transport',
         },
         {
           id: 'REQ-002',
@@ -1192,6 +1497,12 @@ const LogisticsManagement = () => {
           description: 'Transport harvested produce to storage',
           loadDetails: '5 tons produce',
           createdAt: '2026-02-01T14:00:00',
+          receiverId: 'L002',
+          receiverName: 'Mahesh Rao',
+          receiverDepartment: 'Logistics & Transport',
+          adminNote: 'Approved by Admin. Priority transport required for fresh produce. Assign best available truck.',
+          forwardedBy: 'Admin Sharma',
+          forwardedAt: '2026-02-01T16:00:00',
         },
         {
           id: 'REQ-003',
@@ -1208,6 +1519,12 @@ const LogisticsManagement = () => {
           description: 'Land leveling required',
           loadDetails: 'Heavy machinery',
           createdAt: '2026-02-02T09:00:00',
+          receiverId: 'L003',
+          receiverName: 'Prakash Singh',
+          receiverDepartment: 'Heavy Equipment Dept.',
+          adminNote: 'In progress. JCB-205 assigned. Expected completion: 3 hours.',
+          forwardedBy: 'Admin Kumar',
+          forwardedAt: '2026-02-02T10:00:00',
         },
         {
           id: 'REQ-004',
@@ -1224,6 +1541,12 @@ const LogisticsManagement = () => {
           description: 'Fertilizer delivery',
           loadDetails: '500kg fertilizer',
           createdAt: '2026-01-30T11:00:00',
+          receiverId: 'L004',
+          receiverName: 'Rajesh Patel',
+          receiverDepartment: 'Logistics & Transport',
+          adminNote: 'Completed successfully. Fertilizer delivered on time.',
+          forwardedBy: 'Admin Verma',
+          forwardedAt: '2026-01-30T12:00:00',
         },
       ];
       setRequests(mockRequests);
@@ -1252,6 +1575,53 @@ const LogisticsManagement = () => {
     toast.error('Request rejected');
   };
 
+  const handleSubmitNewRequest = () => {
+    // Validate required fields
+    if (!newRequest.requesterName || !newRequest.requesterPhone || !newRequest.vehicleType || 
+        !newRequest.fromLocation || !newRequest.toLocation || !newRequest.preferredDate || !newRequest.description) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    const newReq: LogisticsRequest = {
+      id: `REQ-${String(requests.length + 1).padStart(3, '0')}`,
+      requesterId: 'U' + String(Math.floor(Math.random() * 1000)).padStart(3, '0'),
+      requesterName: newRequest.requesterName,
+      requesterPhone: newRequest.requesterPhone,
+      vehicleType: newRequest.vehicleType,
+      fromLocation: newRequest.fromLocation,
+      toLocation: newRequest.toLocation,
+      requestDate: new Date().toISOString(),
+      preferredDate: newRequest.preferredDate,
+      status: 'pending', // Pending for admin review
+      priority: newRequest.priority,
+      description: newRequest.description,
+      loadDetails: newRequest.loadDetails,
+      createdAt: new Date().toISOString(),
+      receiverId: 'ADMIN',
+      receiverName: 'Admin Review Pending',
+      receiverDepartment: 'Administration',
+    };
+
+    setRequests(prev => [newReq, ...prev]);
+    setIsNewRequestModalOpen(false);
+    
+    // Reset form
+    setNewRequest({
+      requesterName: '',
+      requesterPhone: '',
+      vehicleType: '',
+      fromLocation: '',
+      toLocation: '',
+      preferredDate: '',
+      priority: 'medium',
+      description: '',
+      loadDetails: '',
+    });
+    
+    toast.success('Request sent to Admin for review!');
+  };
+
   const pendingRequestsCount = requests.filter(r => r.status === 'pending').length;
 
   return (
@@ -1277,6 +1647,13 @@ const LogisticsManagement = () => {
                   </span>
                 </div>
               )}
+              <button
+                onClick={() => setIsNewRequestModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
+              >
+                <FileText className="w-4 h-4" />
+                Send to Admin Request
+              </button>
             </div>
           </div>
         </div>
@@ -1298,6 +1675,178 @@ const LogisticsManagement = () => {
           />
         )}
       </div>
+
+      {/* Send to Admin Request Modal */}
+      {isNewRequestModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-xl text-gray-900">Send Request to Admin</h3>
+                <p className="text-sm text-gray-600 mt-1">Submit a logistics request for admin approval</p>
+              </div>
+              <button 
+                onClick={() => setIsNewRequestModalOpen(false)}
+                className="w-10 h-10 bg-white hover:bg-gray-100 rounded-lg flex items-center justify-center transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-600" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Requester Details */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Requester Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newRequest.requesterName}
+                    onChange={(e) => setNewRequest({...newRequest, requesterName: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                    placeholder="Enter your name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Phone Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={newRequest.requesterPhone}
+                    onChange={(e) => setNewRequest({...newRequest, requesterPhone: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                    placeholder="+91 98765 43210"
+                  />
+                </div>
+              </div>
+
+              {/* Vehicle and Priority Details */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Vehicle Type <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newRequest.vehicleType}
+                    onChange={(e) => setNewRequest({...newRequest, vehicleType: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                  >
+                    <option value="">Select vehicle type</option>
+                    <option value="Tractor">Tractor</option>
+                    <option value="Truck">Truck</option>
+                    <option value="Van">Van</option>
+                    <option value="Pickup">Pickup</option>
+                    <option value="Heavy Equipment">Heavy Equipment</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Priority <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newRequest.priority}
+                    onChange={(e) => setNewRequest({...newRequest, priority: e.target.value as RequestPriority})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Location Details */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    From Location <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newRequest.fromLocation}
+                    onChange={(e) => setNewRequest({...newRequest, fromLocation: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                    placeholder="e.g., Plant A, Warehouse 1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    To Location <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newRequest.toLocation}
+                    onChange={(e) => setNewRequest({...newRequest, toLocation: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                    placeholder="e.g., Field 12-B, Hub 3"
+                  />
+                </div>
+              </div>
+
+              {/* Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Preferred Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={newRequest.preferredDate}
+                  onChange={(e) => setNewRequest({...newRequest, preferredDate: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={newRequest.description}
+                  onChange={(e) => setNewRequest({...newRequest, description: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none resize-none"
+                  rows={3}
+                  placeholder="Describe the purpose and requirements of this request..."
+                />
+              </div>
+
+              {/* Load Details */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Load Details (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={newRequest.loadDetails}
+                  onChange={(e) => setNewRequest({...newRequest, loadDetails: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                  placeholder="e.g., Cultivation Equipment, 5 tons produce, 200 bags fertilizer"
+                />
+              </div>
+            </div>
+
+            <div className="p-6 bg-gray-50 border-t border-gray-200 flex gap-3">
+              <button
+                onClick={() => setIsNewRequestModalOpen(false)}
+                className="flex-1 px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitNewRequest}
+                className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-lg font-semibold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+              >
+                <FileText className="w-5 h-5" />
+                Send to Admin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
