@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { Search, Filter, Users, MapPin, Phone, FileText, ShieldCheck, Map as MapIcon, NotebookText, Wallet, Check, Flag } from 'lucide-react';
 import { MapContainer, TileLayer, Polygon, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
+import * as L from 'leaflet';
 import iconUrl from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 import { Input } from '@/components/ui/input';
@@ -253,7 +253,7 @@ const Farmers = () => {
     return (
       <Dialog>
         <DialogTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-9 w-9">
+          <Button className="h-9 w-9 hover:bg-gray-100 bg-transparent p-0">
             {icon}
           </Button>
         </DialogTrigger>
@@ -317,7 +317,7 @@ const Farmers = () => {
                     {docs && (docs.agreement?.url || docs.agreement_file?.url || docs?.agreement_url) ? (
                       <div className="flex items-center gap-2">
                         <a href={docs.agreement?.url || docs.agreement_file?.url || docs?.agreement_url} target="_blank" rel="noreferrer">
-                          <Button size="sm" variant="outline">View Agreement</Button>
+                          <Button className="h-8 px-3 text-sm border border-gray-300 bg-white hover:bg-gray-50">View Agreement</Button>
                         </a>
                         <Check className="w-4 h-4 text-green-600" />
                       </div>
@@ -376,7 +376,9 @@ const Farmers = () => {
                         <span>Documents</span>
                       </div>
                       <div className="space-y-2">
-                        {Object.entries(documents).map(([key, val]) => (
+                        {Object.entries(documents).map(([key, val]) => {
+                          const valTyped = val as any;
+                          return (
                           <div key={key} className="flex items-center justify-between gap-3 rounded-md border p-2">
                             <div className="flex items-center gap-3">
                               <div className="text-sm font-medium">{key.replace(/_/g, ' ')}</div>
@@ -387,20 +389,21 @@ const Farmers = () => {
                                   if (k.length <= 3) return k.replace(/./g, '*');
                                   return k.slice(0,3) + '***********';
                                 }catch{ return '' }
-                              })(val?.s3_key)}</div>
+                              })(valTyped?.s3_key)}</div>
                             </div>
                             <div className="flex items-center gap-2">
-                              {val?.url ? (
-                                <a href={val.url} target="_blank" rel="noreferrer">
-                                  <Button size="sm" variant="outline">View</Button>
+                              {valTyped?.url ? (
+                                <a href={valTyped.url} target="_blank" rel="noreferrer">
+                                  <Button className="h-8 px-3 text-sm border border-gray-300 bg-white hover:bg-gray-50">View</Button>
                                 </a>
                               ) : (
-                                <Button size="sm" variant="outline" disabled>View</Button>
+                                <Button className="h-8 px-3 text-sm border border-gray-300 bg-gray-100" disabled>View</Button>
                               )}
-                              {val?.url && <Check className="w-4 h-4 text-green-600" />}
+                              {valTyped?.url && <Check className="w-4 h-4 text-green-600" />}
                             </div>
                           </div>
-                        ))}
+                        );
+                        })}
                       </div>
                     </div>
                   )}
@@ -452,7 +455,7 @@ const Farmers = () => {
             className="pl-10"
           />
         </div>
-        <Button variant="outline" className="gap-2">
+        <Button className="gap-2 border border-gray-300 bg-white hover:bg-gray-50">
           <Filter className="w-4 h-4" />
           Filter
         </Button>
@@ -500,11 +503,9 @@ const Farmers = () => {
 
                   <TableCell className="text-center">
                     <Button
-                      variant="ghost"
-                      size="icon"
                       onClick={() => toggleFlag(farmer.id)}
                       disabled={!!flagging[farmer.id]}
-                      className={flagged[farmer.id] ? 'text-red-600' : 'text-muted-foreground'}
+                      className={`h-9 w-9 p-0 hover:bg-gray-100 bg-transparent ${flagged[farmer.id] ? 'text-red-600' : 'text-muted-foreground'}`}
                     >
                       <Flag className="h-4 w-4" />
                     </Button>

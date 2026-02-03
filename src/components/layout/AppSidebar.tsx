@@ -21,7 +21,8 @@ import {
   AlertCircle, // Imported AlertCircle icon
   User,
   MoreHorizontal,
-  ClipboardCheck
+  ClipboardCheck,
+  Activity
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -290,6 +291,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavItem to="/cultivation-calendar" icon={Calendar} label="Cultivation Calendar" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/cultivation-master" icon={Sprout} label="Cultivation Master" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/cultivation-plan" icon={Layers} label="Cultivation Plan" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/field-monitoring" icon={Activity} label="Field Monitoring" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
       </nav>

@@ -26,6 +26,7 @@ import RentalRateCard from "./pages/RentalRateCard";
 import ServiceRequest from "./pages/ServiceRequest";
 import FleetChart from "./pages/FleetChart";
 import KhasraFinder from "./pages/khasra_finder";
+import FieldMonitoring from "./pages/FieldMonitoring";
 
 const queryClient = new QueryClient();
 
@@ -47,6 +48,7 @@ const App = () => (
           <Route path="/cultivation-master/*" element={<AppLayout><CultivationMaster /></AppLayout>} />
           <Route path="/cultivation-plan" element={<AppLayout><CultivationPlan /></AppLayout>} />
           <Route path="/cultivation-plan/create" element={<AppLayout><CreateCultivationPlan /></AppLayout>} />
+          <Route path="/field-monitoring" element={<AppLayout><FieldMonitoring /></AppLayout>} />
 
           {/* Harvest & Weighment */}
           <Route path="/harvest-planning" element={<AppLayout><HarvestPlanning /></AppLayout>} />
