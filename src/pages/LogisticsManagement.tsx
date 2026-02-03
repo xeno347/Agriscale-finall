@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { 
   Truck, MapPin, Calendar as CalendarIcon, 
-  Plus, Minus, CheckCircle2, 
+  Plus, CheckCircle2, 
   Trash2, X, User, 
   ArrowLeft, LayoutList, Download, 
   ShieldCheck, AlertTriangle, Clock,
   ChevronRight, Fuel, Navigation, Play,
   Search, Filter, ArrowUpDown, ChevronDown,
-  FileText, Phone, Package, Wrench, Hash
+  FileText, Phone, Package
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -888,13 +888,13 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
 };
 
 // --- REQUESTS SECTION ---
-const RequestsSection = ({ requests, onApprove, onReject }: { 
+const RequestsSection = ({ requests, onApprove, onReject, onUpdateForwardedDepartmentStatus }: { 
   requests: LogisticsRequest[], 
   onApprove: (id: string, note?: string) => void,
-  onReject: (id: string) => void 
+  onReject: (id: string) => void,
+  onUpdateForwardedDepartmentStatus: (id: string, status: ApprovalStageStatus) => void
 }) => {
   const [isAssignResourcesOpen, setIsAssignResourcesOpen] = useState(false);
-  const [assignmentStep, setAssignmentStep] = useState<1 | 2>(1);
   const [assignmentDate, setAssignmentDate] = useState<string | null>(null);
   const [assignmentRequest, setAssignmentRequest] = useState<LogisticsRequest | null>(null);
   const [isApproveNoteModalOpen, setIsApproveNoteModalOpen] = useState(false);
@@ -918,22 +918,16 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
     vehicle_id: string;
   };
 
-  type ApiInventoryItem = {
-    unit?: string;
-    stock?: number;
-    Invent_id?: string;
-    category?: string;
-    item?: string;
-    id?: string;
-  };
-
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
-  const [equipmentCounts, setEquipmentCounts] = useState<Record<string, number>>({});
   const [vehiclesForAssignment, setVehiclesForAssignment] = useState<Asset[]>([]);
   const [isLoadingVehiclesForAssignment, setIsLoadingVehiclesForAssignment] = useState(false);
-  const [inventoryItems, setInventoryItems] = useState<ApiInventoryItem[]>([]);
-  const [isLoadingInventoryItems, setIsLoadingInventoryItems] = useState(false);
   const [isAssigningResources, setIsAssigningResources] = useState(false);
+
+  const toApprovalStageStatus = (raw: any): ApprovalStageStatus | null => {
+    const s = String(raw || '').trim();
+    if (s === 'pending' || s === 'approved' || s === 'approved_and_forwarded' || s === 'rejected') return s;
+    return null;
+  };
 
   const shouldRequireApproveNote = (req: LogisticsRequest) => {
     const first = String(req.first_department || '').trim().toLowerCase();
@@ -975,34 +969,6 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
   const getDayNum = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.getDate();
-  };
-
-  const getInventoryItemId = (item: ApiInventoryItem): string => {
-    return String(item?.id || item?.Invent_id || item?.item || '');
-  };
-
-  const fetchInventoryItems = async () => {
-    setIsLoadingInventoryItems(true);
-    try {
-      const res = await fetch(`${BASE_URL}/inventory_management/get_inventory_items`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data: any = await res.json().catch(() => null);
-      if (!res.ok) {
-        toast.error(data?.message || 'Failed to load inventory items');
-        setInventoryItems([]);
-        return;
-      }
-
-      const items: ApiInventoryItem[] = Array.isArray(data?.inventory_items) ? data.inventory_items : [];
-      setInventoryItems(items);
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to load inventory items');
-      setInventoryItems([]);
-    } finally {
-      setIsLoadingInventoryItems(false);
-    }
   };
 
   const buildVehicleSchedule = (raw: any): Record<string, number> => {
@@ -1127,55 +1093,73 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
     return bT - aT;
   });
 
-  const toggleVehicleSelection = (vId: string) => {
-    setSelectedVehicleIds(prev =>
-      prev.includes(vId) ? prev.filter(id => id !== vId) : [...prev, vId]
-    );
+  const getRequestedLocationForCalendar = (req: LogisticsRequest): string => {
+    const from = String(req.fromLocation || '').trim();
+    const to = String(req.toLocation || '').trim();
+    if (from && to) return `${from} -> ${to}`;
+    return from || to || '';
   };
 
-  const updateEquipmentCount = (eId: string, delta: number, max?: number) => {
-    setEquipmentCounts(prev => {
-      const current = prev[eId] || 0;
-      const boundedMax = typeof max === 'number' && Number.isFinite(max) ? Math.max(0, Math.floor(max)) : undefined;
-      const rawNext = current + delta;
-      const next = Math.max(0, boundedMax !== undefined ? Math.min(boundedMax, rawNext) : rawNext);
-      if (next === 0) {
-        const { [eId]: _, ...rest } = prev;
-        return rest;
-      }
-      return { ...prev, [eId]: next };
+  const updateVehicleCalendarForLogistics = async (vehicleId: string) => {
+    if (!assignmentRequest || !assignmentDate) throw new Error('Missing request/date for assignment');
+
+    const payload = {
+      date: assignmentDate,
+      acres_covered: 0,
+      vehicle_id: vehicleId,
+      block_id: '',
+      activity: 'Logistics Request',
+      farm_id: getRequestedLocationForCalendar(assignmentRequest),
+      description: String(assignmentRequest.description || ''),
+      requester_id: String(assignmentRequest.staff_id || assignmentRequest.requesterId || ''),
+    };
+
+    const res = await fetch(`${BASE_URL}/admin_vehicles/update_vehicle_calander`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
+
+    const data: any = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.message || 'Failed to update vehicle calendar');
+    if (data?.success === false) throw new Error(data?.message || 'Vehicle calendar did not return success');
+    return data;
+  };
+
+  const toggleVehicleSelection = (vId: string) => {
+    // Selection is local-only; backend reservation is done on Confirm Assignment.
+    setSelectedVehicleIds(prev => (
+      prev.includes(vId)
+        ? prev.filter(id => id !== vId)
+        : [...prev, vId]
+    ));
   };
 
   const closeAssignResourcesModal = () => {
     setIsAssignResourcesOpen(false);
-    setAssignmentStep(1);
     setAssignmentDate(null);
     setAssignmentRequest(null);
     setSelectedVehicleIds([]);
-    setEquipmentCounts({});
   };
 
   const handleOpenAssignResources = (req: LogisticsRequest) => {
     const dateKey = toDateKey(req.preferredDate || req.requestDate || req.createdAt);
     setAssignmentRequest(req);
     setAssignmentDate(dateKey);
-    setAssignmentStep(1);
     setSelectedVehicleIds([]);
-    setEquipmentCounts({});
     setIsAssignResourcesOpen(true);
     fetchVehiclesForAssignment();
-    fetchInventoryItems();
   };
 
   const chartDates = assignmentDate ? Array.from({ length: 5 }, (_, i) => addDays(assignmentDate, i)) : [];
 
-  const VehicleAvailabilityRow = ({ asset, isSelected, onSelect }: { asset: Asset, isSelected: boolean, onSelect: () => void }) => {
+  const VehicleAvailabilityRow = ({ asset, isSelected, onSelect, disabled }: { asset: Asset, isSelected: boolean, onSelect: () => void, disabled?: boolean }) => {
     return (
       <div
-        onClick={onSelect}
+        onClick={disabled ? undefined : onSelect}
         className={cn(
           "grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 p-2 rounded-lg border transition-all cursor-pointer items-center group",
+          disabled ? "opacity-60 cursor-not-allowed" : "",
           isSelected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/50"
         )}
       >
@@ -1222,58 +1206,6 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
     );
   };
 
-  const EquipmentQuantityRow = ({ item, count }: { item: ApiInventoryItem; count: number }) => {
-    const id = getInventoryItemId(item);
-    const title = item?.item || id || 'Item';
-    const category = item?.category || 'Inventory';
-    const unit = item?.unit || '';
-    const maxQty = Number(item?.stock ?? 0);
-    const maxSafe = Number.isFinite(maxQty) ? Math.max(0, Math.floor(maxQty)) : 0;
-
-    return (
-      <div className={cn(
-        "flex items-center justify-between p-3 rounded-lg border transition-all",
-        count > 0 ? "border-orange-200 bg-orange-50" : "border-border hover:border-gray-300 bg-white"
-      )}>
-        <div className="flex items-center gap-3">
-          <div className={cn(
-            "p-2 rounded-md border shadow-sm",
-            count > 0 ? "bg-orange-100 text-orange-700 border-orange-200" : "bg-gray-50 text-muted-foreground"
-          )}>
-            <Wrench className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-foreground">{title}</div>
-            <div className="text-[10px] text-muted-foreground">
-              {category}
-              {maxSafe > 0 ? ` • Available: ${maxSafe}${unit ? ` ${unit}` : ''}` : ' • Out of stock'}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 bg-white rounded-md border border-gray-200 p-1 shadow-sm">
-          <button
-            type="button"
-            onClick={() => updateEquipmentCount(id, -1, maxSafe)}
-            disabled={count === 0}
-            className="p-1 hover:bg-gray-100 rounded text-gray-500 disabled:opacity-30 disabled:hover:bg-transparent"
-          >
-            <Minus className="w-3 h-3" />
-          </button>
-          <span className="w-4 text-center text-sm font-bold text-foreground">{count}</span>
-          <button
-            type="button"
-            onClick={() => updateEquipmentCount(id, 1, maxSafe)}
-            disabled={maxSafe === 0 || count >= maxSafe}
-            className="p-1 hover:bg-gray-100 rounded text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"
-          >
-            <Plus className="w-3 h-3" />
-          </button>
-        </div>
-      </div>
-    );
-  };
-
   const handleConfirmResources = async () => {
     if (!assignmentRequest || !assignmentDate) return;
     if (selectedVehicleIds.length === 0) {
@@ -1283,8 +1215,19 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
 
     setIsAssigningResources(true);
     try {
-      // Note: backend endpoint for persisting logistics "operation" creation wasn't provided.
-      // This keeps the *exact* CultivationCalendar Assign Resources UI + vehicle/inventory APIs.
+      // Reserve vehicles on the backend *when confirming*.
+      // Backend endpoint for persisting a separate logistics "operation" wasn't provided.
+      let lastResp: any = null;
+      for (const vehicleId of selectedVehicleIds) {
+        // eslint-disable-next-line no-await-in-loop
+        lastResp = await updateVehicleCalendarForLogistics(vehicleId);
+      }
+
+      if (lastResp?.success === true) {
+        const nextStatus = toApprovalStageStatus(lastResp?.request_status);
+        if (nextStatus) onUpdateForwardedDepartmentStatus(assignmentRequest.id, nextStatus);
+      }
+
       toast.success(`Resources allocated for request ${assignmentRequest.id}`);
       closeAssignResourcesModal();
     } catch (e: any) {
@@ -1526,7 +1469,7 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
             <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
               <div>
                 <h3 className="text-lg font-semibold text-foreground">Assign Resources</h3>
-                <p className="text-sm text-muted-foreground">Step {assignmentStep} of 2 • {assignmentStep === 1 ? 'Vehicle allocation' : 'Equipment selection'} • {new Date(assignmentDate).toDateString()}</p>
+                <p className="text-sm text-muted-foreground">Vehicle allocation • {new Date(assignmentDate).toDateString()}</p>
                 {assignmentRequest && (
                   <p className="text-xs text-muted-foreground mt-1">Request ID: <span className="font-medium text-foreground">{assignmentRequest.id}</span></p>
                 )}
@@ -1535,41 +1478,28 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
             </div>
 
             <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6 space-y-8">
-              {assignmentStep === 1 ? (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Truck className="w-4 h-4" /> Select Vehicles</h4>
-                    {selectedVehicleIds.length > 0 && <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">{selectedVehicleIds.length} Selected</span>}
-                  </div>
-                  <div className="overflow-x-auto bg-white rounded-lg border border-border shadow-sm p-4">
-                    <div className="min-w-[600px]">
-                      <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4 text-xs font-semibold text-muted-foreground">
-                        <div className="self-end pb-2">Vehicle Name</div>
-                        {chartDates.map(date => (
-                          <div key={date} className={cn("text-center pb-2 border-b-2", date === assignmentDate ? "border-primary text-primary" : "border-transparent")}>
-                            <div className="text-[10px] uppercase">{getDayName(date)}</div>
-                            <div>{getDayNum(date)}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="space-y-2">
-                        {isLoadingVehiclesForAssignment ? <div className="p-4 text-sm text-muted-foreground">Loading vehicles…</div> : vehiclesForAssignment.length === 0 ? <div className="p-4 text-sm text-muted-foreground">No vehicles found.</div> : vehiclesForAssignment.map(vehicle => <VehicleAvailabilityRow key={vehicle.id} asset={vehicle} isSelected={selectedVehicleIds.includes(vehicle.id)} onSelect={() => toggleVehicleSelection(vehicle.id)} />)}
-                      </div>
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Truck className="w-4 h-4" /> Select Vehicles</h4>
+                  {selectedVehicleIds.length > 0 && <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">{selectedVehicleIds.length} Selected</span>}
+                </div>
+                <div className="overflow-x-auto bg-white rounded-lg border border-border shadow-sm p-4">
+                  <div className="min-w-[600px]">
+                    <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4 text-xs font-semibold text-muted-foreground">
+                      <div className="self-end pb-2">Vehicle Name</div>
+                      {chartDates.map(date => (
+                        <div key={date} className={cn("text-center pb-2 border-b-2", date === assignmentDate ? "border-primary text-primary" : "border-transparent")}>
+                          <div className="text-[10px] uppercase">{getDayName(date)}</div>
+                          <div>{getDayNum(date)}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-2">
+                      {isLoadingVehiclesForAssignment ? <div className="p-4 text-sm text-muted-foreground">Loading vehicles…</div> : vehiclesForAssignment.length === 0 ? <div className="p-4 text-sm text-muted-foreground">No vehicles found.</div> : vehiclesForAssignment.map(vehicle => <VehicleAvailabilityRow key={vehicle.id} asset={vehicle} isSelected={selectedVehicleIds.includes(vehicle.id)} disabled={isAssigningResources} onSelect={() => { toggleVehicleSelection(vehicle.id); }} />)}
                     </div>
                   </div>
                 </div>
-              ) : (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Wrench className="w-4 h-4" /> Select Equipment</h4>
-                    {Object.values(equipmentCounts).reduce((a, b) => a + b, 0) > 0 && <span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200"><Hash className="w-3 h-3" />{Object.values(equipmentCounts).reduce((a, b) => a + b, 0)} Total</span>}
-                  </div>
-                  <div className="text-xs text-muted-foreground mb-3">Vehicles allocated: <span className="font-semibold text-foreground">{selectedVehicleIds.length}</span></div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {isLoadingInventoryItems ? <div className="col-span-full p-4 text-sm text-muted-foreground">Loading inventory items…</div> : inventoryItems.length === 0 ? <div className="col-span-full p-4 text-sm text-muted-foreground">No inventory items found.</div> : inventoryItems.filter((it) => !!getInventoryItemId(it)).map((it) => { const id = getInventoryItemId(it); return <EquipmentQuantityRow key={id} item={it} count={equipmentCounts[id] || 0} />; })}
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
 
             <div className="p-4 border-t border-border bg-white flex justify-between items-center">
@@ -1579,16 +1509,12 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
               </div>
               <div className="flex gap-2">
                 <button onClick={closeAssignResourcesModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Cancel</button>
-                {assignmentStep === 2 && <button type="button" onClick={() => setAssignmentStep(1)} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Back</button>}
-                {assignmentStep === 1 ? (
-                  <button type="button" onClick={() => setAssignmentStep(2)} disabled={selectedVehicleIds.length === 0} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors", selectedVehicleIds.length > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed")}>
-                    Next
-                  </button>
-                ) : (
-                  <button type="button" onClick={handleConfirmResources} disabled={isAssigningResources} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-primary text-primary-foreground hover:bg-primary/90">
-                    {isAssigningResources ? 'Assigning…' : 'Confirm Assignment'}
-                  </button>
-                )}
+                <button type="button" onClick={handleConfirmResources} disabled={isAssigningResources || selectedVehicleIds.length === 0} className={cn(
+                  "px-4 py-2 text-sm font-medium rounded-md transition-colors",
+                  (selectedVehicleIds.length > 0 && !isAssigningResources) ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed"
+                )}>
+                  {isAssigningResources ? 'Assigning…' : 'Confirm Assignment'}
+                </button>
               </div>
             </div>
           </div>
@@ -1826,6 +1752,15 @@ const LogisticsManagement = () => {
     fetchRequests();
   }, []);
 
+  const handleUpdateForwardedDepartmentStatus = (id: string, status: ApprovalStageStatus) => {
+    setRequests(prev => prev.map((req) => {
+      if (req.id !== id) return req;
+      const next: LogisticsRequest = { ...req, forwarded_department_approval_status: status };
+      next.status = deriveRequestStatus(next);
+      return next;
+    }));
+  };
+
   const handleApproveRequest = async (id: string, note?: string) => {
     const current = requests.find(r => r.id === id);
     if (!current) return;
@@ -2007,6 +1942,7 @@ const LogisticsManagement = () => {
             requests={requests} 
             onApprove={handleApproveRequest}
             onReject={handleRejectRequest}
+            onUpdateForwardedDepartmentStatus={handleUpdateForwardedDepartmentStatus}
           />
         )}
       </div>
