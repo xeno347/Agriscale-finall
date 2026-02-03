@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { MapContainer, TileLayer, Marker, Popup, Polygon } from 'react-leaflet';
+import * as L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { 
   MapPin, 
@@ -13,1053 +13,643 @@ import {
   Wind, 
   Sun, 
   AlertTriangle, 
-  TrendingUp, 
-  TrendingDown,
+  TrendingUp,
   Calendar,
   Activity,
   Beaker,
   Sprout,
-  Camera,
-  CheckCircle,
-  Clock,
   Eye,
-  Plus,
-  Search,
-  Filter,
   Wheat,
-  Tractor
+  Tractor,
+  Users,
+  Phone,
+  Mail,
+  Building,
+  Clock,
+  DollarSign,
+  BarChart3,
+  Zap,
+  X
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-interface FieldData {
+interface FarmLocation {
   id: string;
   name: string;
-  location: string;
-  area: number;
-  cropType: string;
-  plantingDate: string;
-  expectedHarvestDate: string;
-  currentStage: string;
-  soilMoisture: number;
-  temperature: number;
-  humidity: number;
-  phLevel: number;
-  nitrogenLevel: number;
-  phosphorusLevel: number;
-  potassiumLevel: number;
-  pestActivity: 'low' | 'medium' | 'high';
-  diseaseRisk: 'low' | 'medium' | 'high';
-  irrigationStatus: 'scheduled' | 'active' | 'completed' | 'overdue';
-  weatherCondition: 'sunny' | 'cloudy' | 'rainy' | 'stormy';
+  coordinates: [number, number];
+  boundary: [number, number][];
+  owner: string;
+  contactPerson: string;
+  phone: string;
+  email: string;
+  totalArea: number;
+  cultivableArea: number;
+  cropTypes: string[];
+  currentCrops: Array<{ crop: string; area: number; status: string }>;
+  soilType: string;
+  irrigationType: string;
+  waterSource: string;
+  numberOfPlots: number;
+  facilities: string[];
+  equipment: string[];
+  workforce: number;
+  established: string;
   lastInspection: string;
   nextInspection: string;
+  certifications: string[];
+  avgYield: string;
+  revenue: string;
+  expenses: string;
   healthScore: number;
-  yieldProjection: number;
   alerts: string[];
-  observations: Array<{
-    id: string;
-    date: string;
-    type: string;
-    description: string;
-    severity: 'low' | 'medium' | 'high';
-    images?: string[];
-  }>;
+  notes: string;
 }
+
+const farmLocations: FarmLocation[] = [
+  {
+    id: '1',
+    name: 'Amrit Dairy Farm',
+    coordinates: [28.6139, 77.2090],
+    boundary: [
+      [28.6145, 77.2085],
+      [28.6145, 77.2095],
+      [28.6133, 77.2095],
+      [28.6133, 77.2085],
+    ],
+    owner: 'Amrit Singh',
+    contactPerson: 'Rajesh Kumar',
+    phone: '+91 98765 43210',
+    email: 'contact@amritdairy.com',
+    totalArea: 44,
+    cultivableArea: 40.8,
+    cropTypes: ['Wheat', 'Rice', 'Cotton', 'Vegetables'],
+    currentCrops: [
+      { crop: 'Wheat', area: 15, status: 'Growing' },
+      { crop: 'Rice', area: 12, status: 'Harvesting' },
+      { crop: 'Cotton', area: 8, status: 'Flowering' },
+      { crop: 'Vegetables', area: 5.8, status: 'Harvested' }
+    ],
+    soilType: 'Alluvial Loam',
+    irrigationType: 'Drip & Sprinkler',
+    waterSource: 'Borewell, Canal',
+    numberOfPlots: 24,
+    facilities: ['Processing Unit', 'Cold Storage', 'Warehouse', 'Office', 'Worker Housing'],
+    equipment: ['5 Tractors', '3 Harvesters', '2 Sprayers', '4 Pumps', 'Seed Drill'],
+    workforce: 45,
+    established: '2015',
+    lastInspection: '2026-01-28',
+    nextInspection: '2026-02-15',
+    certifications: ['Organic Certified', 'ISO 9001:2015', 'Good Agricultural Practices'],
+    avgYield: '3.5 tons/acre',
+    revenue: '₹85 Lakhs/year',
+    expenses: '₹52 Lakhs/year',
+    healthScore: 92,
+    alerts: ['Irrigation system maintenance due', 'Plot 5 showing pest activity'],
+    notes: 'High-performing farm with excellent soil health and modern infrastructure.'
+  },
+  {
+    id: '2',
+    name: 'Green Valley Farm',
+    coordinates: [28.6200, 77.2150],
+    boundary: [
+      [28.6205, 77.2145],
+      [28.6205, 77.2155],
+      [28.6195, 77.2155],
+      [28.6195, 77.2145],
+    ],
+    owner: 'Harpreet Kaur',
+    contactPerson: 'Sunil Sharma',
+    phone: '+91 98765 43211',
+    email: 'info@greenvalley.com',
+    totalArea: 32,
+    cultivableArea: 28.5,
+    cropTypes: ['Sugarcane', 'Wheat', 'Vegetables'],
+    currentCrops: [
+      { crop: 'Sugarcane', area: 18, status: 'Growing' },
+      { crop: 'Wheat', area: 7, status: 'Sowing' },
+      { crop: 'Vegetables', area: 3.5, status: 'Harvesting' }
+    ],
+    soilType: 'Clay Loam',
+    irrigationType: 'Canal & Borewell',
+    waterSource: 'Canal, 2 Borewells',
+    numberOfPlots: 18,
+    facilities: ['Warehouse', 'Pump House', 'Worker Quarters'],
+    equipment: ['3 Tractors', '1 Harvester', '2 Sprayers', '3 Pumps'],
+    workforce: 28,
+    established: '2018',
+    lastInspection: '2026-01-25',
+    nextInspection: '2026-02-20',
+    certifications: ['Good Agricultural Practices'],
+    avgYield: '3.2 tons/acre',
+    revenue: '₹62 Lakhs/year',
+    expenses: '₹38 Lakhs/year',
+    healthScore: 85,
+    alerts: ['Soil testing recommended for Plot 7'],
+    notes: 'Efficient water management system in place.'
+  },
+  {
+    id: '3',
+    name: 'Sunrise Agro Farm',
+    coordinates: [28.6050, 77.2030],
+    boundary: [
+      [28.6055, 77.2025],
+      [28.6055, 77.2035],
+      [28.6045, 77.2035],
+      [28.6045, 77.2025],
+    ],
+    owner: 'Vikram Malhotra',
+    contactPerson: 'Amit Verma',
+    phone: '+91 98765 43212',
+    email: 'contact@sunriseagro.com',
+    totalArea: 56,
+    cultivableArea: 52,
+    cropTypes: ['Rice', 'Wheat', 'Corn', 'Pulses'],
+    currentCrops: [
+      { crop: 'Rice', area: 25, status: 'Growing' },
+      { crop: 'Wheat', area: 15, status: 'Growing' },
+      { crop: 'Corn', area: 8, status: 'Harvesting' },
+      { crop: 'Pulses', area: 4, status: 'Sowing' }
+    ],
+    soilType: 'Sandy Loam',
+    irrigationType: 'Drip',
+    waterSource: '3 Borewells, Pond',
+    numberOfPlots: 30,
+    facilities: ['Modern Storage', 'Processing Center', 'Laboratory', 'Office Complex', 'Guest House'],
+    equipment: ['7 Tractors', '4 Harvesters', '5 Sprayers', '6 Pumps', 'Drone'],
+    workforce: 65,
+    established: '2012',
+    lastInspection: '2026-02-01',
+    nextInspection: '2026-02-18',
+    certifications: ['Organic Certified', 'ISO 14001:2015', 'Fair Trade'],
+    avgYield: '4.1 tons/acre',
+    revenue: '₹1.2 Crores/year',
+    expenses: '₹68 Lakhs/year',
+    healthScore: 95,
+    alerts: [],
+    notes: 'Award-winning farm with sustainable practices and high productivity.'
+  },
+  {
+    id: '4',
+    name: 'Golden Harvest Farm',
+    coordinates: [28.6100, 77.2200],
+    boundary: [
+      [28.6105, 77.2195],
+      [28.6105, 77.2205],
+      [28.6095, 77.2205],
+      [28.6095, 77.2195],
+    ],
+    owner: 'Manpreet Singh',
+    contactPerson: 'Ravi Patel',
+    phone: '+91 98765 43213',
+    email: 'hello@goldenharvest.com',
+    totalArea: 28,
+    cultivableArea: 25,
+    cropTypes: ['Vegetables', 'Fruits', 'Herbs'],
+    currentCrops: [
+      { crop: 'Tomatoes', area: 8, status: 'Harvesting' },
+      { crop: 'Potatoes', area: 7, status: 'Growing' },
+      { crop: 'Mangoes', area: 6, status: 'Flowering' },
+      { crop: 'Herbs', area: 4, status: 'Growing' }
+    ],
+    soilType: 'Red Soil',
+    irrigationType: 'Sprinkler',
+    waterSource: 'Borewell, Rainwater Harvesting',
+    numberOfPlots: 15,
+    facilities: ['Packhouse', 'Cold Storage', 'Nursery', 'Greenhouse'],
+    equipment: ['2 Tractors', '3 Sprayers', '2 Pumps', 'Sorting Machine'],
+    workforce: 22,
+    established: '2019',
+    lastInspection: '2026-01-30',
+    nextInspection: '2026-02-25',
+    certifications: ['Organic Certified', 'GlobalGAP'],
+    avgYield: '5.2 tons/acre',
+    revenue: '₹48 Lakhs/year',
+    expenses: '₹29 Lakhs/year',
+    healthScore: 88,
+    alerts: ['Greenhouse temperature control needs attention'],
+    notes: 'Specialized in high-value crops with direct market connections.'
+  }
+];
 
 interface FieldMonitoringProps {
   userRole?: 'farm-manager' | 'field-manager';
   regionFilter?: string;
 }
 
-interface PlotData {
-  id: number;
-  plotNumber: string;
-  name: string;
-  area: string;
-  status: 'idle' | 'ploughing' | 'harvesting' | 'irrigation' | 'planting' | 'fertilizing' | 'pest-control';
-  crop: string;
-  completion: number;
-  lastActivity: string;
-  nextActivity: string;
-  position: { x: number; y: number; width: number; height: number };
-  alerts?: string[];
-}
-
-// Clean grid layout matching the image
-const plotsData: PlotData[] = [
-  // Top row
-  { id: 18, plotNumber: '18', name: 'PLOT NO. 18', area: '1.05acre', status: 'idle', crop: 'Wheat', completion: 0, lastActivity: 'Field prepared', nextActivity: 'Sowing', position: { x: 290, y: 80, width: 110, height: 80 } },
-  { id: 13, plotNumber: '13', name: 'PLOT NO. 13', area: '1.3acre', status: 'harvesting', crop: 'Rice', completion: 85, lastActivity: 'Crop matured', nextActivity: 'Storage', position: { x: 420, y: 80, width: 130, height: 80 } },
-  { id: 7, plotNumber: '07', name: 'PLOT NO. 07', area: '1.35acre', status: 'irrigation', crop: 'Cotton', completion: 60, lastActivity: 'Fertilizer applied', nextActivity: 'Monitoring', position: { x: 570, y: 80, width: 130, height: 80 } },
-
-  // Second row  
-  { id: 17, plotNumber: '17', name: 'PLOT NO. 17', area: '1.65acre', status: 'ploughing', crop: 'Corn', completion: 25, lastActivity: 'Harvest completed', nextActivity: 'Land preparation', position: { x: 290, y: 180, width: 110, height: 90 } },
-  { id: 12, plotNumber: '12', name: 'PLOT NO. 12', area: '2.50acre', status: 'fertilizing', crop: 'Soybean', completion: 70, lastActivity: 'Soil testing', nextActivity: 'Growth monitoring', position: { x: 420, y: 180, width: 130, height: 90 } },
-  { id: 5, plotNumber: '05', name: 'PLOT NO. 05', area: '1.28acre', status: 'pest-control', crop: 'Vegetables', completion: 85, lastActivity: 'Pest detected', nextActivity: 'Treatment application', position: { x: 570, y: 180, width: 65, height: 90 } },
-  { id: 6, plotNumber: '06', name: 'PLOT NO. 06', area: '1.54acre', status: 'idle', crop: 'Millet', completion: 0, lastActivity: 'Field cleared', nextActivity: 'Soil preparation', position: { x: 655, y: 180, width: 65, height: 90 } },
-
-  // Third row
-  { id: 16, plotNumber: '16', name: 'PLOT NO. 16', area: '2.63acre', status: 'harvesting', crop: 'Sugarcane', completion: 45, lastActivity: 'Quality check', nextActivity: 'Processing', position: { x: 290, y: 290, width: 110, height: 80 } },
-  { id: 11, plotNumber: '11', name: 'PLOT NO. 11', area: '2.25acre', status: 'irrigation', crop: 'Wheat', completion: 55, lastActivity: 'Growth stage 3', nextActivity: 'Fertilizer application', position: { x: 420, y: 290, width: 130, height: 80 } },
-  { id: 3, plotNumber: '03', name: 'PLOT NO. 03', area: '1.11acre', status: 'planting', crop: 'Rice', completion: 30, lastActivity: 'Seed preparation', nextActivity: 'Initial irrigation', position: { x: 570, y: 290, width: 65, height: 80 } },
-  { id: 4, plotNumber: '04', name: 'PLOT NO. 04', area: '1.21acre', status: 'idle', crop: 'Cotton', completion: 0, lastActivity: 'Field inspection', nextActivity: 'Sowing preparation', position: { x: 655, y: 290, width: 65, height: 80 } },
-
-  // Fourth row
-  { id: 10, plotNumber: '10', name: 'PLOT NO. 10', area: '1.43acre', status: 'ploughing', crop: 'Corn', completion: 20, lastActivity: 'Previous crop removed', nextActivity: 'Deep ploughing', position: { x: 420, y: 390, width: 110, height: 80 } },
-  { id: 1, plotNumber: '01', name: 'PLOT NO. 01', area: '0.65acre', status: 'fertilizing', crop: 'Soybean', completion: 75, lastActivity: 'Nutrient analysis', nextActivity: 'Growth assessment', position: { x: 550, y: 390, width: 85, height: 80 } },
-  { id: 2, plotNumber: '02', name: 'PLOT NO. 02', area: '0.74acre', status: 'harvesting', crop: 'Vegetables', completion: 90, lastActivity: 'Quality inspection', nextActivity: 'Market preparation', position: { x: 655, y: 390, width: 65, height: 80 } },
-
-  // Fifth row
-  { id: 15, plotNumber: '15', name: 'PLOT NO. 15', area: '1.64acre', status: 'irrigation', crop: 'Millet', completion: 35, lastActivity: 'Germination check', nextActivity: 'Nutrient supply', position: { x: 290, y: 490, width: 110, height: 70 } },
-  { id: 9, plotNumber: '09', name: 'PLOT NO. 09', area: '2.57acre', status: 'pest-control', crop: 'Sugarcane', completion: 60, lastActivity: 'Pest monitoring', nextActivity: 'Organic treatment', position: { x: 420, y: 490, width: 130, height: 70 } },
-
-  // Sixth row
-  { id: 14, plotNumber: '14', name: 'PLOT NO. 14', area: '1.90acre', status: 'planting', crop: 'Wheat', completion: 40, lastActivity: 'Seed selection', nextActivity: 'Sowing completion', position: { x: 290, y: 580, width: 110, height: 60 } },
-  { id: 8, plotNumber: '08', name: 'PLOT NO. 08', area: '1.35acre', status: 'idle', crop: 'Rice', completion: 0, lastActivity: 'Field survey', nextActivity: 'Soil testing', position: { x: 420, y: 580, width: 130, height: 60 } },
-
-  // Left side plots
-  { id: 21, plotNumber: '21B', name: 'PLOT NO. 21B', area: '2.11acre', status: 'harvesting', crop: 'Cotton', completion: 80, lastActivity: 'Fiber quality check', nextActivity: 'Ginning preparation', position: { x: 100, y: 250, width: 80, height: 120 } },
-  { id: 22, plotNumber: '21A', name: 'PLOT NO. 21A', area: '2.30acre', status: 'irrigation', crop: 'Corn', completion: 50, lastActivity: 'Tasseling stage', nextActivity: 'Pollination support', position: { x: 190, y: 250, width: 80, height: 120 } },
-  { id: 19, plotNumber: '19', name: 'PLOT NO. 19', area: '2.45acre', status: 'ploughing', crop: 'Soybean', completion: 15, lastActivity: 'Residue removal', nextActivity: 'Soil conditioning', position: { x: 100, y: 380, width: 80, height: 100 } },
-  { id: 20, plotNumber: '20B', name: 'PLOT NO. 20B', area: '1.84acre', status: 'fertilizing', crop: 'Vegetables', completion: 65, lastActivity: 'Nutrient deficiency detected', nextActivity: 'Balanced fertilization', position: { x: 190, y: 380, width: 80, height: 100 } },
-  { id: 23, plotNumber: '20A', name: 'PLOT NO. 20A', area: '1.89acre', status: 'pest-control', crop: 'Millet', completion: 85, lastActivity: 'Integrated pest management', nextActivity: 'Harvest preparation', position: { x: 100, y: 490, width: 80, height: 90 } },
-  { id: 24, plotNumber: '19A', name: 'PLOT NO. 19A', area: '1.86acre', status: 'planting', crop: 'Sugarcane', completion: 25, lastActivity: 'Seed cane preparation', nextActivity: 'Planting completion', position: { x: 190, y: 490, width: 80, height: 90 } }
-];
-
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case 'harvesting': return 'bg-yellow-500';
-    case 'ploughing': return 'bg-orange-500';
-    case 'irrigation': return 'bg-blue-500';
-    case 'planting': return 'bg-green-500';
-    case 'fertilizing': return 'bg-purple-500';
-    case 'pest-control': return 'bg-red-500';
-    default: return 'bg-gray-400';
-  }
-};
-
-const getStatusIcon = (status: string) => {
-  switch (status) {
-    case 'harvesting': return <Wheat className="w-4 h-4" />;
-    case 'irrigation': return <Droplets className="w-4 h-4" />;
-    case 'planting': return <Sprout className="w-4 h-4" />;
-    case 'ploughing': return <Tractor className="w-4 h-4" />;
-    case 'pest-control': return <AlertTriangle className="w-4 h-4" />;
-    default: return <CheckCircle className="w-4 h-4" />;
-  }
-};
-
-// Enhanced Tractor SVG Component
-const TractorIcon = ({ className }: { className?: string }) => (
-  <svg 
-    viewBox="0 0 100 60" 
-    className={className}
-    fill="currentColor"
-  >
-    <rect x="25" y="20" width="35" height="15" rx="2" fill="#22c55e" />
-    <rect x="45" y="10" width="15" height="15" rx="2" fill="#16a34a" />
-    <rect x="50" y="5" width="2" height="8" fill="#374151" />
-    <circle cx="20" cy="40" r="8" fill="#374151" stroke="#1f2937" strokeWidth="2" />
-    <circle cx="20" cy="40" r="4" fill="#6b7280" />
-    <circle cx="65" cy="42" r="12" fill="#374151" stroke="#1f2937" strokeWidth="2" />
-    <circle cx="65" cy="42" r="6" fill="#6b7280" />
-    <rect x="5" y="30" width="15" height="8" rx="1" fill="#dc2626" />
-    <rect x="6" y="32" width="2" height="4" fill="#fbbf24" />
-    <rect x="9" y="32" width="2" height="4" fill="#fbbf24" />
-    <rect x="12" y="32" width="2" height="4" fill="#fbbf24" />
-    <rect x="15" y="32" width="2" height="4" fill="#fbbf24" />
-  </svg>
-);
-
-function InteractiveFarmMap() {
-  const [hoveredPlot, setHoveredPlot] = useState<number | null>(null);
-  const [selectedPlot, setSelectedPlot] = useState<PlotData | null>(null);
-
-  return (
-    <div className="w-full bg-white rounded-lg border overflow-hidden shadow-sm">
-      {/* Header */}
-      <div className="p-6 border-b bg-gradient-to-r from-gray-50 to-white">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-3">AMRIT DAIRY FARM MAP</h1>
-            <div className="grid grid-cols-3 gap-6 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-gray-600 font-medium">TOTAL AREA:</span>
-                <span className="font-bold text-gray-900 text-base">44 Acre</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-gray-600 font-medium">PLOT AREA:</span>
-                <span className="font-bold text-gray-900 text-base">40.80 Acre</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-gray-600 font-medium">ROAD AREA:</span>
-                <span className="font-bold text-gray-900 text-base">3.20 Acre</span>
-              </div>
-            </div>
-          </div>
-          <div className="text-right flex flex-col items-end gap-2">
-            <Badge className="border-2 border-green-500 text-green-700 bg-green-50 font-semibold px-4 py-1.5">
-              Real-time Monitoring
-            </Badge>
-            <p className="text-sm text-gray-600 font-medium">AgriScale Management System</p>
-          </div>
-        </div>
-      </div>
-      
-      <div className="relative">
-        {/* Main Farm Map Container */}
-        <div className="relative w-full h-[800px] bg-gradient-to-br from-blue-50 via-green-50 to-blue-50 overflow-auto">
-          
-          {/* Main Road - Left side */}
-          <div className="absolute left-0 top-0 w-20 h-full bg-gradient-to-b from-blue-400 via-blue-300 to-blue-400 border-r-4 border-blue-600 shadow-lg">
-            <div className="h-full flex items-center justify-center">
-              <div className="transform -rotate-90 text-white font-bold tracking-widest text-base drop-shadow-lg uppercase">
-                Main Road
-              </div>
-            </div>
-            {/* Road markings */}
-            <div className="absolute inset-y-0 right-2 flex flex-col justify-evenly">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="w-2 h-8 bg-white/40 rounded-sm"></div>
-              ))}
-            </div>
-          </div>
-
-          {/* Activity Status Legend */}
-          <div className="absolute left-6 top-6 bg-white rounded-xl shadow-2xl border-2 border-gray-200 p-5 z-30 min-w-[160px]">
-            <h4 className="font-bold text-base mb-4 text-gray-900 border-b-2 border-gray-200 pb-2">Activity Status</h4>
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-3 group cursor-pointer hover:bg-gray-50 p-1.5 rounded transition-colors">
-                <div className="w-5 h-5 bg-yellow-500 rounded-full shadow-md ring-2 ring-yellow-200"></div>
-                <span className="font-medium text-gray-700 group-hover:text-gray-900">Harvesting</span>
-              </div>
-              <div className="flex items-center gap-3 group cursor-pointer hover:bg-gray-50 p-1.5 rounded transition-colors">
-                <div className="w-5 h-5 bg-blue-500 rounded-full shadow-md ring-2 ring-blue-200"></div>
-                <span className="font-medium text-gray-700 group-hover:text-gray-900">Irrigation</span>
-              </div>
-              <div className="flex items-center gap-3 group cursor-pointer hover:bg-gray-50 p-1.5 rounded transition-colors">
-                <div className="w-5 h-5 bg-orange-500 rounded-full shadow-md ring-2 ring-orange-200"></div>
-                <span className="font-medium text-gray-700 group-hover:text-gray-900">Ploughing</span>
-              </div>
-              <div className="flex items-center gap-3 group cursor-pointer hover:bg-gray-50 p-1.5 rounded transition-colors">
-                <div className="w-5 h-5 bg-green-500 rounded-full shadow-md ring-2 ring-green-200"></div>
-                <span className="font-medium text-gray-700 group-hover:text-gray-900">Planting</span>
-              </div>
-              <div className="flex items-center gap-3 group cursor-pointer hover:bg-gray-50 p-1.5 rounded transition-colors">
-                <div className="w-5 h-5 bg-purple-500 rounded-full shadow-md ring-2 ring-purple-200"></div>
-                <span className="font-medium text-gray-700 group-hover:text-gray-900">Fertilizing</span>
-              </div>
-              <div className="flex items-center gap-3 group cursor-pointer hover:bg-gray-50 p-1.5 rounded transition-colors">
-                <div className="w-5 h-5 bg-red-500 rounded-full shadow-md ring-2 ring-red-200"></div>
-                <span className="font-medium text-gray-700 group-hover:text-gray-900">Pest Control</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Dairy Land Section */}
-          <div className="absolute bottom-24 right-24 w-96 h-40 bg-gradient-to-br from-yellow-200 via-yellow-300 to-yellow-400 border-4 border-yellow-600 rounded-xl shadow-2xl relative overflow-hidden">
-            {/* Decorative pattern */}
-            <div className="absolute inset-0 opacity-10">
-              <div className="absolute top-0 left-0 w-20 h-20 border-4 border-yellow-700 rounded-full"></div>
-              <div className="absolute bottom-0 right-0 w-16 h-16 border-4 border-yellow-700 rounded-full"></div>
-            </div>
-            
-            <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
-              <h3 className="text-2xl font-bold text-yellow-900 tracking-wide mb-2 drop-shadow">DAIRY LAND</h3>
-              <p className="text-yellow-800 font-semibold text-base">Processing & Storage Area</p>
-            </div>
-            
-            {/* Compass directions around Dairy Land */}
-            <div className="absolute -top-4 right-10 bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-red-500">
-              <span className="text-base font-bold text-red-600">N</span>
-            </div>
-            <div className="absolute top-1/2 -right-4 transform -translate-y-1/2 bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-gray-400">
-              <span className="text-base font-bold text-gray-700">E</span>
-            </div>
-            <div className="absolute -bottom-4 right-10 bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-gray-400">
-              <span className="text-base font-bold text-gray-700">S</span>
-            </div>
-            <div className="absolute top-1/2 -left-4 transform -translate-y-1/2 bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-gray-400">
-              <span className="text-base font-bold text-gray-700">W</span>
-            </div>
-          </div>
-
-          {/* All Plot Elements */}
-          {plotsData.map((plot) => (
-            <motion.div
-              key={plot.id}
-              className={`absolute border-3 cursor-pointer transition-all duration-300 bg-white rounded-md shadow-md ${
-                hoveredPlot === plot.id ? 'z-20 shadow-2xl scale-105 border-gray-800' : 'z-10 border-gray-700'
-              }`}
-              style={{
-                left: `${plot.position.x}px`,
-                top: `${plot.position.y}px`,
-                width: `${plot.position.width}px`,
-                height: `${plot.position.height}px`,
-                borderWidth: '3px',
-              }}
-              onMouseEnter={() => setHoveredPlot(plot.id)}
-              onMouseLeave={() => setHoveredPlot(null)}
-              onClick={() => setSelectedPlot(plot)}
-              whileHover={{ scale: 1.05 }}
-            >
-              {/* Plot Content */}
-              <div className="relative w-full h-full p-3 flex flex-col justify-between">
-                
-                {/* Plot Header */}
-                <div className="text-center mb-1">
-                  <div className="font-bold text-sm text-gray-900 leading-tight">{plot.name}</div>
-                  <div className="text-xs text-gray-600 font-medium mt-0.5">({plot.area})</div>
-                </div>
-
-                {/* Status Indicator Circle */}
-                {plot.status !== 'idle' && (
-                  <motion.div 
-                    className={`absolute top-2 right-2 w-8 h-8 ${getStatusColor(plot.status)} rounded-full flex items-center justify-center text-white shadow-xl border-2 border-white`}
-                    animate={{ 
-                      scale: [1, 1.15, 1],
-                      rotate: plot.status === 'pest-control' ? [0, 360] : [0, 0]
-                    }}
-                    transition={{ 
-                      duration: 2, 
-                      repeat: Infinity 
-                    }}
-                  >
-                    {getStatusIcon(plot.status)}
-                  </motion.div>
-                )}
-
-                {/* Irrigation Animation */}
-                {plot.status === 'irrigation' && (
-                  <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                    {[...Array(6)].map((_, i) => (
-                      <motion.div
-                        key={i}
-                        className="absolute w-2 h-2 bg-blue-400 rounded-full opacity-60"
-                        style={{ 
-                          top: `${25 + (i % 3) * 20}%`,
-                          left: `${20 + Math.floor(i / 3) * 30}%`
-                        }}
-                        animate={{
-                          scale: [0, 1.5, 0],
-                          opacity: [0, 0.8, 0]
-                        }}
-                        transition={{
-                          duration: 2,
-                          repeat: Infinity,
-                          delay: i * 0.2
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* Tractor Animation for Harvesting */}
-                {plot.status === 'harvesting' && (
-                  <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                    <motion.div
-                      className="absolute top-1/2 text-green-700"
-                      style={{ transform: 'translateY(-50%)' }}
-                      animate={{ 
-                        x: [-20, plot.position.width - 60, plot.position.width - 60, -20],
-                        rotate: [0, 0, 180, 180]
-                      }}
-                      transition={{ 
-                        duration: 8, 
-                        repeat: Infinity, 
-                        ease: "linear" as const
-                      }}
-                    >
-                      <TractorIcon className="w-8 h-6" />
-                    </motion.div>
-                  </div>
-                )}
-
-                {/* Ploughing Animation */}
-                {plot.status === 'ploughing' && (
-                  <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                    {[...Array(3)].map((_, i) => (
-                      <motion.div
-                        key={i}
-                        className="absolute h-0.5 bg-orange-900 opacity-40"
-                        style={{ 
-                          top: `${30 + i * 20}%`,
-                          left: '10%',
-                          right: '10%'
-                        }}
-                        initial={{ scaleX: 0, originX: 0 }}
-                        animate={{ 
-                          scaleX: [0, 1, 1, 0],
-                          originX: [0, 0, 1, 1]
-                        }}
-                        transition={{
-                          duration: 4,
-                          repeat: Infinity,
-                          delay: i * 0.5
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* Progress and Completion */}
-                {plot.status !== 'idle' && (
-                  <div className="text-center mt-auto">
-                    <div className="text-xs font-bold text-gray-800 mb-1.5">
-                      {plot.completion}% complete
-                    </div>
-                    <div className="w-full bg-gray-300 rounded-full h-2.5 shadow-inner">
-                      <motion.div 
-                        className={`h-2.5 rounded-full ${getStatusColor(plot.status)} shadow-sm`}
-                        initial={{ width: 0 }}
-                        animate={{ width: `${plot.completion}%` }}
-                        transition={{ duration: 1, delay: 0.5 }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Hover Tooltip */}
-              {hoveredPlot === plot.id && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="absolute -top-32 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white p-4 rounded-xl shadow-2xl z-50 min-w-60 border-2 border-gray-700"
-                >
-                  <div className="text-sm font-bold mb-2 border-b border-gray-700 pb-2">{plot.name}</div>
-                  <div className="text-xs space-y-1.5">
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Crop:</span>
-                      <span className="font-semibold">{plot.crop}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Status:</span>
-                      <span className="font-semibold capitalize">{plot.status.replace('-', ' ')}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Last:</span>
-                      <span className="font-semibold text-xs">{plot.lastActivity}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Next:</span>
-                      <span className="font-semibold text-xs">{plot.nextActivity}</span>
-                    </div>
-                  </div>
-                  {/* Arrow pointing down */}
-                  <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-8 border-r-8 border-t-8 border-transparent border-t-gray-900">  <div>Next: {plot.nextActivity}</div>
-                  </div>
-                </motion.div>
-              )}
-            </motion.div>
-          ))}
-        </div>
-      </div>
-
-      {/* Plot Details Modal */}
-      <AnimatePresence>
-        {selectedPlot && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-            onClick={() => setSelectedPlot(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">{selectedPlot.name}</h3>
-                    <Badge className={`${getStatusColor(selectedPlot.status)} text-white`}>
-                      {selectedPlot.status.replace('-', ' ')}
-                    </Badge>
-                  </div>
-                  <div className="space-y-3 text-sm">
-                    <div><span className="font-medium">Area:</span> {selectedPlot.area}</div>
-                    <div><span className="font-medium">Crop:</span> {selectedPlot.crop}</div>
-                    <div><span className="font-medium">Completion:</span> {selectedPlot.completion}%</div>
-                    <div><span className="font-medium">Last Activity:</span> {selectedPlot.lastActivity}</div>
-                    <div><span className="font-medium">Next Activity:</span> {selectedPlot.nextActivity}</div>
-                    
-                    {/* Progress Bar */}
-                    <div className="mt-4">
-                      <div className="flex justify-between text-xs mb-1">
-                        <span>Progress</span>
-                        <span>{selectedPlot.completion}%</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className={`h-2 rounded-full ${getStatusColor(selectedPlot.status)}`}
-                          style={{ width: `${selectedPlot.completion}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
 export default function FieldMonitoring({ userRole = 'farm-manager', regionFilter }: FieldMonitoringProps) {
-  const [selectedField, setSelectedField] = useState<string | null>(null);
+  const [selectedFarm, setSelectedFarm] = useState<FarmLocation | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
-  const [showAddObservationDialog, setShowAddObservationDialog] = useState(false);
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('monitoring');
-  const [selectedFarm, setSelectedFarm] = useState('amrit-dairy');
 
-  // Farm options
-  const farmOptions = [
-    { value: 'amrit-dairy', label: 'Amrit Dairy Farm', area: '44 Acre', plots: 24 },
-    { value: 'green-valley', label: 'Green Valley Farm', area: '32 Acre', plots: 18 },
-    { value: 'sunrise-agro', label: 'Sunrise Agro Farm', area: '56 Acre', plots: 30 },
-    { value: 'golden-harvest', label: 'Golden Harvest Farm', area: '28 Acre', plots: 15 },
-  ];
-
-  // Mock field data
-  const mockFields: FieldData[] = [
-    {
-      id: 'field-001',
-      name: 'North Field A',
-      location: 'Sector 1, Block A',
-      area: 25.5,
-      cropType: 'Wheat',
-      plantingDate: '2024-10-01',
-      expectedHarvestDate: '2025-03-15',
-      currentStage: 'Germination',
-      soilMoisture: 65,
-      temperature: 24,
-      humidity: 58,
-      phLevel: 6.8,
-      nitrogenLevel: 45,
-      phosphorusLevel: 32,
-      potassiumLevel: 28,
-      pestActivity: 'low',
-      diseaseRisk: 'low',
-      irrigationStatus: 'scheduled',
-      weatherCondition: 'sunny',
-      lastInspection: '2024-10-01',
-      nextInspection: '2024-10-05',
-      healthScore: 92,
-      yieldProjection: 3.2,
-      alerts: [],
-      observations: [
-        {
-          id: 'obs-001',
-          date: '2024-10-01',
-          type: 'Growth Assessment',
-          description: 'Seeds showing good germination rate of 95%',
-          severity: 'low'
-        }
-      ]
-    },
-    {
-      id: 'field-002',
-      name: 'South Field B',
-      location: 'Sector 2, Block B',
-      area: 18.3,
-      cropType: 'Rice',
-      plantingDate: '2024-09-15',
-      expectedHarvestDate: '2025-01-20',
-      currentStage: 'Vegetative',
-      soilMoisture: 78,
-      temperature: 26,
-      humidity: 72,
-      phLevel: 7.2,
-      nitrogenLevel: 38,
-      phosphorusLevel: 41,
-      potassiumLevel: 35,
-      pestActivity: 'medium',
-      diseaseRisk: 'medium',
-      irrigationStatus: 'active',
-      weatherCondition: 'cloudy',
-      lastInspection: '2024-09-30',
-      nextInspection: '2024-10-03',
-      healthScore: 78,
-      yieldProjection: 4.1,
-      alerts: ['Pest activity detected in northwest corner'],
-      observations: [
-        {
-          id: 'obs-002',
-          date: '2024-09-30',
-          type: 'Pest Control',
-          description: 'Brown plant hopper activity observed',
-          severity: 'medium'
-        }
-      ]
-    },
-    {
-      id: 'field-003',
-      name: 'East Field C',
-      location: 'Sector 3, Block C',
-      area: 32.1,
-      cropType: 'Cotton',
-      plantingDate: '2024-08-20',
-      expectedHarvestDate: '2024-12-10',
-      currentStage: 'Flowering',
-      soilMoisture: 42,
-      temperature: 28,
-      humidity: 45,
-      phLevel: 6.5,
-      nitrogenLevel: 52,
-      phosphorusLevel: 29,
-      potassiumLevel: 41,
-      pestActivity: 'high',
-      diseaseRisk: 'high',
-      irrigationStatus: 'overdue',
-      weatherCondition: 'sunny',
-      lastInspection: '2024-09-28',
-      nextInspection: '2024-10-02',
-      healthScore: 65,
-      yieldProjection: 2.8,
-      alerts: ['Critical: Bollworm infestation detected', 'Irrigation overdue by 3 days'],
-      observations: [
-        {
-          id: 'obs-003',
-          date: '2024-09-28',
-          type: 'Disease Assessment',
-          description: 'Fungal infection symptoms on lower leaves',
-          severity: 'high'
-        }
-      ]
-    }
-  ];
-
-  const filteredFields = mockFields.filter(field => {
-    const matchesSearch = field.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         field.cropType.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         field.location.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesFilter = filterStatus === 'all' || 
-                         (filterStatus === 'active' && field.currentStage !== 'Harvested') ||
-                         (filterStatus === 'harvested' && field.currentStage === 'Harvested') ||
-                         (filterStatus === 'alerts' && field.alerts.length > 0);
-    
-    return matchesSearch && matchesFilter;
+  // Custom marker icon
+  const customIcon = new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
   });
 
-  const selectedFieldData = selectedField ? mockFields.find(f => f.id === selectedField) : null;
-
-  const getHealthScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 60) return 'text-yellow-600';
-    return 'text-red-600';
+  const handleFarmClick = (farm: FarmLocation) => {
+    setSelectedFarm(farm);
+    setShowDetailsDialog(true);
   };
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'high': return 'bg-red-100 text-red-800';
-      case 'medium': return 'bg-yellow-100 text-yellow-800';
-      case 'low': return 'bg-green-100 text-green-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const getIrrigationStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'bg-blue-100 text-blue-800';
-      case 'completed': return 'bg-green-100 text-green-800';
-      case 'scheduled': return 'bg-yellow-100 text-yellow-800';
-      case 'overdue': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
+  const getHealthColor = (score: number) => {
+    if (score >= 90) return 'text-green-600 bg-green-50 border-green-200';
+    if (score >= 75) return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+    return 'text-red-600 bg-red-50 border-red-200';
   };
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold">Field Monitoring Dashboard</h2>
-          <p className="text-muted-foreground">Real-time field data and crop monitoring</p>
+          <h2 className="text-2xl font-bold">Farm Locations Map</h2>
+          <p className="text-muted-foreground">Click on any farm location to view complete details</p>
         </div>
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2">
-            <Label className="text-sm font-medium">Select Farm:</Label>
-            <Select value={selectedFarm} onValueChange={setSelectedFarm}>
-              <SelectTrigger className="w-64">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {farmOptions.map((farm) => (
-                  <SelectItem key={farm.value} value={farm.value}>
-                    <div className="flex items-center justify-between w-full gap-3">
-                      <span className="font-medium">{farm.label}</span>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{farm.area}</span>
-                        <span>•</span>
-                        <span>{farm.plots} plots</span>
-                      </div>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button onClick={() => setShowAddObservationDialog(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Observation
-          </Button>
+        <div className="flex items-center gap-2">
+          <Badge className="border-2 border-blue-500 text-blue-700 bg-blue-50 font-semibold px-4 py-1.5">
+            {farmLocations.length} Farms
+          </Badge>
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="monitoring">Field Monitoring</TabsTrigger>
-          <TabsTrigger value="map">Interactive Map</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="monitoring" className="space-y-6">
-          {/* Search and Filter */}
-          <div className="flex items-center space-x-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search fields by name, crop, or location..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-48">
-                <Filter className="h-4 w-4 mr-2" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Fields</SelectItem>
-                <SelectItem value="active">Active Crops</SelectItem>
-                <SelectItem value="harvested">Harvested</SelectItem>
-                <SelectItem value="alerts">With Alerts</SelectItem>
-              </SelectContent>
-            </Select>
+      {/* Map Container */}
+      <Card className="overflow-hidden">
+        <CardContent className="p-0">
+          <div className="h-[700px] relative">
+            <MapContainer
+              center={[28.6139, 77.2090]}
+              zoom={13}
+              style={{ height: '100%', width: '100%' }}
+              scrollWheelZoom={true}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              
+              {farmLocations.map((farm) => (
+                <React.Fragment key={farm.id}>
+                  {/* Farm boundary polygon */}
+                  <Polygon
+                    positions={farm.boundary}
+                    pathOptions={{
+                      color: '#22c55e',
+                      fillColor: '#22c55e',
+                      fillOpacity: 0.2,
+                      weight: 2
+                    }}
+                  />
+                  
+                  {/* Farm marker */}
+                  <Marker
+                    position={farm.coordinates}
+                    icon={customIcon}
+                    eventHandlers={{
+                      click: () => handleFarmClick(farm)
+                    }}
+                  >
+                    <Popup>
+                      <div className="p-2 min-w-[200px]">
+                        <h3 className="font-bold text-lg mb-2">{farm.name}</h3>
+                        <div className="space-y-1 text-sm">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-gray-500" />
+                            <span className="font-medium">Area: {farm.totalArea} acres</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-gray-500" />
+                            <span>Owner: {farm.owner}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Wheat className="h-4 w-4 text-gray-500" />
+                            <span>{farm.numberOfPlots} plots</span>
+                          </div>
+                          <Button 
+                            className="mt-3 w-full text-xs border border-gray-300 bg-white hover:bg-gray-50 text-gray-900"
+                            onClick={() => handleFarmClick(farm)}
+                          >
+                            View Full Details
+                          </Button>
+                        </div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                </React.Fragment>
+              ))}
+            </MapContainer>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* Fields Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredFields.map((field) => (
-              <Card key={field.id} className="hover:shadow-lg transition-shadow cursor-pointer">
-                <CardHeader>
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <CardTitle className="text-lg">{field.name}</CardTitle>
-                      <p className="text-sm text-muted-foreground">{field.location}</p>
-                    </div>
-                    <Badge className={getSeverityColor(field.pestActivity)}>
-                      {field.pestActivity} pest activity
-                    </Badge>
+      {/* Detailed Farm Information Dialog */}
+      <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto z-[9999]">
+          {selectedFarm && (
+            <>
+              <DialogHeader>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <DialogTitle className="text-3xl font-bold">{selectedFarm.name}</DialogTitle>
+                    <p className="text-muted-foreground mt-1">Complete Farm Information A-Z</p>
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Crop</p>
-                      <p className="font-medium">{field.cropType}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Area</p>
-                      <p className="font-medium">{field.area} acres</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Stage</p>
-                      <p className="font-medium">{field.currentStage}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Health Score</p>
-                      <p className={`font-medium ${getHealthScoreColor(field.healthScore)}`}>
-                        {field.healthScore}%
-                      </p>
-                    </div>
-                  </div>
+                  <Badge className={`px-3 py-1 border-2 ${getHealthColor(selectedFarm.healthScore)}`}>
+                    Health Score: {selectedFarm.healthScore}%
+                  </Badge>
+                </div>
+              </DialogHeader>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <Thermometer className="h-4 w-4 text-orange-500" />
-                        <span className="text-sm">{field.temperature}°C</span>
+              <div className="grid gap-6 mt-4">
+                {/* Basic Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Building className="h-5 w-5" />
+                      Basic Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-muted-foreground">Owner</Label>
+                        <p className="font-semibold">{selectedFarm.owner}</p>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        <Droplets className="h-4 w-4 text-blue-500" />
-                        <span className="text-sm">{field.soilMoisture}%</span>
+                      <div>
+                        <Label className="text-muted-foreground">Contact Person</Label>
+                        <p className="font-semibold">{selectedFarm.contactPerson}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground flex items-center gap-1">
+                          <Phone className="h-3 w-3" /> Phone
+                        </Label>
+                        <p className="font-semibold">{selectedFarm.phone}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground flex items-center gap-1">
+                          <Mail className="h-3 w-3" /> Email
+                        </Label>
+                        <p className="font-semibold">{selectedFarm.email}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Established</Label>
+                        <p className="font-semibold">{selectedFarm.established}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Workforce</Label>
+                        <p className="font-semibold">{selectedFarm.workforce} employees</p>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <Wind className="h-4 w-4 text-gray-500" />
-                        <span className="text-sm">pH {field.phLevel}</span>
-                      </div>
-                      <Badge className={getIrrigationStatusColor(field.irrigationStatus)}>
-                        {field.irrigationStatus}
-                      </Badge>
-                    </div>
-                  </div>
+                  </CardContent>
+                </Card>
 
-                  {field.alerts.length > 0 && (
-                    <div className="space-y-1">
-                      <p className="text-sm text-red-600 font-medium">Alerts:</p>
-                      {field.alerts.map((alert, index) => (
-                        <div key={index} className="flex items-start space-x-2">
-                          <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-                          <p className="text-sm text-red-600">{alert}</p>
+                {/* Land & Agriculture Info */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <MapPin className="h-5 w-5" />
+                      Land & Agriculture Details
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <Label className="text-muted-foreground">Total Area</Label>
+                        <p className="font-semibold text-lg">{selectedFarm.totalArea} acres</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Cultivable Area</Label>
+                        <p className="font-semibold text-lg">{selectedFarm.cultivableArea} acres</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Number of Plots</Label>
+                        <p className="font-semibold text-lg">{selectedFarm.numberOfPlots}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Soil Type</Label>
+                        <p className="font-semibold">{selectedFarm.soilType}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Irrigation Type</Label>
+                        <p className="font-semibold">{selectedFarm.irrigationType}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Water Source</Label>
+                        <p className="font-semibold">{selectedFarm.waterSource}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Current Crops */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Wheat className="h-5 w-5" />
+                      Current Crops
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-3">
+                      {selectedFarm.currentCrops.map((crop, idx) => (
+                        <div key={idx} className="p-3 border rounded-lg bg-gray-50">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-semibold">{crop.crop}</p>
+                              <p className="text-sm text-muted-foreground">{crop.area} acres</p>
+                            </div>
+                            <Badge className="border border-green-500 text-green-700 bg-green-50">
+                              {crop.status}
+                            </Badge>
+                          </div>
                         </div>
                       ))}
                     </div>
-                  )}
-
-                  <Button
-                    className="w-full border border-gray-300 bg-white hover:bg-gray-50"
-                    onClick={() => {
-                      setSelectedField(field.id);
-                      setShowDetailsDialog(true);
-                    }}
-                  >
-                    <Eye className="h-4 w-4 mr-2" />
-                    View Details
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="map" className="space-y-6">
-          <InteractiveFarmMap />
-        </TabsContent>
-      </Tabs>
-
-      {/* Field Details Dialog */}
-      <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedFieldData?.name} - Detailed Monitoring
-            </DialogTitle>
-            <DialogDescription>
-              Comprehensive field monitoring data including environmental conditions, crop health, and recent activities
-            </DialogDescription>
-          </DialogHeader>
-          
-          {selectedFieldData && (
-            <div className="space-y-6">
-              {/* Overview */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center space-x-2">
-                      <Sprout className="h-5 w-5 text-green-500" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Crop Health</p>
-                        <p className={`text-xl font-bold ${getHealthScoreColor(selectedFieldData.healthScore)}`}>
-                          {selectedFieldData.healthScore}%
-                        </p>
+                    <div className="mt-4">
+                      <Label className="text-muted-foreground">All Crop Types Grown</Label>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {selectedFarm.cropTypes.map((crop, idx) => (
+                          <Badge key={idx} className="border border-gray-300 bg-white text-gray-700">
+                            {crop}
+                          </Badge>
+                        ))}
                       </div>
                     </div>
                   </CardContent>
                 </Card>
-                
+
+                {/* Facilities & Equipment */}
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Building className="h-5 w-5" />
+                        Facilities
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2">
+                        {selectedFarm.facilities.map((facility, idx) => (
+                          <li key={idx} className="flex items-center gap-2">
+                            <div className="h-1.5 w-1.5 bg-green-500 rounded-full" />
+                            <span className="text-sm">{facility}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Tractor className="h-5 w-5" />
+                        Equipment
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2">
+                        {selectedFarm.equipment.map((item, idx) => (
+                          <li key={idx} className="flex items-center gap-2">
+                            <div className="h-1.5 w-1.5 bg-blue-500 rounded-full" />
+                            <span className="text-sm">{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Performance & Financial */}
                 <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center space-x-2">
-                      <TrendingUp className="h-5 w-5 text-blue-500" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Yield Projection</p>
-                        <p className="text-xl font-bold">{selectedFieldData.yieldProjection} tons</p>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart3 className="h-5 w-5" />
+                      Performance & Financial Metrics
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="p-4 border rounded-lg bg-green-50">
+                        <Label className="text-muted-foreground text-xs">Average Yield</Label>
+                        <p className="font-bold text-xl mt-1">{selectedFarm.avgYield}</p>
+                      </div>
+                      <div className="p-4 border rounded-lg bg-blue-50">
+                        <Label className="text-muted-foreground text-xs">Annual Revenue</Label>
+                        <p className="font-bold text-xl mt-1">{selectedFarm.revenue}</p>
+                      </div>
+                      <div className="p-4 border rounded-lg bg-orange-50">
+                        <Label className="text-muted-foreground text-xs">Annual Expenses</Label>
+                        <p className="font-bold text-xl mt-1">{selectedFarm.expenses}</p>
+                      </div>
+                      <div className="p-4 border rounded-lg bg-purple-50">
+                        <Label className="text-muted-foreground text-xs">Health Score</Label>
+                        <p className="font-bold text-xl mt-1">{selectedFarm.healthScore}%</p>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
-                
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center space-x-2">
-                      <Calendar className="h-5 w-5 text-purple-500" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Expected Harvest</p>
-                        <p className="text-sm font-medium">{new Date(selectedFieldData.expectedHarvestDate).toLocaleDateString('en-IN')}</p>
+
+                {/* Inspections & Certifications */}
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Clock className="h-5 w-5" />
+                        Inspections
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div>
+                          <Label className="text-muted-foreground">Last Inspection</Label>
+                          <p className="font-semibold flex items-center gap-2">
+                            <Calendar className="h-4 w-4" />
+                            {new Date(selectedFarm.lastInspection).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-muted-foreground">Next Inspection</Label>
+                          <p className="font-semibold flex items-center gap-2">
+                            <Calendar className="h-4 w-4" />
+                            {new Date(selectedFarm.nextInspection).toLocaleDateString()}
+                          </p>
+                        </div>
                       </div>
-                    </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Zap className="h-5 w-5" />
+                        Certifications
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {selectedFarm.certifications.map((cert, idx) => (
+                          <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-amber-50">
+                            <Zap className="h-4 w-4 text-amber-600" />
+                            <span className="text-sm font-medium">{cert}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Alerts */}
+                {selectedFarm.alerts.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <AlertTriangle className="h-5 w-5 text-orange-500" />
+                        Active Alerts
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {selectedFarm.alerts.map((alert, idx) => (
+                          <div key={idx} className="flex items-start gap-2 p-3 border border-orange-200 rounded-lg bg-orange-50">
+                            <AlertTriangle className="h-4 w-4 text-orange-600 mt-0.5" />
+                            <p className="text-sm">{alert}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Notes */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Eye className="h-5 w-5" />
+                      Additional Notes
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">{selectedFarm.notes}</p>
                   </CardContent>
                 </Card>
               </div>
 
-              {/* Environmental Conditions */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Environmental Conditions</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="flex items-center space-x-3">
-                      <Thermometer className="h-8 w-8 text-orange-500" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Temperature</p>
-                        <p className="text-lg font-semibold">{selectedFieldData.temperature}°C</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <Droplets className="h-8 w-8 text-blue-500" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Soil Moisture</p>
-                        <p className="text-lg font-semibold">{selectedFieldData.soilMoisture}%</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <Wind className="h-8 w-8 text-gray-500" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Humidity</p>
-                        <p className="text-lg font-semibold">{selectedFieldData.humidity}%</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <Sun className="h-8 w-8 text-yellow-500" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Weather</p>
-                        <p className="text-lg font-semibold capitalize">{selectedFieldData.weatherCondition}</p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Soil Analysis */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Soil Analysis</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground">pH Level</p>
-                      <p className="text-2xl font-bold">{selectedFieldData.phLevel}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground">Nitrogen (N)</p>
-                      <p className="text-2xl font-bold">{selectedFieldData.nitrogenLevel}%</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground">Phosphorus (P)</p>
-                      <p className="text-2xl font-bold">{selectedFieldData.phosphorusLevel}%</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground">Potassium (K)</p>
-                      <p className="text-2xl font-bold">{selectedFieldData.potassiumLevel}%</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Recent Observations */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Recent Observations</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {selectedFieldData.observations.map((observation) => (
-                      <div key={observation.id} className="border-l-4 border-blue-500 pl-4 py-2">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="font-medium">{observation.type}</p>
-                            <p className="text-sm text-muted-foreground">{observation.description}</p>
-                          </div>
-                          <div className="text-right">
-                            <Badge className={getSeverityColor(observation.severity)}>
-                              {observation.severity}
-                            </Badge>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {new Date(observation.date).toLocaleDateString('en-IN')}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+              <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
+                <Button 
+                  onClick={() => setShowDetailsDialog(false)}
+                  className="border border-gray-300 bg-white hover:bg-gray-50 text-gray-900"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Close
+                </Button>
+                <Button className="bg-green-600 hover:bg-green-700">
+                  <Eye className="h-4 w-4 mr-2" />
+                  Schedule Inspection
+                </Button>
+              </div>
+            </>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Observation Dialog */}
-      <Dialog open={showAddObservationDialog} onOpenChange={setShowAddObservationDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add Field Observation</DialogTitle>
-            <DialogDescription>
-              Record a new observation about field conditions, crop health, or activities
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="observation-field">Select Field</Label>
-              <Select>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a field" />
-                </SelectTrigger>
-                <SelectContent>
-                  {mockFields.map((field) => (
-                    <SelectItem key={field.id} value={field.id}>
-                      {field.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="observation-type">Observation Type</Label>
-              <Select>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="growth">Growth Assessment</SelectItem>
-                  <SelectItem value="pest">Pest Control</SelectItem>
-                  <SelectItem value="disease">Disease Assessment</SelectItem>
-                  <SelectItem value="irrigation">Irrigation</SelectItem>
-                  <SelectItem value="harvest">Harvest</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="observation-notes">Notes</Label>
-              <Textarea
-                id="observation-notes"
-                placeholder="Describe your observation in detail..."
-                rows={4}
-              />
-            </div>
-            <div className="flex space-x-2">
-              <Button className="flex-1">
-                <Camera className="h-4 w-4 mr-2" />
-                Add Photo
-              </Button>
-              <Button onClick={() => {
-                setShowAddObservationDialog(false);
-                // In production, this would save to database
-                alert('✓ Observation saved successfully!');
-              }} className="flex-1 border border-gray-300 bg-white hover:bg-gray-50">
-                Save Observation
-              </Button>
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
     </div>
