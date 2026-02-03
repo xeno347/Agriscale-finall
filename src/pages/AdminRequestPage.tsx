@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   FileText, CheckCircle2, MessageSquare, 
   Plus, ArrowRight, UserCheck, Settings,
@@ -6,6 +6,7 @@ import {
   MapPin, Calendar, Truck, Search, ChevronDown, AlertTriangle, ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getBaseUrl } from '@/lib/config';
 import { toast } from 'sonner';
 
 /**
@@ -22,10 +23,37 @@ import { toast } from 'sonner';
 
 type RequestStatus = 'pending' | 'approved' | 'in_progress' | 'completed' | 'rejected';
 type RequestPriority = 'urgent' | 'high' | 'medium' | 'low';
-type RequestType = 'logistics' | 'inventory' | 'maintenance' | 'procurement';
+type RequestType = 'logistics' | 'inventory' | 'maintenance' | 'procurement' | 'other';
+
+type ApprovalStageStatus = 'pending' | 'approved' | 'approved_and_forwarded' | 'rejected' | string;
+
+type BackendAdminOpsRequest = {
+  first_department?: string;
+  request_details?: {
+    note?: string;
+    request_location?: string;
+  };
+  date?: string;
+  created_at?: string;
+  request_id?: string;
+  concerned_department_approval_status?: ApprovalStageStatus;
+  concerned_department_note?: string;
+  forwarded_department_approval_status?: ApprovalStageStatus;
+  admin_ops_approval_status?: ApprovalStageStatus;
+  admin_ops_note?: string;
+  sender_details?: {
+    staff_name?: string;
+    staff_phone?: string;
+    staff_department?: string;
+    staff_designation?: string;
+    staff_id?: string;
+  };
+  forwarded_to_departments?: string[];
+};
 
 interface AdminRequestData {
   id: string;
+  adminOpsApprovalStatus: string;
   requesterId: string;
   requesterName: string;
   requesterPhone: string;
@@ -52,81 +80,214 @@ interface AdminRequestData {
 }
 
 const AdminRequestPage = () => {
-  const [requests, setRequests] = useState<AdminRequestData[]>([
-    {
-      id: "REQ-001",
-      requesterId: "U001",
-      requesterName: "Ramesh Kumar",
-      requesterPhone: "+91 98765 43210",
-      requesterDepartment: "Cultivation Dept.",
-      requestType: "logistics",
-      title: "Tractor for Cultivation",
-      description: "Need tractor for cultivation. Monsoon preparation.",
-      vehicleType: "Tractor",
-      fromLocation: "Plant A",
-      toLocation: "Field 12-B",
-      preferredDate: "2026-02-05",
-      loadDetails: "Cultivation Equipment",
-      priority: "urgent",
-      status: "pending",
-      createdAt: "2026-02-02T10:30:00",
-      deptApprovals: "Department Manager Approved",
-      deptReason: "Urgent cultivation window starting Feb 5th. Weather forecast shows rain from Feb 7th.",
-      adminNotes: "",
-    },
-    {
-      id: "REQ-002",
-      requesterId: "U002",
-      requesterName: "Suresh Patil",
-      requesterPhone: "+91 98765 43211",
-      requesterDepartment: "Harvest Dept.",
-      requestType: "logistics",
-      title: "Truck for Produce Transport",
-      description: "Transport harvested produce to storage",
-      vehicleType: "Truck",
-      fromLocation: "Field 8-A",
-      toLocation: "Hub 1",
-      preferredDate: "2026-02-04",
-      loadDetails: "5 tons produce",
-      priority: "high",
-      status: "approved",
-      createdAt: "2026-02-01T14:00:00",
-      deptApprovals: "Harvest Manager Approved",
-      deptReason: "Fresh produce needs immediate transport to maintain quality.",
-      adminNotes: "Approved by Admin. Priority transport required for fresh produce. Assign best available truck.",
-      forwardedTo: "Logistics",
-      forwardedAt: "2026-02-01T16:00:00",
-      receiverId: "L002",
-      receiverName: "Mahesh Rao",
-      receiverDepartment: "Logistics & Transport",
-    },
-    {
-      id: "REQ-003",
-      requesterId: "U005",
-      requesterName: "Priya Sharma",
-      requesterPhone: "+91 98765 43214",
-      requesterDepartment: "Inventory Dept.",
-      requestType: "inventory",
-      title: "Fertilizer Stock Request",
-      description: "Need 2 tons of NPK fertilizer for upcoming season",
-      priority: "medium",
-      status: "pending",
-      createdAt: "2026-02-02T11:00:00",
-      deptApprovals: "Inventory Manager Approved",
-      deptReason: "Stock running low. Need replenishment for next planting cycle.",
-      adminNotes: "",
-    },
-  ]);
+  const [requests, setRequests] = useState<AdminRequestData[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [forwardingRequestId, setForwardingRequestId] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [currentEditingNotes, setCurrentEditingNotes] = useState<{id: string, notes: string} | null>(null);
   const [selectedDepartments, setSelectedDepartments] = useState<Record<string, string[]>>({});
+
+  const parseRequestLocation = (raw?: string): { fromLocation?: string; toLocation?: string } => {
+    const cleaned = String(raw || '').trim();
+    if (!cleaned) return { fromLocation: undefined, toLocation: undefined };
+    const parts = cleaned.split('->').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) return { fromLocation: parts[0], toLocation: parts.slice(1).join(' -> ') };
+    return { fromLocation: cleaned, toLocation: undefined };
+  };
+
+  const normalizeRequestType = (raw?: string): RequestType => {
+    const v = String(raw || '').trim().toLowerCase();
+    if (v === 'logistics') return 'logistics';
+    if (v === 'inventory') return 'inventory';
+    if (v === 'maintenance') return 'maintenance';
+    if (v === 'procurement') return 'procurement';
+    return 'other';
+  };
+
+  const titleFromNote = (note?: string): string => {
+    const cleaned = String(note || '').trim();
+    if (!cleaned) return 'Request';
+    // Use first sentence-ish / first chunk as a title.
+    const firstLine = cleaned.split(/\r?\n/)[0] || cleaned;
+    const clipped = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
+    return clipped;
+  };
+
+  const deriveUiStatus = (item: BackendAdminOpsRequest): RequestStatus => {
+    const concerned = String(item?.concerned_department_approval_status || 'pending');
+    const adminOps = String(item?.admin_ops_approval_status || 'pending');
+    const forwarded = String(item?.forwarded_department_approval_status || 'pending');
+    const forwardedTo = Array.isArray(item?.forwarded_to_departments) ? item.forwarded_to_departments : [];
+
+    const isApproved = (v: string) => v === 'approved' || v === 'approved_and_forwarded';
+
+    if ([concerned, adminOps, forwarded].some(s => s === 'rejected')) return 'rejected';
+    if (adminOps === 'pending') return 'pending';
+    if (isApproved(adminOps)) {
+      return forwardedTo.length > 0 ? 'in_progress' : 'approved';
+    }
+    return 'pending';
+  };
+
+  const fetchAdminRequests = async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) setLoadingRequests(true);
+    try {
+      const response = await fetch(`${getBaseUrl()}/admin_ops_requests/get_admin_ops_requests`);
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+      const raw = await response.json();
+
+      const list: BackendAdminOpsRequest[] = Array.isArray(raw)
+        ? raw
+        : (
+            Array.isArray(raw?.admin_ops_requests)
+              ? raw.admin_ops_requests
+              : (Array.isArray(raw?.data?.admin_ops_requests)
+                  ? raw.data.admin_ops_requests
+                  : [])
+          );
+
+      const mapped: AdminRequestData[] = list.map((item) => {
+        const requestId = String(item?.request_id || '').trim() || `REQ-${Math.random().toString(16).slice(2)}`;
+        const sender = item?.sender_details || {};
+        const note = item?.request_details?.note || '';
+        const loc = parseRequestLocation(item?.request_details?.request_location);
+
+        const requestType = normalizeRequestType(item?.first_department || sender?.staff_department);
+        const status = deriveUiStatus(item);
+        const forwardedToList = Array.isArray(item?.forwarded_to_departments) ? item.forwarded_to_departments : [];
+        const rawAdminOpsApprovalStatus = String(item?.admin_ops_approval_status || 'pending');
+        // Robust filtering: even if backend keeps admin_ops_approval_status="approved",
+        // once forwarded_to_departments is non-empty we treat it as "approved_and_forwarded".
+        const adminOpsApprovalStatus =
+          rawAdminOpsApprovalStatus === 'approved' && forwardedToList.length > 0
+            ? 'approved_and_forwarded'
+            : rawAdminOpsApprovalStatus;
+
+        const deptApprovals = (() => {
+          const concerned = String(item?.concerned_department_approval_status || 'pending');
+          if (concerned === 'approved_and_forwarded') return 'Concerned Department Approved';
+          if (concerned === 'rejected') return 'Concerned Department Rejected';
+          return 'Concerned Department Pending';
+        })();
+
+        const deptReason = String(item?.concerned_department_note || '').trim() || '—';
+
+        const forwardedTo = forwardedToList.length > 0 ? forwardedToList.join(', ') : undefined;
+
+        return {
+          id: requestId,
+          adminOpsApprovalStatus,
+          requesterId: String(sender?.staff_id || ''),
+          requesterName: String(sender?.staff_name || '—'),
+          requesterPhone: String(sender?.staff_phone || '—'),
+          requesterDepartment: String(sender?.staff_department || '—'),
+          requestType,
+          title: titleFromNote(note),
+          description: String(note || ''),
+          vehicleType: requestType === 'logistics' ? '—' : undefined,
+          fromLocation: requestType === 'logistics' ? loc.fromLocation : undefined,
+          toLocation: requestType === 'logistics' ? loc.toLocation : undefined,
+          preferredDate: String(item?.date || ''),
+          loadDetails: undefined,
+          priority: 'medium',
+          status,
+          createdAt: String(item?.created_at || ''),
+          deptApprovals,
+          deptReason,
+          adminNotes: String(item?.admin_ops_note || '').trim(),
+          forwardedTo,
+          receiverDepartment: forwardedTo,
+        };
+      });
+
+      setRequests(mapped);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load requests');
+      // If this is just a background refresh, keep the existing UI.
+      if (!silent) setRequests([]);
+    } finally {
+      if (!silent) setLoadingRequests(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAdminRequests();
+  }, []);
+
+  const updateAdminOpsApprovalStatus = async (payload: {
+    request_id: string;
+    status: 'approved' | 'rejected';
+    note: string;
+  }) => {
+    const response = await fetch(
+      `${getBaseUrl()}/admin_ops_requests/update_admin_ops_approval_status`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const maybeMessage = (data && (data.message || data.detail || data.error))
+        ? String(data.message || data.detail || data.error)
+        : '';
+      throw new Error(maybeMessage || `Request failed (${response.status})`);
+    }
+
+    return data;
+  };
+
+  const forwardRequestToDepartments = async (payload: {
+    request_id: string;
+    departments: string[];
+  }) => {
+    const response = await fetch(
+      `${getBaseUrl()}/admin_ops_requests/forward_request_to_departments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const maybeMessage = (data && (data.message || data.detail || data.error))
+        ? String(data.message || data.detail || data.error)
+        : '';
+      throw new Error(maybeMessage || `Request failed (${response.status})`);
+    }
+
+    return data;
+  };
 
   const filteredRequests = requests.filter(req => 
     req.requesterName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     req.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     req.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
     req.id.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Only show items that still need Admin action or forwarding.
+  // Filter by backend status: show only pending/approved; hide approved_and_forwarded.
+  const visibleRequests = filteredRequests.filter(req =>
+    req.adminOpsApprovalStatus === 'pending' || req.adminOpsApprovalStatus === 'approved'
   );
 
   const getStatusConfig = (status: RequestStatus) => {
@@ -148,21 +309,41 @@ const AdminRequestPage = () => {
     }
   };
 
-  const handleApproveRequest = (req: AdminRequestData) => {
-    if (!currentEditingNotes?.notes) {
-      toast.error("Please add admin notes first");
+  const handleApproveRequest = async (req: AdminRequestData) => {
+    const note = String(currentEditingNotes?.notes || '').trim();
+    if (!note) {
+      toast.error('Please add admin notes first');
       return;
     }
-    
-    setRequests(prev => prev.map(r => 
-      r.id === req.id ? { 
-        ...r, 
-        status: 'approved' as RequestStatus,
-        adminNotes: currentEditingNotes.notes 
-      } : r
+
+    let saved: any = null;
+    try {
+      saved = await updateAdminOpsApprovalStatus({
+        request_id: req.id,
+        status: 'approved',
+        note,
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to approve request');
+      return;
+    }
+
+    const savedNote = String(saved?.admin_ops_note || '').trim() || note;
+    const savedStatus = String(saved?.admin_ops_approval_status || 'approved');
+
+    setRequests(prev => prev.map(r =>
+      r.id === req.id
+        ? {
+            ...r,
+            status: 'approved' as RequestStatus,
+            adminOpsApprovalStatus: 'approved',
+            adminNotes: savedNote,
+          }
+        : r
     ));
+
     setCurrentEditingNotes(null);
-    toast.success('✓ Request approved! Now select department(s) to forward');
+    toast.success('✓ Approved! Now select department(s) to forward');
   };
 
   const toggleDepartment = (requestId: string, dept: string) => {
@@ -175,11 +356,24 @@ const AdminRequestPage = () => {
     });
   };
 
-  const handleForwardMultiple = (req: AdminRequestData) => {
+  const handleForwardMultiple = async (req: AdminRequestData) => {
     const departments = selectedDepartments[req.id] || [];
     
     if (departments.length === 0) {
       toast.error("Please select at least one department");
+      return;
+    }
+
+    setForwardingRequestId(req.id);
+
+    try {
+      await forwardRequestToDepartments({
+        request_id: req.id,
+        departments,
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to forward request');
+      setForwardingRequestId(null);
       return;
     }
 
@@ -189,6 +383,7 @@ const AdminRequestPage = () => {
         forwardedTo: departments.join(', '),
         forwardedAt: new Date().toISOString(),
         receiverDepartment: departments.join(', '),
+        adminOpsApprovalStatus: 'approved_and_forwarded',
         status: 'in_progress' as RequestStatus
       } : r
     ));
@@ -202,16 +397,32 @@ const AdminRequestPage = () => {
     
     const deptList = departments.length === 1 ? departments[0] : `${departments.length} departments`;
     toast.success(`✓ Request forwarded to ${deptList}. The department(s) will now handle it.`);
+
+    setForwardingRequestId(null);
+
+    // No automatic re-fetch here because this page intentionally hides forwarded items.
+    // A re-fetch could bring the item back if backend keeps admin_ops_approval_status="approved".
   };
 
-  const handleReject = (id: string) => {
-    setRequests(prev => prev.map(req => 
+  const handleReject = async (id: string) => {
+    try {
+      await updateAdminOpsApprovalStatus({
+        request_id: id,
+        status: 'rejected',
+        note: '',
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to reject request');
+      return;
+    }
+
+    setRequests(prev => prev.map(req =>
       req.id === id ? { ...req, status: 'rejected' as RequestStatus } : req
     ));
     toast.error('Request rejected');
   };
 
-  const pendingCount = requests.filter(r => r.status === 'pending').length;
+  const pendingCount = visibleRequests.filter(r => r.adminOpsApprovalStatus === 'pending').length;
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 flex flex-col">
@@ -244,6 +455,14 @@ const AdminRequestPage = () => {
 
       {/* Main Content */}
       <div className="flex-1 px-8 py-8">
+        {loadingRequests ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="w-8 h-8 border-4 border-slate-900 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-gray-500">Loading requests...</p>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-6">
           {/* Search */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
@@ -261,7 +480,7 @@ const AdminRequestPage = () => {
 
           {/* Request Cards */}
           <div className="space-y-6">
-            {filteredRequests.map((req) => {
+            {visibleRequests.map((req) => {
               const statusConfig = getStatusConfig(req.status);
               const priorityConfig = getPriorityConfig(req.priority);
 
@@ -412,6 +631,18 @@ const AdminRequestPage = () => {
                           </div>
                         </div>
                       )}
+
+                      {!req.forwardedTo && req.status === 'approved' && (
+                        <div className="bg-blue-50 rounded-lg border border-blue-200 p-4">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-5 h-5 text-blue-600" />
+                            <div>
+                              <p className="font-semibold text-blue-900 text-sm">Approved by Admin</p>
+                              <p className="text-xs text-blue-700 mt-0.5">Not forwarded to any department yet</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Column 2: Admin */}
@@ -473,6 +704,7 @@ const AdminRequestPage = () => {
                             {currentEditingNotes?.id === req.id ? (
                               <>
                                 <button
+                                  type="button"
                                   onClick={() => handleApproveRequest(req)}
                                   disabled={!currentEditingNotes.notes}
                                   className={cn(
@@ -486,6 +718,7 @@ const AdminRequestPage = () => {
                                   Approve & Forward
                                 </button>
                                 <button
+                                  type="button"
                                   onClick={() => setCurrentEditingNotes(null)}
                                   className="px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium text-sm hover:bg-gray-50 transition-colors"
                                 >
@@ -495,12 +728,14 @@ const AdminRequestPage = () => {
                             ) : (
                               <>
                                 <button
+                                  type="button"
                                   onClick={() => setCurrentEditingNotes({ id: req.id, notes: req.adminNotes })}
                                   className="flex-1 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium text-sm transition-colors"
                                 >
                                   Review & Add Notes
                                 </button>
                                 <button
+                                  type="button"
                                   onClick={() => handleReject(req.id)}
                                   className="px-4 py-2.5 bg-white border border-red-300 text-red-600 rounded-lg font-medium text-sm hover:bg-red-50 transition-colors"
                                 >
@@ -518,7 +753,7 @@ const AdminRequestPage = () => {
                           <div className="flex items-center gap-2">
                             <CheckCircle2 className="w-5 h-5" />
                             <div>
-                              <p className="font-semibold text-sm">Approved and Forwarded</p>
+                              <p className="font-semibold text-sm">Approved by Admin</p>
                               {req.forwardedAt && (
                                 <p className="text-xs text-slate-300 mt-0.5">{new Date(req.forwardedAt).toLocaleString()}</p>
                               )}
@@ -566,17 +801,23 @@ const AdminRequestPage = () => {
                             })}
                           </div>
                           <button
+                            type="button"
                             onClick={() => handleForwardMultiple(req)}
-                            disabled={!selectedDepartments[req.id]?.length}
+                            disabled={
+                              !selectedDepartments[req.id]?.length ||
+                              forwardingRequestId === req.id
+                            }
                             className={cn(
                               "w-full mt-4 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2",
-                              selectedDepartments[req.id]?.length
+                              (selectedDepartments[req.id]?.length && forwardingRequestId !== req.id)
                                 ? "bg-slate-900 text-white hover:bg-slate-800"
                                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
                             )}
                           >
                             <Send className="w-4 h-4" />
-                            Forward to Selected Department{selectedDepartments[req.id]?.length > 1 ? 's' : ''}
+                            {forwardingRequestId === req.id
+                              ? 'Forwarding...'
+                              : `Forward to Selected Department${selectedDepartments[req.id]?.length > 1 ? 's' : ''}`}
                             {selectedDepartments[req.id]?.length > 0 && (
                               <span className="ml-1">({selectedDepartments[req.id].length})</span>
                             )}
@@ -597,6 +838,15 @@ const AdminRequestPage = () => {
                             </div>
                           </div>
                         </div>
+                      ) : req.status === 'rejected' ? (
+                        <div className="flex items-center justify-center min-h-[300px]">
+                          <div className="text-center space-y-3">
+                            <div className="w-20 h-20 bg-red-50 border-2 border-red-200 rounded-xl flex items-center justify-center mx-auto">
+                              <X className="w-10 h-10 text-red-500" />
+                            </div>
+                            <p className="text-sm font-medium text-red-700">Request rejected</p>
+                          </div>
+                        </div>
                       ) : (
                         <div className="flex items-center justify-center min-h-[300px]">
                           <div className="text-center space-y-3">
@@ -614,7 +864,7 @@ const AdminRequestPage = () => {
               );
             })}
 
-            {filteredRequests.length === 0 && (
+            {visibleRequests.length === 0 && (
               <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
                 <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                 <p className="text-gray-500">No requests found</p>
@@ -622,6 +872,7 @@ const AdminRequestPage = () => {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );

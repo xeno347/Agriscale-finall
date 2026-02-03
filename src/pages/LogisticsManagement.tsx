@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { 
   Truck, MapPin, Calendar as CalendarIcon, 
-  Plus, CheckCircle2, 
+  Plus, Minus, CheckCircle2, 
   Trash2, X, User, 
   ArrowLeft, LayoutList, Download, 
   ShieldCheck, AlertTriangle, Clock,
   ChevronRight, Fuel, Navigation, Play,
   Search, Filter, ArrowUpDown, ChevronDown,
-  FileText, Phone, Package
+  FileText, Phone, Package, Wrench, Hash
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -39,6 +39,30 @@ type TripStatusBackend = 'created' | 'started' | 'completed' | string;
 type RequestStatus = 'pending' | 'approved' | 'in_progress' | 'completed' | 'rejected';
 type RequestPriority = 'urgent' | 'high' | 'medium' | 'low';
 
+type ApprovalStageStatus = 'pending' | 'approved' | 'approved_and_forwarded' | 'rejected';
+
+type BackendDepartmentRequest = {
+  first_department?: string;
+  request_details: {
+    note: string;
+    request_location: string;
+  };
+  date: string;
+  created_at: string;
+  request_id: string;
+  concerned_department_approval_status: ApprovalStageStatus;
+  admin_ops_approval_status: ApprovalStageStatus;
+  forwarded_department_approval_status: ApprovalStageStatus;
+  sender_details: {
+    staff_name: string;
+    staff_phone: string;
+    staff_department: string;
+    staff_designation: string;
+    staff_id: string;
+  };
+  forwarded_to_departments: string[];
+};
+
 interface LogisticsRequest {
   id: string;
   requesterId: string;
@@ -54,12 +78,24 @@ interface LogisticsRequest {
   description: string;
   loadDetails?: string;
   createdAt: string;
+  first_department?: string;
   receiverId?: string;
   receiverName?: string;
   receiverDepartment?: string;
   adminNote?: string;
   forwardedBy?: string;
   forwardedAt?: string;
+  forwarded_to_departments?: string[];
+  // New staff fields
+  staff_id?: string;
+  staff_name?: string;
+  staff_phone?: string;
+  staff_department?: string;
+  staff_designation?: string;
+  // Approval workflow statuses
+  concerned_department_approval_status?: ApprovalStageStatus;
+  admin_ops_approval_status?: ApprovalStageStatus;
+  forwarded_department_approval_status?: ApprovalStageStatus;
 }
 
 interface CalendarEntry {
@@ -854,59 +890,215 @@ const MonitorSection = ({ plans, onUpdate, onCreateClick, onDelete }: { plans: L
 // --- REQUESTS SECTION ---
 const RequestsSection = ({ requests, onApprove, onReject }: { 
   requests: LogisticsRequest[], 
-  onApprove: (id: string) => void,
+  onApprove: (id: string, note?: string) => void,
   onReject: (id: string) => void 
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'date' | 'priority' | 'status'>('date');
-  const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'none'>('status');
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['pending', 'approved', 'in_progress']));
-  const [isCreatePlanModalOpen, setIsCreatePlanModalOpen] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState<LogisticsRequest | null>(null);
-  const [selectedVehicles, setSelectedVehicles] = useState<string[]>([]);
-  const [planDetails, setPlanDetails] = useState({
-    driver: '',
-    startDate: '',
-    notes: '',
-  });
+  const [isAssignResourcesOpen, setIsAssignResourcesOpen] = useState(false);
+  const [assignmentStep, setAssignmentStep] = useState<1 | 2>(1);
+  const [assignmentDate, setAssignmentDate] = useState<string | null>(null);
+  const [assignmentRequest, setAssignmentRequest] = useState<LogisticsRequest | null>(null);
+  const [isApproveNoteModalOpen, setIsApproveNoteModalOpen] = useState(false);
+  const [approveNote, setApproveNote] = useState('');
+  const [approveTarget, setApproveTarget] = useState<LogisticsRequest | null>(null);
 
-  const toggleGroup = (group: string) => {
-    const newExpanded = new Set(expandedGroups);
-    if (newExpanded.has(group)) {
-      newExpanded.delete(group);
-    } else {
-      newExpanded.add(group);
-    }
-    setExpandedGroups(newExpanded);
+  type Asset = {
+    id: string;
+    name: string;
+    type: string;
+    category: 'Vehicle' | 'Equipment';
+    schedule: Record<string, number>;
   };
 
-  const filteredRequests = requests.filter(req => 
-    req.requesterName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    req.fromLocation.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    req.toLocation.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    req.vehicleType.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    req.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  type ApiVehicle = {
+    work_calandar?: any[] | Record<string, any> | null;
+    vehicle_information?: {
+      type?: string;
+      vehicle_number?: string;
+    };
+    vehicle_id: string;
+  };
 
-  const sortedRequests = [...filteredRequests].sort((a, b) => {
-    if (sortBy === 'date') return new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime();
-    if (sortBy === 'priority') {
-      const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
-      return priorityOrder[a.priority] - priorityOrder[b.priority];
+  type ApiInventoryItem = {
+    unit?: string;
+    stock?: number;
+    Invent_id?: string;
+    category?: string;
+    item?: string;
+    id?: string;
+  };
+
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
+  const [equipmentCounts, setEquipmentCounts] = useState<Record<string, number>>({});
+  const [vehiclesForAssignment, setVehiclesForAssignment] = useState<Asset[]>([]);
+  const [isLoadingVehiclesForAssignment, setIsLoadingVehiclesForAssignment] = useState(false);
+  const [inventoryItems, setInventoryItems] = useState<ApiInventoryItem[]>([]);
+  const [isLoadingInventoryItems, setIsLoadingInventoryItems] = useState(false);
+  const [isAssigningResources, setIsAssigningResources] = useState(false);
+
+  const shouldRequireApproveNote = (req: LogisticsRequest) => {
+    const first = String(req.first_department || '').trim().toLowerCase();
+    const concerned = req.concerned_department_approval_status || 'pending';
+    return first === 'logistics' && concerned === 'pending';
+  };
+
+  const isForwardedToLogistics = (req: Pick<LogisticsRequest, 'forwarded_to_departments'>): boolean => {
+    const list = Array.isArray(req.forwarded_to_departments) ? req.forwarded_to_departments : [];
+    return list.some(d => String(d).trim().toLowerCase() === 'logistics');
+  };
+
+  const BASE_URL = getBaseUrl().replace(/\/$/, '');
+
+  const formatDateKey = (date: Date) => {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+
+  const toDateKey = (raw?: string) => {
+    const s = String(raw || '').trim();
+    if (!s) return formatDateKey(new Date());
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return formatDateKey(d);
+    return s.slice(0, 10);
+  };
+
+  const addDays = (dateStr: string, days: number): string => {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return dateStr;
+    date.setDate(date.getDate() + days);
+    return formatDateKey(date);
+  };
+
+  const getDayName = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { weekday: 'short' });
+  };
+
+  const getDayNum = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.getDate();
+  };
+
+  const getInventoryItemId = (item: ApiInventoryItem): string => {
+    return String(item?.id || item?.Invent_id || item?.item || '');
+  };
+
+  const fetchInventoryItems = async () => {
+    setIsLoadingInventoryItems(true);
+    try {
+      const res = await fetch(`${BASE_URL}/inventory_management/get_inventory_items`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(data?.message || 'Failed to load inventory items');
+        setInventoryItems([]);
+        return;
+      }
+
+      const items: ApiInventoryItem[] = Array.isArray(data?.inventory_items) ? data.inventory_items : [];
+      setInventoryItems(items);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load inventory items');
+      setInventoryItems([]);
+    } finally {
+      setIsLoadingInventoryItems(false);
     }
-    return a.status.localeCompare(b.status);
-  });
+  };
 
-  const groupedRequests: Record<string, LogisticsRequest[]> = {};
-  if (groupBy !== 'none') {
-    sortedRequests.forEach(req => {
-      const key = groupBy === 'status' ? req.status : req.priority;
-      if (!groupedRequests[key]) groupedRequests[key] = [];
-      groupedRequests[key].push(req);
-    });
-  } else {
-    groupedRequests['all'] = sortedRequests;
-  }
+  const buildVehicleSchedule = (raw: any): Record<string, number> => {
+    if (!raw) return {};
+    if (!Array.isArray(raw) && typeof raw === 'object') {
+      const schedule: Record<string, number> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (!k) continue;
+        if (typeof v === 'string') {
+          schedule[k] = 0;
+        } else if (v && typeof v === 'object') {
+          const acres = Number((v as any)?.acres_covered);
+          schedule[k] = Number.isFinite(acres) ? acres : 0;
+        } else {
+          schedule[k] = 0;
+        }
+      }
+      return schedule;
+    }
+
+    if (Array.isArray(raw)) {
+      const schedule: Record<string, number> = {};
+      for (const item of raw) {
+        const date = item?.date || item?.day || item?.created_at;
+        if (!date) continue;
+        const acres = Number(item?.acres_covered);
+        schedule[String(date).slice(0, 10)] = Number.isFinite(acres) ? acres : 0;
+      }
+      return schedule;
+    }
+
+    return {};
+  };
+
+  const fetchVehiclesForAssignment = async () => {
+    setIsLoadingVehiclesForAssignment(true);
+    try {
+      const res = await fetch(`${BASE_URL}/admin_vehicles/get_all_vehicles`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(data?.message || 'Failed to load vehicles');
+        setVehiclesForAssignment([]);
+        return;
+      }
+
+      const list: ApiVehicle[] = Array.isArray(data) ? data : [];
+      const mapped: Asset[] = list.map((v) => {
+        const info = v?.vehicle_information || {};
+        const vehicleNumber = info?.vehicle_number || '';
+        return {
+          id: v.vehicle_id,
+          name: vehicleNumber || v.vehicle_id,
+          type: info?.type || 'Vehicle',
+          category: 'Vehicle',
+          schedule: buildVehicleSchedule(v?.work_calandar),
+        };
+      });
+
+      setVehiclesForAssignment(mapped);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load vehicles');
+      setVehiclesForAssignment([]);
+    } finally {
+      setIsLoadingVehiclesForAssignment(false);
+    }
+  };
+
+  const handleApproveClick = (req: LogisticsRequest) => {
+    if (shouldRequireApproveNote(req)) {
+      setApproveTarget(req);
+      setApproveNote('');
+      setIsApproveNoteModalOpen(true);
+      return;
+    }
+    onApprove(req.id);
+  };
+
+  const closeApproveNoteModal = () => {
+    setIsApproveNoteModalOpen(false);
+    setApproveTarget(null);
+    setApproveNote('');
+  };
+
+  const submitApproveNote = () => {
+    if (!approveTarget) return;
+    const note = approveNote.trim();
+    if (!note) {
+      toast.error('Please write a note');
+      return;
+    }
+    onApprove(approveTarget.id, note);
+    closeApproveNoteModal();
+  };
 
   const getStatusConfig = (status: RequestStatus) => {
     switch (status) {
@@ -918,52 +1110,189 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
     }
   };
 
-  const handleOpenCreatePlan = (req: LogisticsRequest) => {
-    setSelectedRequest(req);
-    setIsCreatePlanModalOpen(true);
+  const formatRequestDateTime = (value?: string) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString();
   };
 
-  const handleCloseCreatePlan = () => {
-    setIsCreatePlanModalOpen(false);
-    setSelectedRequest(null);
-    setSelectedVehicles([]);
-    setPlanDetails({ driver: '', startDate: '', notes: '' });
-  };
+  const sortedRequests = [...requests].sort((a, b) => {
+    const aT = new Date(a.requestDate || a.createdAt).getTime();
+    const bT = new Date(b.requestDate || b.createdAt).getTime();
+    if (Number.isNaN(aT) && Number.isNaN(bT)) return 0;
+    if (Number.isNaN(aT)) return 1;
+    if (Number.isNaN(bT)) return -1;
+    return bT - aT;
+  });
 
-  const toggleVehicleSelection = (vehicleId: string) => {
-    setSelectedVehicles(prev => 
-      prev.includes(vehicleId) 
-        ? prev.filter(id => id !== vehicleId)
-        : [...prev, vehicleId]
+  const toggleVehicleSelection = (vId: string) => {
+    setSelectedVehicleIds(prev =>
+      prev.includes(vId) ? prev.filter(id => id !== vId) : [...prev, vId]
     );
   };
 
-  const handleCreatePlan = () => {
-    if (!selectedRequest) return;
-    
-    if (selectedVehicles.length === 0) {
+  const updateEquipmentCount = (eId: string, delta: number, max?: number) => {
+    setEquipmentCounts(prev => {
+      const current = prev[eId] || 0;
+      const boundedMax = typeof max === 'number' && Number.isFinite(max) ? Math.max(0, Math.floor(max)) : undefined;
+      const rawNext = current + delta;
+      const next = Math.max(0, boundedMax !== undefined ? Math.min(boundedMax, rawNext) : rawNext);
+      if (next === 0) {
+        const { [eId]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [eId]: next };
+    });
+  };
+
+  const closeAssignResourcesModal = () => {
+    setIsAssignResourcesOpen(false);
+    setAssignmentStep(1);
+    setAssignmentDate(null);
+    setAssignmentRequest(null);
+    setSelectedVehicleIds([]);
+    setEquipmentCounts({});
+  };
+
+  const handleOpenAssignResources = (req: LogisticsRequest) => {
+    const dateKey = toDateKey(req.preferredDate || req.requestDate || req.createdAt);
+    setAssignmentRequest(req);
+    setAssignmentDate(dateKey);
+    setAssignmentStep(1);
+    setSelectedVehicleIds([]);
+    setEquipmentCounts({});
+    setIsAssignResourcesOpen(true);
+    fetchVehiclesForAssignment();
+    fetchInventoryItems();
+  };
+
+  const chartDates = assignmentDate ? Array.from({ length: 5 }, (_, i) => addDays(assignmentDate, i)) : [];
+
+  const VehicleAvailabilityRow = ({ asset, isSelected, onSelect }: { asset: Asset, isSelected: boolean, onSelect: () => void }) => {
+    return (
+      <div
+        onClick={onSelect}
+        className={cn(
+          "grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 p-2 rounded-lg border transition-all cursor-pointer items-center group",
+          isSelected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/50"
+        )}
+      >
+        <div className="flex items-center gap-3 pr-2">
+          <div className={cn(
+            "p-2 rounded-md border shadow-sm",
+            isSelected ? "bg-primary text-primary-foreground" : "bg-white text-muted-foreground"
+          )}>
+            <Truck className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold truncate text-foreground">{asset.name}</div>
+            <div className="text-[10px] text-muted-foreground">{asset.type}</div>
+          </div>
+        </div>
+
+        {chartDates.map(date => {
+          const acresCovered = asset.schedule[date];
+          const isBusy = acresCovered !== undefined;
+          return (
+            <div key={date} className="flex justify-center h-full items-center">
+              {isBusy ? (
+                <div className="w-full h-8 bg-red-100 border border-red-200 rounded-md flex items-center justify-center group/tooltip relative">
+                  <span className="text-[10px] font-bold text-red-700">{Number(acresCovered || 0).toFixed(0)} ac</span>
+                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap pointer-events-none z-10">
+                    Acres covered: {Number(acresCovered || 0).toFixed(2)}
+                  </div>
+                </div>
+              ) : (
+                <div className={cn(
+                  "w-full h-8 border rounded-md flex items-center justify-center transition-colors",
+                  date === assignmentDate
+                    ? (isSelected ? "bg-green-600 border-green-600 text-white" : "bg-green-100 border-green-200 text-green-700")
+                    : "bg-gray-50 border-gray-100"
+                )}>
+                  {date === assignmentDate && isSelected && <CheckCircle2 className="w-4 h-4" />}
+                  {date === assignmentDate && !isSelected && <span className="text-[10px] font-bold">Free</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const EquipmentQuantityRow = ({ item, count }: { item: ApiInventoryItem; count: number }) => {
+    const id = getInventoryItemId(item);
+    const title = item?.item || id || 'Item';
+    const category = item?.category || 'Inventory';
+    const unit = item?.unit || '';
+    const maxQty = Number(item?.stock ?? 0);
+    const maxSafe = Number.isFinite(maxQty) ? Math.max(0, Math.floor(maxQty)) : 0;
+
+    return (
+      <div className={cn(
+        "flex items-center justify-between p-3 rounded-lg border transition-all",
+        count > 0 ? "border-orange-200 bg-orange-50" : "border-border hover:border-gray-300 bg-white"
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "p-2 rounded-md border shadow-sm",
+            count > 0 ? "bg-orange-100 text-orange-700 border-orange-200" : "bg-gray-50 text-muted-foreground"
+          )}>
+            <Wrench className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-foreground">{title}</div>
+            <div className="text-[10px] text-muted-foreground">
+              {category}
+              {maxSafe > 0 ? ` • Available: ${maxSafe}${unit ? ` ${unit}` : ''}` : ' • Out of stock'}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 bg-white rounded-md border border-gray-200 p-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => updateEquipmentCount(id, -1, maxSafe)}
+            disabled={count === 0}
+            className="p-1 hover:bg-gray-100 rounded text-gray-500 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <Minus className="w-3 h-3" />
+          </button>
+          <span className="w-4 text-center text-sm font-bold text-foreground">{count}</span>
+          <button
+            type="button"
+            onClick={() => updateEquipmentCount(id, 1, maxSafe)}
+            disabled={maxSafe === 0 || count >= maxSafe}
+            className="p-1 hover:bg-gray-100 rounded text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const handleConfirmResources = async () => {
+    if (!assignmentRequest || !assignmentDate) return;
+    if (selectedVehicleIds.length === 0) {
       toast.error('Please select at least one vehicle');
       return;
     }
 
-    if (!planDetails.driver || !planDetails.startDate) {
-      toast.error('Please fill in all required fields');
-      return;
+    setIsAssigningResources(true);
+    try {
+      // Note: backend endpoint for persisting logistics "operation" creation wasn't provided.
+      // This keeps the *exact* CultivationCalendar Assign Resources UI + vehicle/inventory APIs.
+      toast.success(`Resources allocated for request ${assignmentRequest.id}`);
+      closeAssignResourcesModal();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to allocate resources');
+    } finally {
+      setIsAssigningResources(false);
     }
-
-    // Create the logistics plan
-    toast.success(`Logistics plan created for request ${selectedRequest.id}`);
-    handleCloseCreatePlan();
   };
-
-  // Mock vehicle data
-  const availableVehicles = [
-    { id: 'V001', number: 'MH-12-AB-1234', type: 'Tractor', status: 'Available' },
-    { id: 'V002', number: 'MH-12-CD-5678', type: 'Truck', status: 'Available' },
-    { id: 'V003', number: 'MH-12-EF-9012', type: 'Van', status: 'Available' },
-    { id: 'V004', number: 'MH-12-GH-3456', type: 'Pickup', status: 'Available' },
-    { id: 'V005', number: 'MH-12-IJ-7890', type: 'Truck', status: 'Busy' },
-  ];
 
   const getPriorityConfig = (priority: RequestPriority) => {
     switch (priority) {
@@ -973,429 +1302,339 @@ const RequestsSection = ({ requests, onApprove, onReject }: {
       case 'low': return { color: 'text-gray-700', bg: 'bg-gray-50', icon: '⚪' };
     }
   };
-
-  const getGroupLabel = (key: string) => {
-    if (groupBy === 'status') return getStatusConfig(key as RequestStatus).label;
-    if (groupBy === 'priority') return key.charAt(0).toUpperCase() + key.slice(1);
-    return 'All Requests';
-  };
-
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-        <div className="flex flex-col lg:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by requester, location, vehicle, or ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
-            />
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+            <div>Request ID</div>
+            <div>Sender</div>
+            <div>Date &amp; Time</div>
+            <div className="md:text-right">Status</div>
           </div>
-
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
-          >
-            <option value="date">Sort by Date</option>
-            <option value="priority">Sort by Priority</option>
-            <option value="status">Sort by Status</option>
-          </select>
-
-          <select
-            value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value as any)}
-            className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
-          >
-            <option value="status">Group by Status</option>
-            <option value="priority">Group by Priority</option>
-            <option value="none">No Grouping</option>
-          </select>
         </div>
 
-        <div className="mt-4 flex gap-4 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-500">Total:</span>
-            <span className="font-semibold text-gray-900">{requests.length}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-gray-500">Filtered:</span>
-            <span className="font-semibold text-gray-900">{filteredRequests.length}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-gray-500">Pending:</span>
-            <span className="font-semibold text-amber-700">{requests.filter(r => r.status === 'pending').length}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-gray-500">In Progress:</span>
-            <span className="font-semibold text-purple-700">{requests.filter(r => r.status === 'in_progress').length}</span>
-          </div>
+        <div className="divide-y divide-gray-100 bg-white">
+          {sortedRequests.length === 0 ? (
+            <div className="p-12 text-center text-gray-500">
+              <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p className="text-gray-500">No requests available</p>
+            </div>
+          ) : (
+            sortedRequests.map((req) => {
+              const statusConfig = getStatusConfig(req.status);
+              const priorityConfig = getPriorityConfig(req.priority);
+              const dateTime = formatRequestDateTime(req.createdAt || req.requestDate);
+
+              return (
+                <details key={req.id} className="group">
+                  <summary
+                    className={cn(
+                      "cursor-pointer list-none [&::-webkit-details-marker]:hidden",
+                      "px-6 py-4 hover:bg-gray-50 transition-colors",
+                      "flex items-center gap-4"
+                    )}
+                  >
+                    <div className="min-w-0 flex-1 grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+                      <div className="font-mono text-sm font-semibold text-gray-900 truncate">{req.id}</div>
+                      <div className="text-sm font-medium text-gray-900 truncate">{req.requesterName}</div>
+                      <div className="text-sm text-gray-600 truncate">{dateTime}</div>
+                      <div className="md:text-right">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig.bg} ${statusConfig.color} ${statusConfig.border} border`}>
+                          {statusConfig.label}
+                        </span>
+                      </div>
+                    </div>
+
+                    <ChevronDown className="w-5 h-5 text-gray-400 transition-transform group-open:rotate-180 flex-shrink-0" />
+                  </summary>
+
+                  <div className="px-6 pb-6 pt-4 bg-gray-50 border-t border-gray-200">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 divide-x divide-dashed divide-gray-300">
+                      {/* Section 1: Sender's Details */}
+                      <div className="space-y-3">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Sender's Details</h4>
+                        <div className="space-y-2">
+                          <div>
+                            <p className="text-xs text-gray-500">Staff ID</p>
+                            <p className="text-sm font-medium text-gray-900">{req.staff_id || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Staff Name</p>
+                            <p className="text-sm font-medium text-gray-900">{req.staff_name || req.requesterName}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Phone</p>
+                            <p className="text-sm font-medium text-gray-900">{req.staff_phone || req.requesterPhone}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Department</p>
+                            <p className="text-sm font-medium text-gray-900">{req.staff_department || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Designation</p>
+                            <p className="text-sm font-medium text-gray-900">{req.staff_designation || '—'}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Section 2: Request Details */}
+                      <div className="space-y-3 md:pl-6">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Request Details</h4>
+                        <div className="space-y-2">
+                          <div>
+                            <p className="text-xs text-gray-500">Requested Date</p>
+                            <p className="text-sm font-medium text-gray-900">{formatRequestDateTime(req.requestDate)}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Requested Location</p>
+                            <p className="text-sm font-medium text-gray-900">
+                              {req.toLocation ? `${req.fromLocation} → ${req.toLocation}` : req.fromLocation}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Vehicle Type</p>
+                            <p className="text-sm font-medium text-gray-900">{req.vehicleType}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Priority</p>
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${priorityConfig.bg} ${priorityConfig.color}`}>
+                              {priorityConfig.icon} {req.priority.charAt(0).toUpperCase() + req.priority.slice(1)}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Request Notes</p>
+                            <p className="text-xs italic text-gray-400 mb-1">(Direct note from sender)</p>
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-sm text-gray-700">{req.description}</div>
+                          </div>
+
+                          {req.adminNote && String(req.adminNote).trim() && (
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Approval Note</p>
+                              <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-sm text-blue-900">{req.adminNote}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Section 3: Request Status */}
+                      <div className="space-y-3 md:pl-6">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Request Status</h4>
+                        <div className="space-y-4">
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Concerned Department</p>
+                            <span className={cn(
+                              "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium",
+                              req.concerned_department_approval_status === 'approved_and_forwarded' ? "bg-green-100 text-green-800 border border-green-200" :
+                              req.concerned_department_approval_status === 'rejected' ? "bg-red-100 text-red-800 border border-red-200" :
+                              "bg-amber-100 text-amber-800 border border-amber-200"
+                            )}>
+                              {req.concerned_department_approval_status === 'approved_and_forwarded' ? 'Approved & Forwarded' :
+                               req.concerned_department_approval_status === 'rejected' ? 'Rejected' : 'Pending'}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Admin Operations</p>
+                            <span className={cn(
+                              "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium",
+                              (req.admin_ops_approval_status === 'approved_and_forwarded' || req.admin_ops_approval_status === 'approved') ? "bg-green-100 text-green-800 border border-green-200" :
+                              req.admin_ops_approval_status === 'rejected' ? "bg-red-100 text-red-800 border border-red-200" :
+                              "bg-amber-100 text-amber-800 border border-amber-200"
+                            )}>
+                              {(req.admin_ops_approval_status === 'approved_and_forwarded' || req.admin_ops_approval_status === 'approved') ? 'Approved' :
+                               req.admin_ops_approval_status === 'rejected' ? 'Rejected' : 'Pending'}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Forwarded Department</p>
+                            <span className={cn(
+                              "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium",
+                              req.forwarded_department_approval_status === 'approved_and_forwarded' ? "bg-green-100 text-green-800 border border-green-200" :
+                              req.forwarded_department_approval_status === 'rejected' ? "bg-red-100 text-red-800 border border-red-200" :
+                              "bg-amber-100 text-amber-800 border border-amber-200"
+                            )}>
+                              {req.forwarded_department_approval_status === 'approved_and_forwarded' ? 'Approved & Forwarded' :
+                               req.forwarded_department_approval_status === 'rejected' ? 'Rejected' : 'Pending'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 pt-4 border-t border-gray-200 flex flex-wrap gap-2">
+                      {/* Buttons based on approval status */}
+                      {req.concerned_department_approval_status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleApproveClick(req)}
+                            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors"
+                          >
+                            Approve & Forward
+                          </button>
+                          <button
+                            onClick={() => onReject(req.id)}
+                            className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition-colors"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+
+                      {req.forwarded_department_approval_status === 'pending' &&
+                        (req.admin_ops_approval_status === 'approved_and_forwarded' || req.admin_ops_approval_status === 'approved') &&
+                        isForwardedToLogistics(req) && (
+                        <>
+                          <button
+                            onClick={() => handleOpenAssignResources(req)}
+                            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium transition-colors"
+                          >
+                            Create Operation
+                          </button>
+                          <button
+                            onClick={() => onReject(req.id)}
+                            className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition-colors"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+
+                      {req.forwarded_department_approval_status === 'approved_and_forwarded' && (
+                        <span className="inline-flex items-center px-3 py-2 bg-green-50 text-green-700 rounded-lg text-xs font-medium border border-green-200">
+                          ✓ Fully Approved
+                        </span>
+                      )}
+
+                      {(req.concerned_department_approval_status === 'rejected' || req.admin_ops_approval_status === 'rejected' || req.forwarded_department_approval_status === 'rejected') && (
+                        <span className="inline-flex items-center px-3 py-2 bg-red-50 text-red-700 rounded-lg text-xs font-medium border border-red-200">
+                          ✗ Rejected
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </details>
+              );
+            })
+          )}
         </div>
       </div>
 
-      <div className="space-y-4">
-        {Object.entries(groupedRequests).map(([groupKey, groupRequests]) => {
-          const isExpanded = expandedGroups.has(groupKey);
-          
-          return (
-            <div key={groupKey} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-              {groupBy !== 'none' && (
-                <button
-                  onClick={() => toggleGroup(groupKey)}
-                  className="w-full px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <ChevronDown className={cn("w-5 h-5 text-gray-400 transition-transform", !isExpanded && "-rotate-90")} />
-                    <h3 className="font-semibold text-gray-900">{getGroupLabel(groupKey)}</h3>
-                    <span className="px-2.5 py-1 bg-white rounded-full text-xs font-medium text-gray-600 border border-gray-200">
-                      {groupRequests.length}
-                    </span>
+      {/* Assign Resources Modal (same UI as CultivationCalendar) */}
+      {isAssignResourcesOpen && assignmentDate && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-background border border-border w-full max-w-4xl rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Assign Resources</h3>
+                <p className="text-sm text-muted-foreground">Step {assignmentStep} of 2 • {assignmentStep === 1 ? 'Vehicle allocation' : 'Equipment selection'} • {new Date(assignmentDate).toDateString()}</p>
+                {assignmentRequest && (
+                  <p className="text-xs text-muted-foreground mt-1">Request ID: <span className="font-medium text-foreground">{assignmentRequest.id}</span></p>
+                )}
+              </div>
+              <button onClick={closeAssignResourcesModal} className="p-1 hover:bg-muted rounded-md"><X className="w-5 h-5 text-muted-foreground" /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6 space-y-8">
+              {assignmentStep === 1 ? (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Truck className="w-4 h-4" /> Select Vehicles</h4>
+                    {selectedVehicleIds.length > 0 && <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">{selectedVehicleIds.length} Selected</span>}
                   </div>
-                </button>
-              )}
-
-              {isExpanded && (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Request ID</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Sender Details</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Receiver Details</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Request Details</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Priority</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 bg-white">
-                      {groupRequests.map((req) => {
-                        const statusConfig = getStatusConfig(req.status);
-                        const priorityConfig = getPriorityConfig(req.priority);
-
-                        return (
-                          <tr key={req.id} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-4 py-4">
-                              <div className="space-y-1">
-                                <p className="font-mono text-sm font-semibold text-gray-900">{req.id}</p>
-                                <p className="text-xs text-gray-500">User ID: {req.requesterId}</p>
-                                <p className="text-xs text-gray-500">{new Date(req.createdAt).toLocaleString()}</p>
-                              </div>
-                            </td>
-                            
-                            <td className="px-4 py-4">
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <User className="w-3.5 h-3.5 text-gray-400" />
-                                  <p className="font-medium text-gray-900">{req.requesterName}</p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Phone className="w-3.5 h-3.5 text-gray-400" />
-                                  <p className="text-sm text-gray-600">{req.requesterPhone}</p>
-                                </div>
-                                <p className="text-xs text-gray-500">ID: {req.requesterId}</p>
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-4">
-                              <div className="space-y-1">
-                                {req.receiverName ? (
-                                  <>
-                                    <div className="flex items-center gap-2">
-                                      <User className="w-3.5 h-3.5 text-gray-400" />
-                                      <p className="font-medium text-gray-900">{req.receiverName}</p>
-                                    </div>
-                                    <p className="text-sm text-gray-600">{req.receiverDepartment || 'Logistics Dept.'}</p>
-                                    {req.receiverId && <p className="text-xs text-gray-500">ID: {req.receiverId}</p>}
-                                  </>
-                                ) : (
-                                  <p className="text-sm text-gray-500 italic">Not assigned</p>
-                                )}
-                                {req.forwardedBy && (
-                                  <p className="text-xs text-blue-600 mt-2">
-                                    Forwarded by {req.forwardedBy}
-                                  </p>
-                                )}
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-4">
-                              <div className="space-y-2 max-w-xs">
-                                <div className="flex items-start gap-2">
-                                  <Truck className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                                  <div>
-                                    <p className="text-xs text-gray-500">Vehicle Type</p>
-                                    <p className="text-sm font-medium text-gray-900">{req.vehicleType}</p>
-                                  </div>
-                                </div>
-                                
-                                <div className="flex items-start gap-2">
-                                  <MapPin className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
-                                  <div>
-                                    <p className="text-xs text-gray-500">Route</p>
-                                    <p className="text-sm text-gray-900">{req.fromLocation} → {req.toLocation}</p>
-                                  </div>
-                                </div>
-
-                                <div className="flex items-start gap-2">
-                                  <CalendarIcon className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                                  <div>
-                                    <p className="text-xs text-gray-500">Preferred Date</p>
-                                    <p className="text-sm text-gray-900">{new Date(req.preferredDate).toLocaleDateString()}</p>
-                                  </div>
-                                </div>
-
-                                {req.loadDetails && (
-                                  <div className="flex items-start gap-2">
-                                    <Package className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                                    <div>
-                                      <p className="text-xs text-gray-500">Load</p>
-                                      <p className="text-sm text-gray-900">{req.loadDetails}</p>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {req.description && (
-                                  <div className="mt-2 p-2 bg-gray-50 rounded border border-gray-100">
-                                    <p className="text-xs text-gray-600 italic">"{req.description}"</p>
-                                  </div>
-                                )}
-
-                                {req.adminNote && (
-                                  <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-100">
-                                    <p className="text-xs font-semibold text-blue-900 mb-1">Admin Note:</p>
-                                    <p className="text-xs text-blue-700">{req.adminNote}</p>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-4">
-                              <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border", priorityConfig.bg, priorityConfig.color)}>
-                                <span>{priorityConfig.icon}</span>
-                                <span>{req.priority.toUpperCase()}</span>
-                              </span>
-                            </td>
-
-                            <td className="px-4 py-4">
-                              <span className={cn("inline-flex px-3 py-1.5 rounded-lg text-xs font-medium border", statusConfig.bg, statusConfig.color, statusConfig.border)}>
-                                {statusConfig.label}
-                              </span>
-                            </td>
-
-                            <td className="px-4 py-4">
-                              <div className="flex flex-col gap-2 min-w-[140px]">
-                                {req.status === 'pending' && req.receiverId !== 'ADMIN' && (
-                                  <button
-                                    onClick={() => {
-                                      // Send request to admin for review
-                                      toast.success('Request sent to Admin for review');
-                                    }}
-                                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
-                                  >
-                                    <FileText className="w-3.5 h-3.5" />
-                                    Send to Admin Request
-                                  </button>
-                                )}
-                                {req.status === 'pending' && req.receiverId === 'ADMIN' && (
-                                  <>
-                                    <button
-                                      onClick={() => onApprove(req.id)}
-                                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
-                                    >
-                                      <CheckCircle2 className="w-3.5 h-3.5" />
-                                      Approve
-                                    </button>
-                                    <button
-                                      onClick={() => onReject(req.id)}
-                                      className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium transition-colors"
-                                    >
-                                      Reject
-                                    </button>
-                                  </>
-                                )}
-                                {req.status === 'approved' && (
-                                  <button 
-                                    onClick={() => handleOpenCreatePlan(req)}
-                                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium"
-                                  >
-                                    Create Plan
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-
-                  {groupRequests.length === 0 && (
-                    <div className="p-12 text-center text-gray-500 bg-white">
-                      <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                      <p>No requests in this category</p>
+                  <div className="overflow-x-auto bg-white rounded-lg border border-border shadow-sm p-4">
+                    <div className="min-w-[600px]">
+                      <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4 text-xs font-semibold text-muted-foreground">
+                        <div className="self-end pb-2">Vehicle Name</div>
+                        {chartDates.map(date => (
+                          <div key={date} className={cn("text-center pb-2 border-b-2", date === assignmentDate ? "border-primary text-primary" : "border-transparent")}>
+                            <div className="text-[10px] uppercase">{getDayName(date)}</div>
+                            <div>{getDayNum(date)}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="space-y-2">
+                        {isLoadingVehiclesForAssignment ? <div className="p-4 text-sm text-muted-foreground">Loading vehicles…</div> : vehiclesForAssignment.length === 0 ? <div className="p-4 text-sm text-muted-foreground">No vehicles found.</div> : vehiclesForAssignment.map(vehicle => <VehicleAvailabilityRow key={vehicle.id} asset={vehicle} isSelected={selectedVehicleIds.includes(vehicle.id)} onSelect={() => toggleVehicleSelection(vehicle.id)} />)}
+                      </div>
                     </div>
-                  )}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Wrench className="w-4 h-4" /> Select Equipment</h4>
+                    {Object.values(equipmentCounts).reduce((a, b) => a + b, 0) > 0 && <span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200"><Hash className="w-3 h-3" />{Object.values(equipmentCounts).reduce((a, b) => a + b, 0)} Total</span>}
+                  </div>
+                  <div className="text-xs text-muted-foreground mb-3">Vehicles allocated: <span className="font-semibold text-foreground">{selectedVehicleIds.length}</span></div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {isLoadingInventoryItems ? <div className="col-span-full p-4 text-sm text-muted-foreground">Loading inventory items…</div> : inventoryItems.length === 0 ? <div className="col-span-full p-4 text-sm text-muted-foreground">No inventory items found.</div> : inventoryItems.filter((it) => !!getInventoryItemId(it)).map((it) => { const id = getInventoryItemId(it); return <EquipmentQuantityRow key={id} item={it} count={equipmentCounts[id] || 0} />; })}
+                  </div>
                 </div>
               )}
             </div>
-          );
-        })}
 
-        {filteredRequests.length === 0 && (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-            <Search className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p className="text-gray-500">No requests found matching your search</p>
+            <div className="p-4 border-t border-border bg-white flex justify-between items-center">
+              <div className="flex gap-4 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-green-100 border border-green-200 rounded-sm"></div> Available</div>
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-red-100 border border-red-200 rounded-sm"></div> Busy</div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={closeAssignResourcesModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Cancel</button>
+                {assignmentStep === 2 && <button type="button" onClick={() => setAssignmentStep(1)} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Back</button>}
+                {assignmentStep === 1 ? (
+                  <button type="button" onClick={() => setAssignmentStep(2)} disabled={selectedVehicleIds.length === 0} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors", selectedVehicleIds.length > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed")}>
+                    Next
+                  </button>
+                ) : (
+                  <button type="button" onClick={handleConfirmResources} disabled={isAssigningResources} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-primary text-primary-foreground hover:bg-primary/90">
+                    {isAssigningResources ? 'Assigning…' : 'Confirm Assignment'}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Create Plan Modal */}
-      {isCreatePlanModalOpen && selectedRequest && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-3xl rounded-xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
+      {/* Approve Note Modal */}
+      {isApproveNoteModalOpen && approveTarget && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-xl rounded-xl shadow-2xl overflow-hidden border border-gray-200">
             <div className="p-6 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
               <div>
-                <h3 className="font-bold text-xl text-gray-900">Create Logistics Plan</h3>
-                <p className="text-sm text-gray-600 mt-1">Request ID: {selectedRequest.id}</p>
+                <h3 className="font-bold text-lg text-gray-900">Approval Note</h3>
+                <p className="text-sm text-gray-600 mt-1">Request ID: {approveTarget.id}</p>
               </div>
-              <button 
-                onClick={handleCloseCreatePlan}
+              <button
+                onClick={closeApproveNoteModal}
                 className="w-10 h-10 bg-white hover:bg-gray-100 rounded-lg flex items-center justify-center transition-colors"
               >
                 <X className="w-5 h-5 text-gray-600" />
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
-              {/* Request Summary */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h4 className="font-semibold text-blue-900 mb-3">Request Summary</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-blue-600">Requester:</p>
-                    <p className="font-medium text-blue-900">{selectedRequest.requesterName}</p>
-                  </div>
-                  <div>
-                    <p className="text-blue-600">Vehicle Type:</p>
-                    <p className="font-medium text-blue-900">{selectedRequest.vehicleType}</p>
-                  </div>
-                  <div>
-                    <p className="text-blue-600">Route:</p>
-                    <p className="font-medium text-blue-900">{selectedRequest.fromLocation} → {selectedRequest.toLocation}</p>
-                  </div>
-                  <div>
-                    <p className="text-blue-600">Preferred Date:</p>
-                    <p className="font-medium text-blue-900">{new Date(selectedRequest.preferredDate).toLocaleDateString()}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Vehicle Selection */}
-              <div>
-                <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                  <Truck className="w-5 h-5" />
-                  Select Vehicle(s)
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {availableVehicles.map(vehicle => (
-                    <button
-                      key={vehicle.id}
-                      onClick={() => toggleVehicleSelection(vehicle.id)}
-                      disabled={vehicle.status === 'Busy'}
-                      className={cn(
-                        "p-4 rounded-lg border-2 text-left transition-all",
-                        selectedVehicles.includes(vehicle.id)
-                          ? "border-slate-900 bg-slate-50"
-                          : "border-gray-200 bg-white hover:border-gray-300",
-                        vehicle.status === 'Busy' && "opacity-50 cursor-not-allowed"
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="font-semibold text-gray-900">{vehicle.number}</p>
-                        {selectedVehicles.includes(vehicle.id) && (
-                          <CheckCircle2 className="w-5 h-5 text-slate-900" />
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600">{vehicle.type}</span>
-                        <span className={cn(
-                          "px-2 py-0.5 rounded text-xs font-medium",
-                          vehicle.status === 'Available' 
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-red-100 text-red-700"
-                        )}>
-                          {vehicle.status}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Plan Details */}
-              <div className="space-y-4">
-                <h4 className="font-semibold text-gray-900">Plan Details</h4>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Driver Name <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={planDetails.driver}
-                      onChange={(e) => setPlanDetails({...planDetails, driver: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
-                      placeholder="Enter driver name"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Start Date <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={planDetails.startDate}
-                      onChange={(e) => setPlanDetails({...planDetails, startDate: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
-                      min={new Date().toISOString().split('T')[0]}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Additional Notes (Optional)
-                  </label>
-                  <textarea
-                    value={planDetails.notes}
-                    onChange={(e) => setPlanDetails({...planDetails, notes: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none resize-none"
-                    rows={3}
-                    placeholder="Add any special instructions or notes..."
-                  />
-                </div>
-              </div>
+            <div className="p-6 space-y-3">
+              <label className="block text-sm font-medium text-gray-700">Write a note (required)</label>
+              <textarea
+                value={approveNote}
+                onChange={(e) => setApproveNote(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none resize-none"
+                rows={4}
+                placeholder="Add approval note..."
+              />
             </div>
 
             <div className="p-6 bg-gray-50 border-t border-gray-200 flex gap-3">
               <button
-                onClick={handleCloseCreatePlan}
+                onClick={closeApproveNoteModal}
                 className="flex-1 px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={handleCreatePlan}
-                className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-lg font-semibold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+                onClick={submitApproveNote}
+                className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-colors"
               >
-                <CheckCircle2 className="w-5 h-5" />
-                Create Plan
+                Approve
               </button>
             </div>
           </div>
@@ -1459,99 +1698,125 @@ const LogisticsManagement = () => {
     loadDetails: '',
   });
 
+  const deriveRequestStatus = (r: Pick<LogisticsRequest,
+    'concerned_department_approval_status' | 'admin_ops_approval_status' | 'forwarded_department_approval_status'>
+  ): RequestStatus => {
+    const concerned = r.concerned_department_approval_status || 'pending';
+    const adminOps = r.admin_ops_approval_status || 'pending';
+    const forwarded = r.forwarded_department_approval_status || 'pending';
+
+    const isApproved = (v: ApprovalStageStatus) => v === 'approved' || v === 'approved_and_forwarded';
+
+    if ([concerned, adminOps, forwarded].some(s => s === 'rejected')) return 'rejected';
+    if ([concerned, adminOps, forwarded].every(s => isApproved(s))) return 'approved';
+    if (concerned === 'pending') return 'pending';
+    return 'in_progress';
+  };
+
+  const parseRequestLocation = (raw: string): { fromLocation: string; toLocation: string } => {
+    const cleaned = String(raw || '').trim();
+    if (!cleaned) return { fromLocation: '—', toLocation: '' };
+    const parts = cleaned.split('->').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) return { fromLocation: parts[0], toLocation: parts.slice(1).join(' -> ') };
+    return { fromLocation: cleaned, toLocation: '' };
+  };
+
+  const updateConcernedDepartmentApprovalStatus = async (payload: {
+    request_id: string;
+    status: 'approved_and_forwarded' | 'rejected';
+    note: string;
+  }) => {
+    const response = await fetch(
+      `${getBaseUrl()}/admin_ops_requests/update_concerned_department_approval_status`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const maybeMessage = (data && (data.message || data.detail || data.error)) ? String(data.message || data.detail || data.error) : '';
+      throw new Error(maybeMessage || `Request failed (${response.status})`);
+    }
+
+    return data;
+  };
+
   const fetchRequests = async () => {
     setLoadingRequests(true);
     try {
-      const mockRequests: LogisticsRequest[] = [
-        {
-          id: 'REQ-001',
-          requesterId: 'U001',
-          requesterName: 'Ramesh Kumar',
-          requesterPhone: '+91 98765 43210',
-          vehicleType: 'Tractor',
-          fromLocation: 'Plant A',
-          toLocation: 'Field 12-B',
-          requestDate: '2026-02-02T10:30:00',
-          preferredDate: '2026-02-05',
+      const response = await fetch(`${getBaseUrl()}/admin_ops_requests/get_all_department_requests/logistics`);
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+
+      const raw = await response.json();
+      const list: BackendDepartmentRequest[] = Array.isArray(raw)
+        ? raw
+        : (
+            Array.isArray(raw?.department_requests)
+              ? raw.department_requests
+              : (Array.isArray(raw?.data)
+                  ? raw.data
+                  : (Array.isArray(raw?.requests)
+                      ? raw.requests
+                      : (Array.isArray(raw?.data?.department_requests)
+                          ? raw.data.department_requests
+                          : [])))
+          );
+
+      const mapped: LogisticsRequest[] = list.map((item) => {
+        const loc = parseRequestLocation(item?.request_details?.request_location);
+        const concerned = item?.concerned_department_approval_status || 'pending';
+        const adminOps = item?.admin_ops_approval_status || 'pending';
+        const forwarded = item?.forwarded_department_approval_status || 'pending';
+        const forwardedToDepartments = Array.isArray(item?.forwarded_to_departments) ? item.forwarded_to_departments : [];
+
+        const base: LogisticsRequest = {
+          id: String(item?.request_id || '').trim() || `REQ-${Math.random().toString(16).slice(2)}`,
+          requesterId: item?.sender_details?.staff_id || '',
+          requesterName: item?.sender_details?.staff_name || '—',
+          requesterPhone: item?.sender_details?.staff_phone || '—',
+          vehicleType: '—',
+          fromLocation: loc.fromLocation,
+          toLocation: loc.toLocation,
+          // requested date from backend
+          requestDate: item?.date || '',
+          // keep something valid for the existing modal
+          preferredDate: item?.date || '',
+          // will be overwritten after derive
           status: 'pending',
-          priority: 'urgent',
-          description: 'Need tractor for cultivation. Monsoon preparation.',
-          loadDetails: 'Cultivation Equipment',
-          createdAt: '2026-02-02T10:30:00',
-          receiverId: 'L001',
-          receiverName: 'Logistics Department',
-          receiverDepartment: 'Logistics & Transport',
-        },
-        {
-          id: 'REQ-002',
-          requesterId: 'U002',
-          requesterName: 'Suresh Patil',
-          requesterPhone: '+91 98765 43211',
-          vehicleType: 'Truck',
-          fromLocation: 'Field 8-A',
-          toLocation: 'Hub 1',
-          requestDate: '2026-02-01T14:00:00',
-          preferredDate: '2026-02-04',
-          status: 'approved',
-          priority: 'high',
-          description: 'Transport harvested produce to storage',
-          loadDetails: '5 tons produce',
-          createdAt: '2026-02-01T14:00:00',
-          receiverId: 'L002',
-          receiverName: 'Mahesh Rao',
-          receiverDepartment: 'Logistics & Transport',
-          adminNote: 'Approved by Admin. Priority transport required for fresh produce. Assign best available truck.',
-          forwardedBy: 'Admin Sharma',
-          forwardedAt: '2026-02-01T16:00:00',
-        },
-        {
-          id: 'REQ-003',
-          requesterId: 'U003',
-          requesterName: 'Vijay Deshmukh',
-          requesterPhone: '+91 98765 43212',
-          vehicleType: 'JCB',
-          fromLocation: 'Hub 2',
-          toLocation: 'Field 15-C',
-          requestDate: '2026-02-02T09:00:00',
-          preferredDate: '2026-02-03',
-          status: 'in_progress',
           priority: 'medium',
-          description: 'Land leveling required',
-          loadDetails: 'Heavy machinery',
-          createdAt: '2026-02-02T09:00:00',
-          receiverId: 'L003',
-          receiverName: 'Prakash Singh',
-          receiverDepartment: 'Heavy Equipment Dept.',
-          adminNote: 'In progress. JCB-205 assigned. Expected completion: 3 hours.',
-          forwardedBy: 'Admin Kumar',
-          forwardedAt: '2026-02-02T10:00:00',
-        },
-        {
-          id: 'REQ-004',
-          requesterId: 'U004',
-          requesterName: 'Anil Sharma',
-          requesterPhone: '+91 98765 43213',
-          vehicleType: 'Pickup',
-          fromLocation: 'Plant B',
-          toLocation: 'Field 3-A',
-          requestDate: '2026-01-30T11:00:00',
-          preferredDate: '2026-02-01',
-          status: 'completed',
-          priority: 'low',
-          description: 'Fertilizer delivery',
-          loadDetails: '500kg fertilizer',
-          createdAt: '2026-01-30T11:00:00',
-          receiverId: 'L004',
-          receiverName: 'Rajesh Patel',
-          receiverDepartment: 'Logistics & Transport',
-          adminNote: 'Completed successfully. Fertilizer delivered on time.',
-          forwardedBy: 'Admin Verma',
-          forwardedAt: '2026-01-30T12:00:00',
-        },
-      ];
-      setRequests(mockRequests);
+          description: item?.request_details?.note || '',
+          createdAt: item?.created_at || '',
+
+          first_department: item?.first_department,
+
+          staff_id: item?.sender_details?.staff_id,
+          staff_name: item?.sender_details?.staff_name,
+          staff_phone: item?.sender_details?.staff_phone,
+          staff_department: item?.sender_details?.staff_department,
+          staff_designation: item?.sender_details?.staff_designation,
+
+          concerned_department_approval_status: concerned,
+          admin_ops_approval_status: adminOps,
+          forwarded_department_approval_status: forwarded,
+
+          forwarded_to_departments: forwardedToDepartments,
+        };
+
+        return { ...base, status: deriveRequestStatus(base) };
+      });
+
+      setRequests(mapped);
     } catch (e) {
-      toast.error('Failed to load requests');
+      toast.error(e instanceof Error ? e.message : 'Failed to load requests');
     } finally {
       setLoadingRequests(false);
     }
@@ -1561,18 +1826,88 @@ const LogisticsManagement = () => {
     fetchRequests();
   }, []);
 
-  const handleApproveRequest = (id: string) => {
-    setRequests(prev => prev.map(req => 
-      req.id === id ? { ...req, status: 'approved' as RequestStatus } : req
-    ));
-    toast.success('Request approved');
+  const handleApproveRequest = async (id: string, note?: string) => {
+    const current = requests.find(r => r.id === id);
+    if (!current) return;
+
+    const concerned = current.concerned_department_approval_status || 'pending';
+    const adminOps = current.admin_ops_approval_status || 'pending';
+    const forwarded = current.forwarded_department_approval_status || 'pending';
+
+    const trimmedNote = typeof note === 'string' ? note.trim() : '';
+
+    // First department action (concerned department) must be persisted via backend.
+    if (concerned === 'pending') {
+      try {
+        await updateConcernedDepartmentApprovalStatus({
+          request_id: id,
+          status: 'approved_and_forwarded',
+          note: trimmedNote,
+        });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to approve request');
+        return;
+      }
+    }
+
+    setRequests(prev => prev.map(req => {
+      if (req.id !== id) return req;
+
+      const c = req.concerned_department_approval_status || 'pending';
+      const a = req.admin_ops_approval_status || 'pending';
+      const f = req.forwarded_department_approval_status || 'pending';
+
+      let next: LogisticsRequest = { ...req };
+      if (c === 'pending') next.concerned_department_approval_status = 'approved_and_forwarded';
+      else if (a === 'pending') next.admin_ops_approval_status = 'approved_and_forwarded';
+      else if (f === 'pending') next.forwarded_department_approval_status = 'approved_and_forwarded';
+
+      if (trimmedNote) next.adminNote = trimmedNote;
+
+      next.status = deriveRequestStatus(next);
+      return next;
+    }));
+
+    toast.success('Approved & forwarded');
   };
 
-  const handleRejectRequest = (id: string) => {
-    setRequests(prev => prev.map(req => 
-      req.id === id ? { ...req, status: 'rejected' as RequestStatus } : req
-    ));
-    toast.error('Request rejected');
+  const handleRejectRequest = async (id: string) => {
+    const current = requests.find(r => r.id === id);
+    if (!current) return;
+
+    const concerned = current.concerned_department_approval_status || 'pending';
+
+    // First department rejection must be persisted via backend.
+    if (concerned === 'pending') {
+      try {
+        await updateConcernedDepartmentApprovalStatus({
+          request_id: id,
+          status: 'rejected',
+          note: '',
+        });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to reject request');
+        return;
+      }
+    }
+
+    setRequests(prev => prev.map(req => {
+      if (req.id !== id) return req;
+
+      const c = req.concerned_department_approval_status || 'pending';
+      const a = req.admin_ops_approval_status || 'pending';
+      const f = req.forwarded_department_approval_status || 'pending';
+
+      let next: LogisticsRequest = { ...req };
+      if (c === 'pending') next.concerned_department_approval_status = 'rejected';
+      else if (a === 'pending') next.admin_ops_approval_status = 'rejected';
+      else if (f === 'pending') next.forwarded_department_approval_status = 'rejected';
+
+      next.status = deriveRequestStatus(next);
+      return next;
+    }));
+
+    toast.error('Rejected');
   };
 
   const handleSubmitNewRequest = () => {

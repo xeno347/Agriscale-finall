@@ -262,7 +262,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavItem 
             to="/logistics" 
             icon={Truck} 
-            label="Logistics" 
+            label="Logistics Requests" 
             isSidebarCollapsed={isCollapsed} 
             notificationStatus="warning"
           />
@@ -275,7 +275,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             isSidebarCollapsed={isCollapsed} 
             notificationStatus="warning"
           />
-          <NavItem to="/admin-request" icon={ClipboardCheck} label="Admin Request" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/admin-request" icon={ClipboardCheck} label="Admin Ops Request" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/staff-onboarding" icon={UserPlus} label="Staff Onboarding" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
