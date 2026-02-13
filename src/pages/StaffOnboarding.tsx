@@ -477,7 +477,7 @@ const StaffOnboarding = () => {
                       <option value="">Select designation</option>
                       <option value="Driver">Driver</option>
                       <option value="Executive">Executive</option>
-                      <option value="Field Officer">Field Officer</option>
+                      <option value="Field Manager">Field Manager</option>
                       <option value="Manager">Manager</option>
                       <option value="Operator">Operator</option>
                       <option value="Supervisor">Supervisor</option>

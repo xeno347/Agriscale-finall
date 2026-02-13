@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Plus, Trash2, Map, CheckCircle, Clock, ArrowUp, ArrowDown, Bot, Building, MapIcon, Grid3x3 } from 'lucide-react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { Plus, Trash2, Map, CheckCircle, Clock, ArrowUp, ArrowDown, Bot, Building, Grid3x3, User, Phone, BadgeCheck } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,7 +11,6 @@ import {
   DialogFooter
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Farmer } from '@/types/farm';
 import getBaseUrl from '@/lib/config';
 import { useToast } from '@/hooks/use-toast';
 
@@ -22,16 +21,44 @@ interface LandRow {
   fetchedDetails: string | null;
 }
 
+interface AvailableFarm {
+  id: string | number;
+  fullName: string;
+  village?: string | null;
+  district?: string | null;
+  state?: string | null;
+  phoneNumber?: string;
+  landMapping?: {
+    totalArea?: string | number;
+    coordinates?: unknown[];
+  };
+  kyc?: unknown;
+  agreements?: unknown[];
+  createdAt?: Date;
+}
+
 interface Block {
   block_id: string;
   block_name?: string;
   total_area?: number;
+  supervisor_details?: {
+    supervisor_name?: string;
+    // Backend typo in key: "suervisor_contact" (keep support for it)
+    suervisor_contact?: string;
+    supervisor_contact?: string;
+    supervisor_id?: string;
+  } | null;
 }
 
 interface Zone {
   zone_id: string;
   zone_name?: string;
   total_area?: number;
+  field_manager?: {
+    name?: string;
+    field_manager_id?: string;
+    contact?: string;
+  } | null;
 }
 
 interface Cluster {
@@ -39,6 +66,52 @@ interface Cluster {
   cluster_name?: string;
   total_area?: number;
 }
+
+interface FieldManager {
+  staff_id?: string;
+  manager_id: string;
+  name: string;
+  phone: string;
+}
+
+interface Supervisor {
+  supervisor_id: string; // maps to API sup_id
+  staff_id?: string;
+  name: string;
+  phone: string;
+  designation?: string;
+  department?: string;
+  employmentType?: string;
+}
+
+type SupervisorApiResponse = {
+  supervisors?: Array<{
+    staff_id?: string;
+    sup_id?: string;
+    supervisor_info?: {
+      staff_name?: string;
+      staff_phone?: string;
+      staff_department?: string;
+      staff_designation?: string;
+      employment_type?: string;
+    };
+  }>;
+};
+
+type FieldManagerApiResponse = {
+  field_managers?: Array<{
+    staff_id: string;
+    manager_id: string;
+    assigned_zones?: unknown;
+    field_manager_info?: {
+      staff_name?: string;
+      staff_phone?: string;
+      staff_department?: string;
+      staff_designation?: string;
+      employment_type?: string;
+    };
+  }>;
+};
 
 type EntityType = 'cluster' | 'zone' | 'block';
 
@@ -78,7 +151,7 @@ const Blocks = () => {
   const [isViewClusterModalOpen, setIsViewClusterModalOpen] = useState(false);
 
   // Common State
-  const [availableFarms, setAvailableFarms] = useState<Farmer[]>([]);
+  const [availableFarms, setAvailableFarms] = useState<AvailableFarm[]>([]);
   const [loadingFarmsForEntity, setLoadingFarmsForEntity] = useState(false);
   const [availableBlocksForZone, setAvailableBlocksForZone] = useState<Block[]>([]);
   const [loadingBlocksForZone, setLoadingBlocksForZone] = useState(false);
@@ -89,11 +162,274 @@ const Blocks = () => {
   const [blocksInZoneView, setBlocksInZoneView] = useState<any[]>([]);
   const [loadingBlocksInZoneView, setLoadingBlocksInZoneView] = useState(false);
 
+  // Zone -> Field Manager (local UI state for now)
+  const [zoneFieldManagers, setZoneFieldManagers] = useState<Record<string, FieldManager | null>>({});
+  const [isAssignManagerOpen, setIsAssignManagerOpen] = useState(false);
+  const [assigningZone, setAssigningZone] = useState<Zone | null>(null);
+  const [selectedManagerId, setSelectedManagerId] = useState<string>('');
+  const [fieldManagers, setFieldManagers] = useState<FieldManager[]>([]);
+  const [isLoadingFieldManagers, setIsLoadingFieldManagers] = useState(false);
+  const [fieldManagersError, setFieldManagersError] = useState<string | null>(null);
+  const [isAssigningFieldManager, setIsAssigningFieldManager] = useState(false);
+
+  // Block -> Supervisor (frontend-only for now)
+  const [blockSupervisors, setBlockSupervisors] = useState<Record<string, Supervisor | null>>({});
+  const [isAssignSupervisorOpen, setIsAssignSupervisorOpen] = useState(false);
+  const [assigningBlock, setAssigningBlock] = useState<Block | null>(null);
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>('');
+  const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
+  const [isLoadingSupervisors, setIsLoadingSupervisors] = useState(false);
+  const [supervisorsError, setSupervisorsError] = useState<string | null>(null);
+  const [isAssigningSupervisor, setIsAssigningSupervisor] = useState(false);
+
   useEffect(() => {
     loadBlocks();
     loadZones();
     loadClusters();
   }, []);
+
+  useEffect(() => {
+    // If dialog is open and we loaded managers but nothing is selected yet, default to first option.
+    if (!isAssignManagerOpen) return;
+    if (selectedManagerId) return;
+    if (fieldManagers.length === 0) return;
+    setSelectedManagerId(fieldManagers[0].staff_id);
+  }, [isAssignManagerOpen, selectedManagerId, fieldManagers]);
+
+  useEffect(() => {
+    // If dialog is open and nothing is selected yet, default to first supervisor.
+    if (!isAssignSupervisorOpen) return;
+    if (selectedSupervisorId) return;
+    if (supervisors.length === 0) return;
+    setSelectedSupervisorId(supervisors[0].supervisor_id);
+  }, [isAssignSupervisorOpen, selectedSupervisorId, supervisors]);
+
+  const fetchAllSupervisors = async () => {
+    setIsLoadingSupervisors(true);
+    setSupervisorsError(null);
+    try {
+      const base = getBaseUrl();
+      const resp = await fetch(`${base.replace(/\/$/, '')}/supervisor_management/get_all_supervisors`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+      const data = (await resp.json()) as SupervisorApiResponse;
+
+      const list = Array.isArray(data?.supervisors) ? data.supervisors : [];
+      const mapped: Supervisor[] = list
+        .filter((s) => !!s?.sup_id && !!s?.staff_id)
+        .map((s) => ({
+          supervisor_id: String(s.sup_id),
+          staff_id: String(s.staff_id),
+          name: s.supervisor_info?.staff_name || 'Unknown',
+          phone: s.supervisor_info?.staff_phone || 'N/A',
+          designation: s.supervisor_info?.staff_designation,
+          department: s.supervisor_info?.staff_department,
+          employmentType: s.supervisor_info?.employment_type,
+        }));
+
+      setSupervisors(mapped);
+      return mapped;
+    } catch (error) {
+      console.error('Failed to load supervisors:', error);
+      setSupervisors([]);
+      setSupervisorsError('Failed to load supervisors');
+      toast({ title: 'Error', description: 'Failed to load supervisors', variant: 'destructive' });
+      return [] as Supervisor[];
+    } finally {
+      setIsLoadingSupervisors(false);
+    }
+  };
+
+  const fetchAllFieldManagers = async () => {
+    setIsLoadingFieldManagers(true);
+    setFieldManagersError(null);
+    try {
+      const base = getBaseUrl();
+      const resp = await fetch(`${base.replace(/\/$/, '')}/field_manager/get_all_field_managers`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+      const data = (await resp.json()) as FieldManagerApiResponse;
+      const managers: FieldManager[] = (data.field_managers || [])
+        .filter((m) => !!m.staff_id && !!m.manager_id)
+        .map((m) => ({
+          staff_id: m.staff_id,
+          manager_id: m.manager_id,
+          name: m.field_manager_info?.staff_name || 'Unknown',
+          phone: m.field_manager_info?.staff_phone || 'N/A',
+        }));
+      setFieldManagers(managers);
+      return managers;
+    } catch (error) {
+      console.error('Failed to load field managers:', error);
+      setFieldManagers([]);
+      setFieldManagersError('Failed to load field managers');
+      toast({ title: 'Error', description: 'Failed to load field managers', variant: 'destructive' });
+      return [] as FieldManager[];
+    } finally {
+      setIsLoadingFieldManagers(false);
+    }
+  };
+
+  const openAssignFieldManager = (zone: Zone) => {
+    setAssigningZone(zone);
+    const current = zoneFieldManagers[zone.zone_id];
+    setSelectedManagerId(current?.staff_id || '');
+    setIsAssignManagerOpen(true);
+    fetchAllFieldManagers().then((managers) => {
+      if (managers.length === 0) return;
+
+      // If zone already has a manager assigned via get_zones, we might only have manager_id (not staff_id).
+      // Try to pre-select by matching manager_id first.
+      if (current?.staff_id) return;
+      if (current?.manager_id) {
+        const match = managers.find((m) => m.manager_id === current.manager_id);
+        if (match?.staff_id) {
+          setSelectedManagerId(match.staff_id);
+          return;
+        }
+      }
+
+      // Otherwise default to first option.
+      if (managers[0].staff_id) setSelectedManagerId(managers[0].staff_id);
+    });
+  };
+
+  const confirmAssignFieldManager = async () => {
+    if (!assigningZone || !selectedManagerId) return;
+    const selected = fieldManagers.find((m) => m.staff_id === selectedManagerId) || null;
+    if (!selected) {
+      toast({ title: 'Error', description: 'Please select a field manager', variant: 'destructive' });
+      return;
+    }
+
+    setIsAssigningFieldManager(true);
+    try {
+      const base = getBaseUrl();
+      const resp = await fetch(`${base.replace(/\/$/, '')}/field_manager/assign_field_manager`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          field_manager_id: selected.manager_id,
+          Zone_id: assigningZone.zone_id,
+        }),
+      });
+
+      let data: any = null;
+      try {
+        data = await resp.json();
+      } catch {
+        // ignore non-json
+      }
+
+      if (!resp.ok) {
+        throw new Error((data && (data.message || data.error)) || `Server responded ${resp.status}`);
+      }
+
+      const successValue = data?.success;
+      const isSuccess = typeof successValue === 'boolean' ? successValue : true;
+      if (!isSuccess) {
+        toast({ title: 'Not assigned', description: 'API returned success=false', variant: 'destructive' });
+        return;
+      }
+
+      setZoneFieldManagers((prev) => ({ ...prev, [assigningZone.zone_id]: selected }));
+      setIsAssignManagerOpen(false);
+      toast({
+        title: 'Assigned',
+        description: `Field Manager assigned to ${assigningZone.zone_name || assigningZone.zone_id}`,
+      });
+    } catch (error) {
+      console.error('Failed to assign field manager:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to assign field manager',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAssigningFieldManager(false);
+    }
+  };
+
+  const openAssignSupervisor = (block: Block) => {
+    setAssigningBlock(block);
+    const current = blockSupervisors[String(block.block_id)];
+    setSelectedSupervisorId(current?.supervisor_id || '');
+    setIsAssignSupervisorOpen(true);
+    fetchAllSupervisors().then((list) => {
+      if (current?.supervisor_id) return;
+      if (list.length === 0) return;
+      setSelectedSupervisorId(list[0].supervisor_id);
+    });
+  };
+
+  const confirmAssignSupervisor = async () => {
+    if (!assigningBlock || !selectedSupervisorId) return;
+    const selected = supervisors.find((s) => s.supervisor_id === selectedSupervisorId) || null;
+    if (!selected) {
+      toast({ title: 'Error', description: 'Please select a supervisor', variant: 'destructive' });
+      return;
+    }
+
+    setIsAssigningSupervisor(true);
+    try {
+      const base = getBaseUrl();
+      const resp = await fetch(`${base.replace(/\/$/, '')}/supervisor_management/assign_supervisor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supervisor_id: selected.supervisor_id,
+          block_id: String(assigningBlock.block_id),
+        }),
+      });
+
+      let data: any = null;
+      try {
+        data = await resp.json();
+      } catch {
+        // ignore non-json
+      }
+
+      if (!resp.ok) {
+        throw new Error((data && (data.message || data.error)) || `Server responded ${resp.status}`);
+      }
+
+      const successValue = data?.success;
+      const isSuccess =
+        typeof successValue === 'boolean'
+          ? successValue
+          : typeof successValue === 'string'
+            ? ['true', '1', 'yes', 'y'].includes(successValue.trim().toLowerCase())
+            : typeof successValue === 'number'
+              ? successValue === 1
+              : true;
+
+      if (!isSuccess) {
+        toast({ title: 'Not assigned', description: 'API returned success=false', variant: 'destructive' });
+        return;
+      }
+
+      setBlockSupervisors((prev) => ({ ...prev, [String(assigningBlock.block_id)]: selected }));
+      setIsAssignSupervisorOpen(false);
+      toast({
+        title: 'Assigned',
+        description: `Supervisor assigned to ${assigningBlock.block_name || assigningBlock.block_id}`,
+      });
+    } catch (error) {
+      console.error('Failed to assign supervisor:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to assign supervisor',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAssigningSupervisor(false);
+    }
+  };
 
   const loadBlocks = async () => {
     try {
@@ -104,7 +440,32 @@ const Blocks = () => {
       });
       if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
       const result = await resp.json();
-      setBlocks(result.blocks || []);
+      const list: Block[] = Array.isArray(result?.blocks) ? result.blocks : [];
+      setBlocks(list);
+
+      // If backend already returns supervisor_details, reflect it in the UI.
+      setBlockSupervisors((prev) => {
+        const next: Record<string, Supervisor | null> = { ...prev };
+        for (const block of list) {
+          const key = String(block.block_id);
+          const details = block?.supervisor_details;
+          if (details === null) {
+            next[key] = null;
+            continue;
+          }
+          if (!details) continue;
+
+          const supervisorId = details.supervisor_id;
+          if (!supervisorId) continue;
+
+          next[key] = {
+            supervisor_id: String(supervisorId),
+            name: details.supervisor_name || 'Unknown',
+            phone: details.suervisor_contact || details.supervisor_contact || 'N/A',
+          };
+        }
+        return next;
+      });
     } catch (error) {
       console.error('Failed to load blocks:', error);
       toast({ title: 'Error', description: 'Failed to load blocks', variant: 'destructive' });
@@ -120,7 +481,30 @@ const Blocks = () => {
       });
       if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
       const result = await resp.json();
-      setZones(result.zones || []);
+      const list: Zone[] = Array.isArray(result?.zones) ? result.zones : [];
+      setZones(list);
+
+      // If backend already returns field_manager, reflect it in the UI.
+      setZoneFieldManagers((prev) => {
+        const next: Record<string, FieldManager | null> = { ...prev };
+        for (const zone of list) {
+          const key = String(zone.zone_id);
+          const fm = zone?.field_manager;
+          if (fm === null) {
+            next[key] = null;
+            continue;
+          }
+          if (!fm) continue;
+          if (!fm.field_manager_id) continue;
+
+          next[key] = {
+            manager_id: String(fm.field_manager_id),
+            name: fm.name || 'Unknown',
+            phone: fm.contact || 'N/A',
+          };
+        }
+        return next;
+      });
     } catch (error) {
       console.error('Failed to load zones:', error);
       toast({ title: 'Error', description: 'Failed to load zones', variant: 'destructive' });
@@ -143,18 +527,18 @@ const Blocks = () => {
     }
   };
 
-  const addLandRow = (landRows: LandRow[], setLandRows: (rows: LandRow[]) => void) => {
+  const addLandRow = (landRows: LandRow[], setLandRows: Dispatch<SetStateAction<LandRow[]>>) => {
     setLandRows([
       ...landRows,
       { id: Date.now(), village: '', farmerId: '', fetchedDetails: null }
     ]);
   };
 
-  const removeLandRow = (id: number, landRows: LandRow[], setLandRows: (rows: LandRow[]) => void) => {
+  const removeLandRow = (id: number, landRows: LandRow[], setLandRows: Dispatch<SetStateAction<LandRow[]>>) => {
     setLandRows(landRows.filter(row => row.id !== id));
   };
 
-  const moveLandRow = (id: number, direction: 'up' | 'down', landRows: LandRow[], setLandRows: (rows: LandRow[]) => void) => {
+  const moveLandRow = (id: number, direction: 'up' | 'down', landRows: LandRow[], setLandRows: Dispatch<SetStateAction<LandRow[]>>) => {
     setLandRows(prev => {
       const index = prev.findIndex(r => r.id === id);
       if (index < 0) return prev;
@@ -167,7 +551,7 @@ const Blocks = () => {
     });
   };
 
-  const handleLandChange = (id: number, field: keyof LandRow, value: string, landRows: LandRow[], setLandRows: (rows: LandRow[]) => void) => {
+  const handleLandChange = (id: number, field: keyof LandRow, value: string, landRows: LandRow[], setLandRows: Dispatch<SetStateAction<LandRow[]>>) => {
     setLandRows(prev => prev.map(row => {
       if (row.id === id) {
         const updatedRow = { ...row, [field]: value };
@@ -217,7 +601,7 @@ const Blocks = () => {
             .filter(r => !!r.farmerId)
             .map((r, idx) => {
               const blk = availableBlocksForZone.find(b => b.block_id === r.farmerId);
-              const area = blk?.total_area ?? (r.fetchedDetails ? parseFloat((r.fetchedDetails.match(/^(\d+(?:\.\d+)?)/) || [0])[0]) : 0);
+              const area = blk?.total_area ?? (r.fetchedDetails ? parseFloat(String((r.fetchedDetails.match(/^(\d+(?:\.\d+)?)/) || ['0'])[0])) : 0);
               return {
                 total_area: area || 0,
                 block_id: r.farmerId,
@@ -234,7 +618,7 @@ const Blocks = () => {
             .filter(r => !!r.farmerId)
             .map((r, idx) => {
               const zn = availableZonesForCluster.find(z => z.zone_id === r.farmerId);
-              const area = zn?.total_area ?? (r.fetchedDetails ? parseFloat((r.fetchedDetails.match(/^(\d+(?:\.\d+)?)/) || [0])[0]) : 0);
+              const area = zn?.total_area ?? (r.fetchedDetails ? parseFloat(String((r.fetchedDetails.match(/^(\d+(?:\.\d+)?)/) || ['0'])[0])) : 0);
               return {
                 total_area: area || 0,
                 zone_id: r.farmerId,
@@ -414,7 +798,7 @@ const Blocks = () => {
       entityName: string;
       setEntityName: (name: string) => void;
       landRows: LandRow[];
-      setLandRows: (rows: LandRow[]) => void;
+      setLandRows: Dispatch<SetStateAction<LandRow[]>>;
       viewEntity: any;
       setViewEntity: (entity: any) => void;
       isViewModalOpen: boolean;
@@ -482,7 +866,7 @@ const Blocks = () => {
                   .then(async resp => {
                     if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
                     const result = await resp.json();
-                    const transformed: Farmer[] = (result.farmers || []).map((item: any) => {
+                    const transformed: AvailableFarm[] = (result.farmers || []).map((item: any) => {
                       const fd = item.farmer_data || {};
                       const kyc = item.kyc_data || null;
                       return {
@@ -501,7 +885,7 @@ const Blocks = () => {
                           : undefined,
                         agreements: item.agreement_data || [],
                         createdAt: item.created_at ? new Date(item.created_at) : new Date(),
-                      } as Farmer;
+                      } as any;
                     });
                     setAvailableFarms(transformed);
                   })
@@ -899,6 +1283,113 @@ const Blocks = () => {
                     </span>
                   </div>
                 </div>
+
+                  {/* Zone Bottom Panel: Field Manager */}
+                  {entityType === 'zone' && (
+                    <div className="border-t border-green-100 bg-green-50/40 px-6 py-3">
+                      {(() => {
+                        const manager = zoneFieldManagers[String(entity.zone_id)];
+                        if (!manager) {
+                          return (
+                            <button
+                              type="button"
+                              className="w-full flex items-center justify-between gap-3 text-sm font-semibold text-green-800 hover:text-green-900"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAssignFieldManager(entity as Zone);
+                              }}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <User className="w-4 h-4 text-green-700" />
+                                Assign field manager
+                              </span>
+                              <span className="text-xs text-green-700 bg-white/70 border border-green-200 px-2 py-0.5 rounded-full">Assign</span>
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <BadgeCheck className="w-4 h-4 text-green-700" />
+                                <p className="text-xs uppercase font-bold tracking-wide text-green-800">Field Manager</p>
+                              </div>
+                              <p className="mt-1 text-sm font-semibold text-slate-900 truncate">{manager.name}</p>
+                              <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
+                                <span className="inline-flex items-center gap-1"><User className="w-3 h-3" />{manager.manager_id}</span>
+                                <span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" />{manager.phone}</span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="shrink-0 text-xs font-semibold text-green-800 bg-white/80 border border-green-200 px-3 py-1 rounded-full hover:bg-white"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAssignFieldManager(entity as Zone);
+                              }}
+                            >
+                              Change
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Block Bottom Panel: Supervisor */}
+                  {entityType === 'block' && (
+                    <div className="border-t border-green-100 bg-green-50/40 px-6 py-3">
+                      {(() => {
+                        const supervisor = blockSupervisors[String(entity.block_id)];
+                        if (!supervisor) {
+                          return (
+                            <button
+                              type="button"
+                              className="w-full flex items-center justify-between gap-3 text-sm font-semibold text-green-800 hover:text-green-900"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAssignSupervisor(entity as Block);
+                              }}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <User className="w-4 h-4 text-green-700" />
+                                Assign supervisor
+                              </span>
+                              <span className="text-xs text-green-700 bg-white/70 border border-green-200 px-2 py-0.5 rounded-full">Assign</span>
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <BadgeCheck className="w-4 h-4 text-green-700" />
+                                <p className="text-xs uppercase font-bold tracking-wide text-green-800">Supervisor</p>
+                              </div>
+                              <p className="mt-1 text-sm font-semibold text-slate-900 truncate">{supervisor.name}</p>
+                              <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
+                                <span className="inline-flex items-center gap-1"><User className="w-3 h-3" />{supervisor.supervisor_id}</span>
+                                <span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" />{supervisor.phone}</span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="shrink-0 text-xs font-semibold text-green-800 bg-white/80 border border-green-200 px-3 py-1 rounded-full hover:bg-white"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAssignSupervisor(entity as Block);
+                              }}
+                            >
+                              Change
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
                 <div className="absolute right-0 bottom-0 opacity-10 pointer-events-none">
                   {entityType === 'cluster' && <Grid3x3 className="w-32 h-32 text-green-400" />}
                   {entityType === 'zone' && <Building className="w-32 h-32 text-green-400" />}
@@ -908,6 +1399,168 @@ const Blocks = () => {
             ))
           )}
         </div>
+
+          {/* Assign Field Manager Dialog (Zones only) */}
+          {entityType === 'zone' && (
+            <Dialog
+              open={isAssignManagerOpen}
+              onOpenChange={(open) => {
+                setIsAssignManagerOpen(open);
+                if (!open) {
+                  setAssigningZone(null);
+                  setSelectedManagerId('');
+                }
+              }}
+            >
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-bold">Assign Field Manager</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <div className="bg-muted/30 border border-border rounded-lg px-4 py-3">
+                    <div className="text-xs text-muted-foreground">Zone</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {assigningZone?.zone_name || assigningZone?.zone_id || '—'}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-semibold text-foreground">Select a manager</div>
+                    <div className="space-y-2">
+                      {isLoadingFieldManagers ? (
+                        <div className="text-sm text-muted-foreground italic px-1">Loading field managers...</div>
+                      ) : fieldManagersError ? (
+                        <div className="text-sm text-red-600 px-1">{fieldManagersError}</div>
+                      ) : fieldManagers.length === 0 ? (
+                        <div className="text-sm text-muted-foreground italic px-1">No field managers found.</div>
+                      ) : (
+                        fieldManagers.map((m) => (
+                        <label
+                          key={m.staff_id}
+                          className={
+                            'flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/20 ' +
+                            (selectedManagerId === m.staff_id ? 'border-green-400 bg-green-50/40' : 'border-border bg-white')
+                          }
+                        >
+                          <input
+                            type="radio"
+                            name="field_manager"
+                            checked={selectedManagerId === m.staff_id}
+                            onChange={() => setSelectedManagerId(m.staff_id)}
+                            className="mt-1"
+                          />
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-foreground truncate">{m.name}</div>
+                            <div className="mt-0.5 text-[11px] text-muted-foreground flex flex-wrap gap-3">
+                              <span className="inline-flex items-center gap-1"><User className="w-3 h-3" />{m.manager_id}</span>
+                              <span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" />{m.phone}</span>
+                            </div>
+                          </div>
+                        </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAssignManagerOpen(false)}>Cancel</Button>
+                  <Button
+                    className="bg-green-700 hover:bg-green-800"
+                    onClick={confirmAssignFieldManager}
+                    disabled={!assigningZone || !selectedManagerId || isLoadingFieldManagers || isAssigningFieldManager || fieldManagers.length === 0}
+                  >
+                    {isAssigningFieldManager ? 'Assigning…' : 'Assign'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {/* Assign Supervisor Dialog (Blocks only) */}
+          {entityType === 'block' && (
+            <Dialog
+              open={isAssignSupervisorOpen}
+              onOpenChange={(open) => {
+                setIsAssignSupervisorOpen(open);
+                if (!open) {
+                  setAssigningBlock(null);
+                  setSelectedSupervisorId('');
+                  setSupervisorsError(null);
+                  setIsAssigningSupervisor(false);
+                }
+              }}
+            >
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-bold">Assign Supervisor</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <div className="bg-muted/30 border border-border rounded-lg px-4 py-3">
+                    <div className="text-xs text-muted-foreground">Block</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {assigningBlock?.block_name || assigningBlock?.block_id || '—'}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-semibold text-foreground">Select a supervisor</div>
+                    <div className="space-y-2">
+                      {isLoadingSupervisors ? (
+                        <div className="text-sm text-muted-foreground italic px-1">Loading supervisors...</div>
+                      ) : supervisorsError ? (
+                        <div className="text-sm text-red-600 px-1">{supervisorsError}</div>
+                      ) : supervisors.length === 0 ? (
+                        <div className="text-sm text-muted-foreground italic px-1">No supervisors found.</div>
+                      ) : (
+                        supervisors.map((s) => (
+                          <label
+                            key={s.supervisor_id}
+                            className={
+                              'flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/20 ' +
+                              (selectedSupervisorId === s.supervisor_id ? 'border-green-400 bg-green-50/40' : 'border-border bg-white')
+                            }
+                          >
+                            <input
+                              type="radio"
+                              name="supervisor"
+                              checked={selectedSupervisorId === s.supervisor_id}
+                              onChange={() => setSelectedSupervisorId(s.supervisor_id)}
+                              className="mt-1"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-foreground truncate">{s.name}</div>
+                              <div className="mt-0.5 text-[11px] text-muted-foreground flex flex-wrap gap-3">
+                                <span className="inline-flex items-center gap-1"><User className="w-3 h-3" />{s.supervisor_id}</span>
+                                <span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" />{s.phone}</span>
+                              </div>
+                            </div>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAssignSupervisorOpen(false)} disabled={isAssigningSupervisor}>
+                    Cancel
+                  </Button>
+                  <Button
+                    className="bg-green-700 hover:bg-green-800"
+                    onClick={confirmAssignSupervisor}
+                    disabled={
+                      !assigningBlock ||
+                      !selectedSupervisorId ||
+                      isLoadingSupervisors ||
+                      isAssigningSupervisor ||
+                      supervisors.length === 0
+                    }
+                  >
+                    {isAssigningSupervisor ? 'Assigning…' : 'Assign'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
 
         {/* View Entity Modal */}
         <Dialog open={config.isViewModalOpen} onOpenChange={(open) => {

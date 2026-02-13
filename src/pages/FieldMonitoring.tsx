@@ -1,13 +1,11 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polygon, useMap } from 'react-leaflet';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { MapContainer, TileLayer, Marker, Polygon, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getBaseUrl } from '@/lib/config';
 import { 
   MapPin, 
@@ -16,7 +14,7 @@ import {
   Building,
   X
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogOverlay, DialogPortal, DialogTitle } from '@/components/ui/dialog';
 
 interface FarmLocation {
   id: string;
@@ -33,6 +31,7 @@ interface FarmLocation {
   block_id?: string;
   supervisor?: {
     name?: string;
+    supervisor_id?: string;
     phone?: string;
   };
 }
@@ -52,8 +51,33 @@ interface ApiFarm {
   block_id?: string;
   supervisor?: {
     name?: string;
+    supervisor_id?: string;
+    contact?: string;
     phone?: string;
   };
+}
+
+interface ApiSupervisor {
+  assigned_farms?: Record<string, unknown>;
+  staff_id: string;
+  sup_id: string;
+  supervisor_info?: {
+    staff_name?: string;
+    employment_type?: string;
+    staff_phone?: string;
+    staff_department?: string;
+    staff_designation?: string;
+  };
+}
+
+interface Supervisor {
+  staffId: string;
+  supId: string;
+  name: string;
+  phone?: string;
+  employmentType?: string;
+  department?: string;
+  designation?: string;
 }
 
 const ZoomToFarm: React.FC<{ search: string; farms: FarmLocation[] }> = ({ search, farms }) => {
@@ -88,9 +112,19 @@ interface FieldMonitoringProps {
 export default function FieldMonitoring({ userRole = 'farm-manager', regionFilter }: FieldMonitoringProps) {
   const [selectedFarm, setSelectedFarm] = useState<FarmLocation | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [farmIdSearch, setFarmIdSearch] = useState('');
   const [farms, setFarms] = useState<FarmLocation[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
+  const [supervisorsLoading, setSupervisorsLoading] = useState(false);
+  const [supervisorsError, setSupervisorsError] = useState<string | null>(null);
+  const [supervisorsReloadKey, setSupervisorsReloadKey] = useState(0);
+  const [supervisorSearch, setSupervisorSearch] = useState('');
+  const [selectedSupervisor, setSelectedSupervisor] = useState<Supervisor | null>(null);
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchFarms = async () => {
@@ -132,7 +166,13 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
               priority: apiFarm.priority,
               farmer_id: apiFarm.farmer_id,
               block_id: apiFarm.block_id,
-              supervisor: apiFarm.supervisor,
+              supervisor: apiFarm.supervisor
+                ? {
+                    name: apiFarm.supervisor.name,
+                    supervisor_id: apiFarm.supervisor.supervisor_id,
+                    phone: apiFarm.supervisor.contact ?? apiFarm.supervisor.phone,
+                  }
+                : undefined,
             };
           });
           
@@ -147,6 +187,50 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
     
     fetchFarms();
   }, []);
+
+  useEffect(() => {
+    if (!showAssignDialog) return;
+
+    const controller = new AbortController();
+
+    const fetchSupervisors = async () => {
+      try {
+        setSupervisorsLoading(true);
+        setSupervisorsError(null);
+
+        const response = await fetch(`${getBaseUrl()}/supervisor_management/get_all_supervisors`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch supervisors (${response.status})`);
+        }
+
+        const data = await response.json();
+        const apiList: ApiSupervisor[] = Array.isArray(data?.supervisors) ? data.supervisors : [];
+        const transformed: Supervisor[] = apiList.map((sup) => ({
+          staffId: sup.staff_id,
+          supId: sup.sup_id,
+          name: sup.supervisor_info?.staff_name || sup.sup_id || 'Supervisor',
+          phone: sup.supervisor_info?.staff_phone,
+          employmentType: sup.supervisor_info?.employment_type,
+          department: sup.supervisor_info?.staff_department,
+          designation: sup.supervisor_info?.staff_designation,
+        }));
+
+        setSupervisors(transformed);
+      } catch (error) {
+        if ((error as Error)?.name === 'AbortError') return;
+        console.error('Error fetching supervisors:', error);
+        setSupervisorsError('Unable to load supervisors. Please try again.');
+      } finally {
+        setSupervisorsLoading(false);
+      }
+    };
+
+    fetchSupervisors();
+
+    return () => controller.abort();
+  }, [showAssignDialog, supervisorsReloadKey]);
 
   // Minimal, clean circular marker icon
   const customIcon = L.divIcon({
@@ -173,10 +257,71 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
     setShowDetailsDialog(true);
   };
 
-  const getHealthColor = (score: number) => {
-    if (score >= 90) return 'text-green-600 bg-green-50 border-green-200';
-    if (score >= 75) return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-    return 'text-red-600 bg-red-50 border-red-200';
+  const handleOpenAssignSupervisor = () => {
+    setSupervisorSearch('');
+    setSelectedSupervisor(null);
+    setAssignError(null);
+    setShowAssignDialog(true);
+  };
+
+  const filteredSupervisors = useMemo(() => {
+    const query = supervisorSearch.trim().toLowerCase();
+    if (!query) return supervisors;
+    return supervisors.filter((sup) => {
+      const haystack = `${sup.name} ${sup.supId} ${sup.phone ?? ''}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [supervisorSearch, supervisors]);
+
+  const handleConfirmAssignSupervisor = async () => {
+    if (!selectedFarm || !selectedSupervisor) return;
+    if (assignSubmitting) return;
+
+    try {
+      setAssignSubmitting(true);
+      setAssignError(null);
+
+      const supervisorIdToSend = selectedSupervisor.supId || selectedSupervisor.staffId;
+
+      const response = await fetch(`${getBaseUrl()}/supervisor_management/assign_supervisor`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          supervisor_id: supervisorIdToSend,
+          farm_id: selectedFarm.id,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Assign supervisor failed (${response.status})`);
+      }
+
+      const data = await response.json();
+      const isSuccess = data?.success === true || data?.success === 'True' || data?.success === 'true';
+      if (!isSuccess) {
+        throw new Error('Assign supervisor did not succeed');
+      }
+
+      const updatedSupervisor = {
+        name: selectedSupervisor.name,
+        supervisor_id: selectedSupervisor.supId,
+        phone: selectedSupervisor.phone,
+      };
+
+      setFarms((prev) =>
+        prev.map((farm) => (farm.id === selectedFarm.id ? { ...farm, supervisor: updatedSupervisor } : farm))
+      );
+      setSelectedFarm((prev) => (prev ? { ...prev, supervisor: updatedSupervisor } : prev));
+
+      setShowAssignDialog(false);
+    } catch (error) {
+      console.error('Error assigning supervisor:', error);
+      setAssignError('Unable to assign supervisor. Please try again.');
+    } finally {
+      setAssignSubmitting(false);
+    }
   };
 
   const filteredFarms = useMemo(() => {
@@ -267,40 +412,6 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
                     click: () => handleFarmClick(farm),
                   }}
                 >
-                  <Popup>
-                    <div className="p-2 min-w-[220px]">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h3 className="font-bold text-base leading-snug">{farm.name}</h3>
-                          <p className="text-xs text-muted-foreground mt-1">Farm ID: {farm.id}</p>
-                        </div>
-                      </div>
-                      <div className="space-y-1 text-sm mt-2">
-                        <div className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4 text-gray-500" />
-                          <span className="font-medium">Area: {farm.area} acres</span>
-                        </div>
-                        {farm.village && (
-                          <div className="flex items-center gap-2">
-                            <Users className="h-4 w-4 text-gray-500" />
-                            <span>{farm.village}, {farm.district}</span>
-                          </div>
-                        )}
-                        {farm.state && (
-                          <div className="flex items-center gap-2">
-                            <Wheat className="h-4 w-4 text-gray-500" />
-                            <span>{farm.state}</span>
-                          </div>
-                        )}
-                      </div>
-                      <Button
-                        className="mt-3 w-full text-xs border border-gray-300 bg-white hover:bg-gray-50 text-gray-900"
-                        onClick={() => handleFarmClick(farm)}
-                      >
-                        View Full Details
-                      </Button>
-                    </div>
-                  </Popup>
                 </Marker>
               </React.Fragment>
             );
@@ -310,135 +421,328 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
 
       {/* Detailed Farm Information Dialog */}
       <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-auto z-[9999]">
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-hidden p-0 gap-0 z-[5000]">
           {selectedFarm && (
             <>
-              <DialogHeader>
+              {/* Header Section - Fixed */}
+              <div className="sticky top-0 bg-gradient-to-r from-green-50 to-emerald-50 border-b px-6 py-5 z-10">
                 <div className="flex items-start justify-between">
-                  <div>
-                    <DialogTitle className="text-2xl font-bold">{selectedFarm.name}</DialogTitle>
-                    <p className="text-muted-foreground mt-1">Farm ID: {selectedFarm.id}</p>
+                  <div className="flex-1">
+                    <DialogTitle className="text-2xl font-bold text-gray-900 mb-1">
+                      {selectedFarm.name}
+                    </DialogTitle>
+                    <div className="flex items-center gap-3 mt-2">
+                      <Badge variant="outline" className="bg-white font-mono text-xs">
+                        {selectedFarm.id}
+                      </Badge>
+                      <Badge className="bg-green-600 text-white">
+                        {selectedFarm.area} acres
+                      </Badge>
+                      {selectedFarm.priority && (
+                        <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200">
+                          Priority {selectedFarm.priority}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   <Button
                     onClick={() => setShowDetailsDialog(false)}
-                    variant="outline"
-                    size="sm"
-                    className="bg-white"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full hover:bg-white/80"
                   >
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
-              </DialogHeader>
+              </div>
 
-              <Separator className="my-4" />
-
-              <div className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <MapPin className="h-5 w-5" /> Location Details
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-muted-foreground">Village</Label>
-                        <p className="font-semibold">{selectedFarm.village || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">District</Label>
-                        <p className="font-semibold">{selectedFarm.district || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">State</Label>
-                        <p className="font-semibold">{selectedFarm.state || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">Area</Label>
-                        <p className="font-semibold text-lg">{selectedFarm.area} acres</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Building className="h-5 w-5" /> Farm Information
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-muted-foreground">Farming Option</Label>
-                        <p className="font-semibold">{selectedFarm.farmingOption || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">Priority</Label>
-                        <Badge className="bg-blue-50 text-blue-700 border border-blue-200">
-                          {selectedFarm.priority ? `Priority ${selectedFarm.priority}` : 'Not Set'}
-                        </Badge>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">Farmer ID</Label>
-                        <p className="font-mono text-sm">{selectedFarm.farmer_id || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">Block ID</Label>
-                        <p className="font-mono text-sm">{selectedFarm.block_id || 'N/A'}</p>
-                      </div>
-                      <div className="md:col-span-2">
-                        <Label className="text-muted-foreground">Supervisor</Label>
-                        {selectedFarm.supervisor?.name || selectedFarm.supervisor?.phone ? (
-                          <p className="font-semibold">
-                            {selectedFarm.supervisor?.name}
-                            {selectedFarm.supervisor?.phone
-                              ? ` (${selectedFarm.supervisor.phone})`
-                              : ''}
-                          </p>
-                        ) : (
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-sm text-muted-foreground">No supervisor found</span>
-                            <Button size="sm" variant="outline">
-                              Add Supervisor
-                            </Button>
+              {/* Scrollable Content */}
+              <div className="overflow-y-auto max-h-[calc(92vh-120px)] px-6 py-6">
+                <div className="space-y-4">
+                  {/* Row 1: Location + Farm info (concise, 2-column with dotted divider) */}
+                  <div className="bg-white border rounded-xl p-5 shadow-sm">
+                    <div className="grid grid-cols-1 md:grid-cols-2">
+                      <div className="md:pr-6">
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                            <MapPin className="h-4 w-4 text-blue-600" />
                           </div>
-                        )}
+                          <h3 className="text-sm font-semibold text-gray-900">Location details</h3>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Village</p>
+                            <p className="text-sm font-semibold text-gray-900">{selectedFarm.village || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">District</p>
+                            <p className="text-sm font-semibold text-gray-900">{selectedFarm.district || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">State</p>
+                            <p className="text-sm font-semibold text-gray-900">{selectedFarm.state || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Coordinates</p>
+                            <p className="text-xs font-mono text-gray-600">
+                              {selectedFarm.coordinates[0].toFixed(4)}, {selectedFarm.coordinates[1].toFixed(4)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 md:mt-0 md:pl-6 md:border-l md:border-dotted md:border-gray-300">
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
+                            <Building className="h-4 w-4 text-amber-600" />
+                          </div>
+                          <h3 className="text-sm font-semibold text-gray-900">Farm information</h3>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Farming option</p>
+                            <p className="text-sm font-semibold text-gray-900">{selectedFarm.farmingOption || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Area</p>
+                            <p className="text-sm font-semibold text-gray-900">{selectedFarm.area} acres</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Farmer ID</p>
+                            <p className="text-xs font-mono text-gray-700 truncate">{selectedFarm.farmer_id || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Block ID</p>
+                            <p className="text-xs font-mono text-gray-700 truncate">{selectedFarm.block_id || '—'}</p>
+                          </div>
+                          {selectedFarm.boundary && (
+                            <div className="col-span-2">
+                              <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Boundary</p>
+                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                {selectedFarm.boundary.length} points mapped
+                              </Badge>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <MapPin className="h-5 w-5" /> Coordinates
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      <div>
-                        <Label className="text-muted-foreground">Center Point</Label>
-                        <p className="font-mono text-sm">
-                          Lat: {selectedFarm.coordinates[0].toFixed(6)}, 
-                          Lng: {selectedFarm.coordinates[1].toFixed(6)}
-                        </p>
-                      </div>
-                      {selectedFarm.boundary && (
-                        <div>
-                          <Label className="text-muted-foreground">Boundary Points</Label>
-                          <Badge className="bg-green-50 text-green-700 border border-green-200">
-                            {selectedFarm.boundary.length} Points Mapped
-                          </Badge>
+                  {/* Row 2: Supervisor (one-liner) */}
+                  <div className="bg-white border rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center shrink-0">
+                          <Users className="h-4 w-4 text-purple-700" />
                         </div>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Supervisor</p>
+                          {selectedFarm.supervisor?.name || selectedFarm.supervisor?.phone ? (
+                            <p className="text-sm text-gray-900 truncate">
+                              <span className="font-semibold">{selectedFarm.supervisor?.name || '—'}</span>
+                              {selectedFarm.supervisor?.supervisor_id ? (
+                                <span className="text-gray-500"> • </span>
+                              ) : null}
+                              {selectedFarm.supervisor?.supervisor_id ? (
+                                <span className="font-mono text-xs text-gray-600">{selectedFarm.supervisor.supervisor_id}</span>
+                              ) : null}
+                              {selectedFarm.supervisor?.phone ? (
+                                <span className="text-gray-500"> • {selectedFarm.supervisor.phone}</span>
+                              ) : null}
+                            </p>
+                          ) : (
+                            <p className="text-sm text-gray-600">No supervisor assigned</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {!(selectedFarm.supervisor?.name || selectedFarm.supervisor?.phone) ? (
+                        <Button size="sm" variant="outline" className="text-xs" onClick={handleOpenAssignSupervisor}>
+                          Assign
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="text-xs" onClick={handleOpenAssignSupervisor}>
+                          Change
+                        </Button>
                       )}
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+
+                  {/* Row 3: Latest cultivation details (one-liner) */}
+                  <div className="bg-white border rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-teal-100 flex items-center justify-center shrink-0">
+                        <Wheat className="h-4 w-4 text-teal-700" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Latest cultivation details</p>
+                        <p className="text-sm text-gray-700 truncate">
+                          Stage: — • Sowing: — • Last update: —
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 4: Harvest logs (bigger section) */}
+                  <div className="bg-white border rounded-xl p-5 shadow-sm">
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-9 h-9 rounded-lg bg-green-100 flex items-center justify-center">
+                          <Wheat className="h-4 w-4 text-green-700" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-900">Harvest log</h3>
+                          <p className="text-xs text-muted-foreground">Latest entries for this farm</p>
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="bg-white">
+                        Coming soon
+                      </Badge>
+                    </div>
+
+                    <div className="border rounded-lg bg-gray-50 p-4">
+                      <p className="text-sm text-gray-700 font-medium">No harvest entries yet</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Harvest log data will appear here once the API is integrated.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
           )}
         </DialogContent>
+      </Dialog>
+
+      {/* Assign Supervisor Dialog */}
+      <Dialog
+        open={showAssignDialog}
+        onOpenChange={(open) => {
+          setShowAssignDialog(open);
+          if (!open) {
+            setSupervisorSearch('');
+            setSelectedSupervisor(null);
+            setSupervisorsError(null);
+            setAssignError(null);
+          }
+        }}
+      >
+        <DialogPortal>
+          <DialogOverlay className="z-[6000] bg-black/60" />
+          <DialogPrimitive.Content
+            className="fixed left-[50%] top-[50%] z-[6001] grid w-full max-w-2xl translate-x-[-50%] translate-y-[-50%] overflow-hidden rounded-xl border bg-white shadow-2xl"
+          >
+            <div className="border-b px-5 py-4 bg-white">
+              <DialogTitle className="text-lg font-semibold text-gray-900">Assign Supervisor</DialogTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                {selectedFarm ? `Farm ID: ${selectedFarm.id}` : 'Select a farm to assign a supervisor.'}
+              </p>
+              <div className="mt-3">
+                <Input
+                  value={supervisorSearch}
+                  onChange={(e) => setSupervisorSearch(e.target.value)}
+                  placeholder="Search by name, phone, or supervisor ID..."
+                  className="bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="px-5 py-4">
+              {assignError && (
+                <div className="mb-3 border border-red-200 bg-red-50 text-red-700 rounded-lg p-3 text-sm">
+                  {assignError}
+                </div>
+              )}
+              {supervisorsLoading ? (
+                <div className="py-10 text-center">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mx-auto mb-3"></div>
+                  <p className="text-sm text-muted-foreground">Loading supervisors...</p>
+                </div>
+              ) : supervisorsError ? (
+                <div className="py-8">
+                  <div className="border border-red-200 bg-red-50 text-red-700 rounded-lg p-4 text-sm">
+                    {supervisorsError}
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <Button variant="outline" onClick={() => setSupervisorsReloadKey((k) => k + 1)}>
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              ) : filteredSupervisors.length === 0 ? (
+                <div className="py-10 text-center">
+                  <p className="text-sm text-muted-foreground">No supervisors found.</p>
+                </div>
+              ) : (
+                <div className="max-h-[55vh] overflow-y-auto space-y-2 pr-1">
+                  {filteredSupervisors.map((sup) => {
+                    const isActive = selectedSupervisor?.staffId === sup.staffId;
+                    return (
+                      <button
+                        key={sup.staffId}
+                        type="button"
+                        onClick={() => setSelectedSupervisor(sup)}
+                        className={
+                          `w-full text-left border rounded-lg p-4 transition ` +
+                          (isActive
+                            ? 'border-green-300 bg-green-50'
+                            : 'border-gray-200 bg-white hover:bg-gray-50')
+                        }
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">{sup.name}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {sup.supId}
+                              {sup.phone ? ` • ${sup.phone}` : ''}
+                            </p>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {sup.employmentType && (
+                                <Badge variant="secondary" className="text-[10px] bg-gray-100 text-gray-700">
+                                  {sup.employmentType}
+                                </Badge>
+                              )}
+                              {sup.department && (
+                                <Badge variant="outline" className="text-[10px] bg-white">
+                                  {sup.department}
+                                </Badge>
+                              )}
+                              {sup.designation && (
+                                <Badge variant="outline" className="text-[10px] bg-white">
+                                  {sup.designation}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          {isActive && <Badge className="bg-green-600 text-white">Selected</Badge>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t px-5 py-4 bg-gray-50 flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground truncate">
+                {selectedSupervisor
+                  ? `Selected: ${selectedSupervisor.name} (${selectedSupervisor.supId})`
+                  : 'Select a supervisor to continue'}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => setShowAssignDialog(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  disabled={!selectedFarm || !selectedSupervisor || assignSubmitting}
+                  onClick={handleConfirmAssignSupervisor}
+                >
+                  {assignSubmitting ? 'Assigning...' : 'Assign'}
+                </Button>
+              </div>
+            </div>
+          </DialogPrimitive.Content>
+        </DialogPortal>
       </Dialog>
     </div>
   );

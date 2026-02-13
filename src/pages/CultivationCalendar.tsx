@@ -162,19 +162,32 @@ return s === 'rental_send_workorder' || s === 'rental_pending' || s === 'rental_
 // For calendar coloring and the little clock icon, treat contract_farm_pending as a kind of "pending".
 const isPendingAssignmentStatus = (raw?: string) => {
 const s = normalizeAssignmentStatus(raw);
-return s === 'pending' || s === 'rental_pending' || s === 'contract_farm_pending';
+return s === 'pending' || s === 'rental_pending' || s === 'contract_farm_pending' || s === 'sup_task_completed';
 };
 
 // For the "Pending" badge + pending counts in the modal, do NOT include contract_farm_pending
 // because that should show as "Contract Farmer" and is not user-assignable.
 const isUserPendingAssignmentStatus = (raw?: string) => {
 const s = normalizeAssignmentStatus(raw);
-return s === 'pending' || s === 'rental_pending';
+return s === 'pending' || s === 'rental_pending' || s === 'sup_task_completed';
 };
 
 const isCompletedAssignmentStatus = (raw?: string) => {
 const s = normalizeAssignmentStatus(raw);
 return s === 'completed' || s === 'rental_completed' || s === 'contract_farm_completed';
+};
+
+// --- Approval helpers ---
+// Backend can return partial approval statuses like `sup_task_completed`.
+// Interpret as: Supervisor done, Field Manager still pending.
+const isSupervisorApprovedAssignmentStatus = (raw?: string) => {
+const s = normalizeAssignmentStatus(raw);
+return isCompletedAssignmentStatus(s) || s === 'sup_task_completed';
+};
+
+const isFieldManagerApprovedAssignmentStatus = (raw?: string) => {
+const s = normalizeAssignmentStatus(raw);
+return isCompletedAssignmentStatus(s);
 };
 
 const isOverdueAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'overdue';
@@ -203,6 +216,7 @@ if (isRentalCompletedAssignmentStatus(s1) || isRentalCompletedAssignmentStatus(s
 }
 
 if (isCompletedAssignmentStatus(s1) || isCompletedAssignmentStatus(s2)) return 'completed';
+if (s1 === 'sup_task_completed' || s2 === 'sup_task_completed') return 'sup_task_completed';
 if (normalizeAssignmentStatus(s1) === 'pending' || normalizeAssignmentStatus(s2) === 'pending') return 'pending';
 if (isOverdueAssignmentStatus(s1) || isOverdueAssignmentStatus(s2)) return 'overdue';
 return s1 || s2 || 'unassigned';
@@ -221,6 +235,8 @@ return <ClipboardList className={iconClass} />;
 };
 
 const isHarvestActivity = (activity: string) => activity.trim().toLowerCase().includes('harvest');
+
+const isFieldVisitActivity = (activity: string) => activity.trim().toLowerCase().includes('visit');
 
 const formatDateKey = (date: Date) => {
 return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -799,6 +815,30 @@ const allSelectedKeys = selectedActivities.map(getTaskKey);
 const anySelected = allSelectedKeys.some((k) => !!selectedTaskKeys[k]);
 const allSelected = allSelectedKeys.length > 0 && allSelectedKeys.every((k) => !!selectedTaskKeys[k]);
 
+const approvalSummary = useMemo(() => {
+let eligible = 0;
+let supDone = 0;
+let fmDone = 0;
+
+for (const act of selectedActivities) {
+if (isFieldVisitActivity(String(act?.activity || ''))) continue;
+eligible += 1;
+const list = Array.isArray(act.assignments) ? act.assignments : [];
+const supApproved = list.some((a) => isSupervisorApprovedAssignmentStatus(a?.status));
+const fmApproved = list.some((a) => isFieldManagerApprovedAssignmentStatus(a?.status));
+if (supApproved) supDone += 1;
+if (fmApproved) fmDone += 1;
+}
+
+return {
+eligible,
+sup_done: supDone,
+sup_pending: Math.max(0, eligible - supDone),
+fm_done: fmDone,
+fm_pending: Math.max(0, eligible - fmDone),
+};
+}, [selectedActivities]);
+
 const anyAssignableSelected = selectedActivities.some((t) => {
 if (!isTaskAssignable(t)) return false;
 return !!selectedTaskKeys[getTaskKey(t)];
@@ -1145,6 +1185,14 @@ showPending={false}
 <span>Total Tasks: <span className="font-semibold text-foreground">{selectedActivities.length}</span></span>
 <span>•</span>
 <span>Pending: <span className="font-semibold text-orange-600">{selectedActivities.filter((act) => isTaskPending(act)).length}</span></span>
+{approvalSummary.eligible > 0 && (
+<>
+<span>•</span>
+<span>Supervisor Approval: <span className={cn("font-semibold", approvalSummary.sup_pending > 0 ? "text-orange-600" : "text-green-700")}>{approvalSummary.sup_pending > 0 ? `${approvalSummary.sup_pending} pending` : 'done'}</span></span>
+<span>•</span>
+<span>Field Manager Approval: <span className={cn("font-semibold", approvalSummary.fm_pending > 0 ? "text-orange-600" : "text-green-700")}>{approvalSummary.fm_pending > 0 ? `${approvalSummary.fm_pending} pending` : 'done'}</span></span>
+</>
+)}
 </div>
 </div>
 <button onClick={closeModal} className="text-muted-foreground hover:text-foreground p-2 rounded-md hover:bg-muted transition-colors"><X className="w-5 h-5" /></button>
@@ -1178,6 +1226,9 @@ const completedTask = isTaskCompleted(act);
 const contractTask = isTaskContractFarm(act);
 const rentalTask = isTaskRental(act);
 const overdueTask = !completedTask && isTaskOverdue(act);
+const isFieldVisit = isFieldVisitActivity(String(act?.activity || ''));
+const supApproved = Array.isArray(act.assignments) ? act.assignments.some((a) => isSupervisorApprovedAssignmentStatus(a?.status)) : false;
+const fmApproved = Array.isArray(act.assignments) ? act.assignments.some((a) => isFieldManagerApprovedAssignmentStatus(a?.status)) : false;
 const totalArea = Array.isArray(act.assignments) ? act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0) : 0;
 return (
 <div key={idx} className={cn("group transition-colors", completedTask ? "bg-green-50 hover:bg-green-50/80" : overdueTask ? "bg-red-50 hover:bg-red-50/80" : "bg-white hover:bg-gray-50/50")}>
@@ -1186,13 +1237,31 @@ return (
 <div className="flex justify-center"><input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer" checked={!!selectedTaskKeys[taskKey]} disabled={pendingTask || completedTask || contractTask} onChange={(e) => { setSelectedTaskKeys((prev) => ({ ...prev, [taskKey]: e.target.checked })); }} /></div>
 <div className="flex items-center gap-2.5 min-w-0">
 <div className="p-1.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 shrink-0">{getActivityIcon(act.activity)}</div>
-<div className="min-w-0 flex items-center gap-2">
+<div className="min-w-0 flex flex-wrap items-center gap-2">
 <span className="text-sm font-semibold text-foreground truncate">{act.activity}</span>
 {pendingTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">Pending</span>}
 {overdueTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">Overdue</span>}
 {completedTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">Done</span>}
 {contractTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">Contract Farmer</span>}
 {rentalTask && <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">(Rental)</span>}
+{!isFieldVisit && (
+<>
+<span className={cn(
+"shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border",
+supApproved ? "bg-green-100 text-green-800 border-green-200" : "bg-yellow-50 text-yellow-800 border-yellow-200"
+)}>
+{supApproved ? <CheckCircle2 className="w-3 h-3" /> : <Watch className="w-3 h-3" />}
+Sup: {supApproved ? 'Done' : 'Pending'}
+</span>
+<span className={cn(
+"shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border",
+fmApproved ? "bg-green-100 text-green-800 border-green-200" : "bg-yellow-50 text-yellow-800 border-yellow-200"
+)}>
+{fmApproved ? <CheckCircle2 className="w-3 h-3" /> : <Watch className="w-3 h-3" />}
+FM: {fmApproved ? 'Done' : 'Pending'}
+</span>
+</>
+)}
 </div>
 </div>
 <div><span className={cn("inline-flex items-center px-2 py-1 rounded text-[11px] font-bold border", completedTask ? "bg-green-100 text-green-800 border-green-200" : overdueTask ? "bg-red-100 text-red-800 border-red-200" : "bg-gray-50 text-gray-700 border-gray-200")}>{act.farm_id || '—'}</span></div>

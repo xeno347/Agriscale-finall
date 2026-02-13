@@ -32,6 +32,13 @@ type BackendAdminOpsRequest = {
   request_details?: {
     note?: string;
     request_location?: string;
+    request_type?: string;
+    meta_data?: Array<{
+      driver_name?: string;
+      fuel_amount?: number;
+      request_id?: string;
+      vehicle_number?: string;
+    }>;
   };
   date?: string;
   created_at?: string;
@@ -59,6 +66,13 @@ interface AdminRequestData {
   requesterPhone: string;
   requesterDepartment: string;
   requestType: RequestType;
+  requestDetailsType?: string;
+  fuelMetaData?: Array<{
+    driver_name: string;
+    fuel_amount: number;
+    request_id: string;
+    vehicle_number: string;
+  }>;
   title: string;
   description: string;
   vehicleType?: string;
@@ -154,6 +168,18 @@ const AdminRequestPage = () => {
         const note = item?.request_details?.note || '';
         const loc = parseRequestLocation(item?.request_details?.request_location);
 
+        const requestDetailsType = String(item?.request_details?.request_type || '').trim().toLowerCase();
+        const rawMeta = item?.request_details?.meta_data;
+        const fuelMetaData =
+          requestDetailsType === 'fuel' && Array.isArray(rawMeta)
+            ? rawMeta.map((m) => ({
+                driver_name: String(m?.driver_name || '—'),
+                fuel_amount: Number(m?.fuel_amount || 0),
+                request_id: String(m?.request_id || '—'),
+                vehicle_number: String(m?.vehicle_number || '—'),
+              }))
+            : undefined;
+
         const requestType = normalizeRequestType(item?.first_department || sender?.staff_department);
         const status = deriveUiStatus(item);
         const forwardedToList = Array.isArray(item?.forwarded_to_departments) ? item.forwarded_to_departments : [];
@@ -184,6 +210,8 @@ const AdminRequestPage = () => {
           requesterPhone: String(sender?.staff_phone || '—'),
           requesterDepartment: String(sender?.staff_department || '—'),
           requestType,
+          requestDetailsType: requestDetailsType || undefined,
+          fuelMetaData,
           title: titleFromNote(note),
           description: String(note || ''),
           vehicleType: requestType === 'logistics' ? '—' : undefined,
@@ -572,6 +600,41 @@ const AdminRequestPage = () => {
                             <p className="text-gray-600 mb-1">Description:</p>
                             <p className="text-gray-800 text-xs leading-relaxed">{req.description}</p>
                           </div>
+
+                          {req.requestDetailsType === 'fuel' && Array.isArray(req.fuelMetaData) && (
+                            <div className="pt-2 border-t border-gray-200">
+                              <div className="flex items-center justify-between">
+                                <p className="text-gray-600 text-sm font-medium">Fuel Requests</p>
+                                <p className="text-xs text-gray-600">
+                                  Total: <span className="font-semibold text-gray-900">{req.fuelMetaData.reduce((sum, it) => sum + (Number(it.fuel_amount) || 0), 0)} L</span>
+                                </p>
+                              </div>
+
+                              {req.fuelMetaData.length === 0 ? (
+                                <p className="text-xs text-gray-600 mt-2">No fuel requests found.</p>
+                              ) : (
+                                <div className="mt-2 bg-white border border-gray-200 rounded-lg overflow-hidden">
+                                  <div className="grid grid-cols-4 gap-2 px-3 py-2 bg-gray-50 text-[11px] font-semibold text-gray-600 uppercase tracking-wide">
+                                    <div>Request</div>
+                                    <div>Vehicle</div>
+                                    <div>Driver</div>
+                                    <div className="text-right">Liters</div>
+                                  </div>
+                                  <div className="divide-y divide-gray-100 max-h-40 overflow-y-auto">
+                                    {req.fuelMetaData.map((it, idx) => (
+                                      <div key={`${it.request_id}-${idx}`} className="grid grid-cols-4 gap-2 px-3 py-2 text-xs">
+                                        <div className="font-mono text-gray-900 truncate">{it.request_id}</div>
+                                        <div className="font-mono text-gray-900 truncate">{it.vehicle_number}</div>
+                                        <div className="text-gray-900 truncate">{it.driver_name}</div>
+                                        <div className="text-right font-semibold text-gray-900">{Number(it.fuel_amount) || 0}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {req.requestType === 'logistics' && (
                             <>
                               <div className="flex items-center gap-2 pt-2 border-t border-gray-200">

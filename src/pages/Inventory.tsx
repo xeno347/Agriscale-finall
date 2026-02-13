@@ -4,7 +4,7 @@ import {
   Package, AlertTriangle, 
   ArrowUpRight, ArrowDownLeft, X,
   FileText, TrendingUp, Download, Edit, RefreshCw,
-  Calendar, User, MapPin, Tag, Fuel, ChevronDown, ChevronRight
+  User, Fuel, ChevronDown, ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -85,6 +85,13 @@ interface InventoryRequest {
   forwardedAt?: string;
 }
 
+type AdminRequestOption = 'fuel' | 'equipment';
+
+type EquipmentCartItem = {
+  name: string;
+  quantity: number;
+};
+
 // ============================================================================
 // MOCK DATA
 // ============================================================================
@@ -164,20 +171,19 @@ const Inventory = () => {
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
   const [isFuelRequestsOpen, setIsFuelRequestsOpen] = useState(false);
   const [isConfirmDeliveryOpen, setIsConfirmDeliveryOpen] = useState(false);
+  const [selectedFuelIds, setSelectedFuelIds] = useState<string[]>([]);
   const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [selectedFuelRequest, setSelectedFuelRequest] = useState<FuelRequest | null>(null);
+  const [adminFuelSnapshot, setAdminFuelSnapshot] = useState<FuelRequest[] | null>(null);
+  const [isSendingAdminRequest, setIsSendingAdminRequest] = useState(false);
   const [newRequest, setNewRequest] = useState({
-    requesterName: '',
-    requesterPhone: '',
-    itemCategory: 'Fertilizer' as ItemCategory,
-    itemName: '',
-    quantity: '',
-    unit: 'kg' as UnitType,
-    purpose: '',
-    requiredDate: '',
+    note: '',
+    option: 'fuel' as AdminRequestOption,
     priority: 'medium' as RequestPriority,
-    description: '',
+    equipmentCart: [] as EquipmentCartItem[],
+    equipmentName: '',
+    equipmentQty: '1',
   });
 
   // --- ACTIONS ---
@@ -253,7 +259,7 @@ const Inventory = () => {
   };
 
   // Fetch fuel requests (reusable for mount + refresh)
-  const fetchFuelRequests = async () => {
+  const fetchFuelRequests = async (): Promise<FuelRequest[] | null> => {
     setIsFuelLoading(true);
     try {
       const url = `${getBaseUrl()}/inventory/get_all_fuel_request`;
@@ -263,16 +269,39 @@ const Inventory = () => {
       if (data && data.success && Array.isArray(data.fuel_requests)) {
         const mapped: FuelRequest[] = data.fuel_requests.map((fr: any, idx: number) => mapBackendFuelRequest(fr, idx));
         setFuelRequests(mapped);
+        return mapped;
       } else {
         toast.error('Failed to load fuel requests');
+        return null;
       }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('Error fetching fuel requests', err);
       toast.error('Error fetching fuel requests');
+      return null;
     } finally {
       setIsFuelLoading(false);
     }
+  };
+
+  const toggleSelectFuel = (id: string) => {
+    setSelectedFuelIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const selectAllFuelRequests = () => {
+    setSelectedFuelIds(filteredFuelRequests.map(r => r.request_id));
+  };
+
+  const deselectAllFuelRequests = () => {
+    setSelectedFuelIds([]);
+  };
+
+  const makeFuelRequest = () => {
+    if (selectedFuelIds.length === 0) return;
+    toast.success(`Processed ${selectedFuelIds.length} fuel request${selectedFuelIds.length > 1 ? 's' : ''}`);
+    // Placeholder for real action; closing modal for now
+    setSelectedFuelIds([]);
+    setIsFuelRequestsOpen(false);
   };
 
   useEffect(() => {
@@ -335,52 +364,140 @@ const Inventory = () => {
     }
   };
 
-  const handleSubmitNewRequest = () => {
-    // Validate required fields
-    if (!newRequest.requesterName || !newRequest.requesterPhone || !newRequest.itemName || 
-        !newRequest.quantity || !newRequest.requiredDate || !newRequest.description) {
-      toast.error('Please fill in all required fields');
+  const handleSubmitNewRequest = async () => {
+    const note = newRequest.note.trim();
+
+    if (!newRequest.option) {
+      toast.error('Please choose an option');
       return;
     }
 
+    if (newRequest.option === 'equipment' && newRequest.equipmentCart.length === 0) {
+      toast.error('Please add at least one equipment item');
+      return;
+    }
+
+    if (newRequest.option === 'fuel' && adminFuelSnapshot === null) {
+      toast.error('Please fetch fuel requirements first');
+      return;
+    }
+
+    if (newRequest.option === 'fuel') {
+      const meta_data = (adminFuelSnapshot || []).map((r) => ({
+        request_id: r.request_id,
+        vehicle_number: r.vehicleNumber,
+        fuel_amount: Number(r.requestedAmount) || 0,
+        driver_name: r.driverName,
+      }));
+
+      setIsSendingAdminRequest(true);
+      try {
+        const url = `${getBaseUrl()}/admin_ops_requests/make_fuel_request`;
+        const body = {
+          staff_id: '8c4b07a6-bace-4cf9-9aad-7ecf4ae9244c',
+          note,
+          request_location: '',
+          meta_data,
+        };
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => res.statusText);
+          throw new Error(`HTTP ${res.status} - ${text}`);
+        }
+
+        const data = await res.json().catch(() => null);
+        if (data && data.success === false) {
+          toast.error(data.message || 'Failed to send fuel request');
+          return;
+        }
+
+        toast.success('Fuel request sent to Admin');
+        setIsNewRequestModalOpen(false);
+        setAdminFuelSnapshot(null);
+        setNewRequest({
+          note: '',
+          option: 'fuel',
+          priority: 'medium',
+          equipmentCart: [],
+          equipmentName: '',
+          equipmentQty: '1',
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Error sending fuel request to admin', err);
+        toast.error('Error sending fuel request');
+      } finally {
+        setIsSendingAdminRequest(false);
+      }
+
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const totalEquipmentQty = newRequest.equipmentCart.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+    const equipmentSummary = newRequest.equipmentCart.map((it) => `${it.name} x${it.quantity}`).join(', ');
+
+    const fuelTotalLiters = adminFuelSnapshot
+      ? Math.max(0, adminFuelSnapshot.reduce((sum, r) => sum + (Number(r.requestedAmount) || 0), 0))
+      : 0;
+    const fuelSummaryText = adminFuelSnapshot
+      ? adminFuelSnapshot
+          .map((r) => `${r.request_id} (${r.vehicleNumber}) ${r.requestedAmount}L - ${r.status}`)
+          .join('\n')
+      : '';
+
+    const optionLabel = newRequest.option === 'fuel' ? 'Fuel Request' : 'Equipment Request';
+
     const newReq: InventoryRequest = {
       id: `IR-${String(inventoryRequests.length + 1).padStart(3, '0')}`,
-      requesterId: 'U' + String(Math.floor(Math.random() * 1000)).padStart(3, '0'),
-      requesterName: newRequest.requesterName,
-      requesterPhone: newRequest.requesterPhone,
-      itemCategory: newRequest.itemCategory,
-      itemName: newRequest.itemName,
-      quantity: parseInt(newRequest.quantity),
-      unit: newRequest.unit,
-      purpose: newRequest.purpose,
-      requestDate: new Date().toISOString(),
-      requiredDate: newRequest.requiredDate,
+      requesterId: '—',
+      requesterName: '—',
+      requesterPhone: '—',
+
+      itemCategory: newRequest.option === 'fuel' ? 'Fuel' : 'Equipment',
+      itemName:
+        newRequest.option === 'fuel'
+          ? `Fuel requirement (${adminFuelSnapshot?.length ?? 0} request${(adminFuelSnapshot?.length ?? 0) !== 1 ? 's' : ''})`
+          : `Equipment: ${equipmentSummary}`,
+      quantity: newRequest.option === 'fuel'
+        ? fuelTotalLiters
+        : totalEquipmentQty,
+      unit: newRequest.option === 'fuel' ? 'L' : 'units',
+      purpose: optionLabel,
+      requestDate: nowIso,
+      requiredDate: nowIso.slice(0, 10),
       status: 'pending',
       priority: newRequest.priority,
-      description: newRequest.description,
-      createdAt: new Date().toISOString(),
+      description:
+        newRequest.option === 'fuel'
+          ? [note || '—', '', 'Fuel Requests:', fuelSummaryText || '—'].join('\n')
+          : (note || optionLabel),
+      createdAt: nowIso,
+
       receiverId: 'ADMIN',
       receiverName: 'Admin Review Pending',
       receiverDepartment: 'Administration',
     };
 
-    setInventoryRequests(prev => [newReq, ...prev]);
+    setInventoryRequests((prev) => [newReq, ...prev]);
     setIsNewRequestModalOpen(false);
-    
-    // Reset form
+    setAdminFuelSnapshot(null);
+
     setNewRequest({
-      requesterName: '',
-      requesterPhone: '',
-      itemCategory: 'Fertilizer',
-      itemName: '',
-      quantity: '',
-      unit: 'kg',
-      purpose: '',
-      requiredDate: '',
+      note: '',
+      option: 'fuel',
       priority: 'medium',
-      description: '',
+      equipmentCart: [],
+      equipmentName: '',
+      equipmentQty: '1',
     });
-    
+
     toast.success('Request sent to Admin for review!');
   };
 
@@ -402,6 +519,35 @@ const Inventory = () => {
   const pendingFuelRequests = fuelRequests.filter(req => req.status === 'requested').length;
   const totalValue = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
   const lowStockCount = items.filter(item => item.quantity <= item.reorderLevel).length;
+
+  const pendingInventoryRequestsCount = inventoryRequests.filter(r => r.status === 'pending').length;
+
+  const getStatusConfig = (status: RequestStatus) => {
+    switch (status) {
+      case 'pending': return { color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', label: 'Pending' };
+      case 'approved': return { color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', label: 'Approved' };
+      case 'in_progress': return { color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', label: 'In Progress' };
+      case 'completed': return { color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Completed' };
+      case 'rejected': return { color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200', label: 'Rejected' };
+    }
+  };
+
+  const getPriorityConfig = (priority: RequestPriority) => {
+    switch (priority) {
+      case 'urgent': return { color: 'text-red-700', bg: 'bg-red-50', icon: '🔴' };
+      case 'high': return { color: 'text-orange-700', bg: 'bg-orange-50', icon: '🟠' };
+      case 'medium': return { color: 'text-yellow-700', bg: 'bg-yellow-50', icon: '🟡' };
+      case 'low': return { color: 'text-gray-700', bg: 'bg-gray-50', icon: '⚪' };
+    }
+  };
+
+  const formatRequestDateTime = (value?: string) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString();
+  };
 
   // Filter and group requests
   const filteredRequests = inventoryRequests.filter(req => {
@@ -438,366 +584,228 @@ const Inventory = () => {
     );
   });
 
+  const sortedRequests = [...filteredRequests].sort((a, b) => {
+    const aT = new Date(a.requestDate || a.createdAt).getTime();
+    const bT = new Date(b.requestDate || b.createdAt).getTime();
+    if (Number.isNaN(aT) && Number.isNaN(bT)) return 0;
+    if (Number.isNaN(aT)) return 1;
+    if (Number.isNaN(bT)) return -1;
+    return bT - aT;
+  });
+
   return (
-    <div className="p-8 space-y-8 animate-in fade-in duration-300">
-      
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-display font-bold text-foreground">Inventory Management</h1>
-          <p className="text-muted-foreground mt-1">Track stock levels, procurements, and consumption.</p>
-        </div>
-        <div className="flex gap-3">
-          <button 
-            onClick={() => { setSelectedItem(null); setIsIssueStockOpen(true); }}
-            className="flex items-center gap-2 border border-orange-200 bg-orange-50 text-orange-700 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-orange-100 transition-colors"
-          >
-            <Minus className="w-4 h-4" />
-            Issue Stock
-          </button>
-          <button 
-            onClick={() => { setSelectedItem(null); setIsAddStockOpen(true); }}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add Stock
-          </button>
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 flex flex-col">
+      <div className="bg-white border-b border-gray-200 shadow-sm">
+        <div className="px-8 py-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
+                <Package className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold text-gray-900">Inventory Management</h1>
+                <p className="text-sm text-gray-600 mt-0.5">Manage requests and stock</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap justify-end">
+              {pendingInventoryRequestsCount > 0 && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span className="text-sm font-medium text-amber-800">
+                    {pendingInventoryRequestsCount} pending request{pendingInventoryRequestsCount !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              )}
+
+              <button
+                onClick={() => setIsFuelRequestsOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium hover:bg-blue-100 transition-colors shadow-sm"
+              >
+                <Fuel className="w-4 h-4" />
+                Fuel Requests
+                {pendingFuelRequests > 0 && (
+                  <span className="ml-1 inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700 border border-red-200">
+                    {pendingFuelRequests}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setIsNewRequestModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
+              >
+                <FileText className="w-4 h-4" />
+                Send to Admin Request
+              </button>
+
+              <button
+                onClick={() => { setSelectedItem(null); setIsIssueStockOpen(true); }}
+                className="flex items-center gap-2 px-4 py-2.5 border border-orange-200 bg-orange-50 text-orange-700 rounded-lg font-medium hover:bg-orange-100 transition-colors"
+              >
+                <Minus className="w-4 h-4" />
+                Issue Stock
+              </button>
+              <button
+                onClick={() => { setSelectedItem(null); setIsAddStockOpen(true); }}
+                className="flex items-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Add Stock
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* OVERVIEW CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Inventory Value</p>
-              <h3 className="text-2xl font-bold mt-1">₹{totalValue.toLocaleString()}</h3>
-            </div>
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><TrendingUp className="w-5 h-5"/></div>
-          </div>
-        </div>
-        <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total SKUs</p>
-              <h3 className="text-2xl font-bold mt-1">{items.length}</h3>
-            </div>
-            <div className="p-2 bg-gray-100 text-gray-600 rounded-lg"><Package className="w-5 h-5"/></div>
-          </div>
-        </div>
-        <div className="bg-card border border-border p-4 rounded-xl shadow-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Low Stock Alerts</p>
-              <h3 className="text-2xl font-bold mt-1 text-orange-600">{lowStockCount}</h3>
-            </div>
-            <div className="p-2 bg-orange-50 text-orange-600 rounded-lg"><AlertTriangle className="w-5 h-5"/></div>
-          </div>
-        </div>
-      </div>
-
-      {/* TABS & LIST */}
-      <div className="flex flex-col space-y-4">
-        {/* SEARCH AND FILTERS */}
-        <div className="bg-white border border-border rounded-xl p-4 shadow-sm">
-          <div className="flex flex-col md:flex-row gap-4 items-center">
-            <div className="relative flex-1 w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search by requester, location, vehicle, or ID..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-2.5 w-full text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-slate-900"
-              />
-            </div>
-            <div className="flex gap-3 w-full md:w-auto">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-4 py-2.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-slate-900"
-              >
-                <option value="date">Sort by Date</option>
-                <option value="priority">Sort by Priority</option>
-                <option value="requester">Sort by Requester</option>
-              </select>
-              <select
-                value={groupBy}
-                onChange={(e) => setGroupBy(e.target.value)}
-                className="px-4 py-2.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-slate-900"
-              >
-                <option value="status">Group by Status</option>
-                <option value="priority">Group by Priority</option>
-              </select>
-            </div>
-          </div>
-
-          {/* STATS ROW */}
-          <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border text-sm">
-            <div>
-              <span className="text-muted-foreground">Total: </span>
-              <span className="font-semibold">{inventoryRequests.length}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Filtered: </span>
-              <span className="font-semibold">{filteredRequests.length}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Pending: </span>
-              <span className="font-semibold text-amber-600">{groupedRequests.pending.length}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">In Progress: </span>
-              <span className="font-semibold text-purple-600">{groupedRequests.in_progress.length}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* SEND TO ADMIN BUTTON */}
-        <div className="flex justify-end">
-          <button
-            onClick={() => setIsNewRequestModalOpen(true)}
-            className="flex items-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
-          >
-            <FileText className="w-4 h-4" />
-            Send to Admin Request
-          </button>
-        </div>
-
-        {/* GROUPED REQUESTS */}
+      <div className="flex-1 px-8 py-8">
         {loadingRequests ? (
-          <div className="flex items-center justify-center p-12 bg-white border border-border rounded-xl">
+          <div className="flex items-center justify-center h-64">
             <div className="text-center">
               <div className="w-8 h-8 border-4 border-slate-900 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-muted-foreground">Loading requests...</p>
+              <p className="text-gray-500">Loading requests...</p>
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
-            {/* PENDING SECTION */}
-            {groupedRequests.pending.length > 0 && (
-              <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
-                <button
-                  onClick={() => toggleSection('pending')}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    {expandedSections.pending ? (
-                      <ChevronDown className="w-5 h-5 text-gray-600" />
-                    ) : (
-                      <ChevronRight className="w-5 h-5 text-gray-600" />
-                    )}
-                    <h3 className="text-lg font-semibold">Pending</h3>
-                    <span className="px-2.5 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full">
-                      {groupedRequests.pending.length}
-                    </span>
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  <div>Request ID</div>
+                  <div>Sender</div>
+                  <div>Date &amp; Time</div>
+                  <div className="md:text-right">Status</div>
+                </div>
+              </div>
+
+              <div className="divide-y divide-gray-100 bg-white">
+                {sortedRequests.length === 0 ? (
+                  <div className="p-12 text-center text-gray-500">
+                    <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                    <p className="text-gray-500">No requests available</p>
                   </div>
-                </button>
-                
-                {expandedSections.pending && (
-                  <div className="divide-y divide-border">
-                    {groupedRequests.pending.map((req) => (
-                      <div key={req.id} className="p-6 hover:bg-gray-50 transition-colors">
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                          {/* REQUEST ID */}
-                          <div className="lg:col-span-2">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Request ID</div>
-                            <div className="font-mono text-sm font-semibold">{req.id}</div>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              User ID: {req.requesterId}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {format(new Date(req.createdAt), 'dd/MM/yyyy, HH:mm a')}
+                ) : (
+                  sortedRequests.map((req) => {
+                    const statusConfig = getStatusConfig(req.status);
+                    const priorityConfig = getPriorityConfig(req.priority);
+                    const dateTime = formatRequestDateTime(req.createdAt || req.requestDate);
+
+                    return (
+                      <details key={req.id} className="group">
+                        <summary
+                          className={cn(
+                            "cursor-pointer list-none [&::-webkit-details-marker]:hidden",
+                            "px-6 py-4 hover:bg-gray-50 transition-colors",
+                            "flex items-center gap-4"
+                          )}
+                        >
+                          <div className="min-w-0 flex-1 grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+                            <div className="font-mono text-sm font-semibold text-gray-900 truncate">{req.id}</div>
+                            <div className="text-sm font-medium text-gray-900 truncate">{req.requesterName}</div>
+                            <div className="text-sm text-gray-600 truncate">{dateTime}</div>
+                            <div className="md:text-right">
+                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig.bg} ${statusConfig.color} ${statusConfig.border} border`}>
+                                {statusConfig.label}
+                              </span>
                             </div>
                           </div>
 
-                          {/* SENDER DETAILS */}
-                          <div className="lg:col-span-2">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Sender Details</div>
-                            <div className="flex items-start gap-2">
-                              <User className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                              <div>
-                                <div className="font-medium text-sm">{req.requesterName}</div>
-                                <div className="text-xs text-muted-foreground mt-1">{req.requesterPhone}</div>
-                              </div>
-                            </div>
-                          </div>
+                          <ChevronDown className="w-5 h-5 text-gray-400 transition-transform group-open:rotate-180 flex-shrink-0" />
+                        </summary>
 
-                          {/* RECEIVER DETAILS */}
-                          <div className="lg:col-span-2">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Receiver Details</div>
-                            <div className="flex items-start gap-2">
-                              <User className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                              <div>
-                                <div className="font-medium text-sm">{req.receiverName || 'Admin Review'}</div>
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  {req.receiverDepartment || 'Administration'}
-                                </div>
-                                {req.receiverId && (
-                                  <div className="text-xs text-muted-foreground">ID: {req.receiverId}</div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* REQUEST DETAILS */}
-                          <div className="lg:col-span-3">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Request Details</div>
-                            <div className="space-y-2 text-sm">
-                              <div className="flex items-start gap-2">
-                                <Package className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <div className="px-6 pb-6 pt-4 bg-gray-50 border-t border-gray-200">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 divide-x divide-dashed divide-gray-300">
+                            {/* Sender Details */}
+                            <div className="space-y-3">
+                              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Sender Details</h4>
+                              <div className="space-y-2">
                                 <div>
-                                  <span className="text-xs text-muted-foreground">Item Category</span>
-                                  <div className="font-medium">{req.itemCategory}</div>
+                                  <p className="text-xs text-gray-500">User ID</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.requesterId || '—'}</p>
                                 </div>
-                              </div>
-                              <div className="flex items-start gap-2">
-                                <MapPin className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
                                 <div>
-                                  <span className="text-xs text-muted-foreground">Purpose</span>
-                                  <div className="font-medium">{req.purpose}</div>
+                                  <p className="text-xs text-gray-500">Name</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.requesterName}</p>
                                 </div>
-                              </div>
-                              <div className="flex items-start gap-2">
-                                <Calendar className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
                                 <div>
-                                  <span className="text-xs text-muted-foreground">Preferred Date</span>
-                                  <div className="font-medium">{format(new Date(req.requiredDate), 'dd/MM/yyyy')}</div>
-                                </div>
-                              </div>
-                              <div className="flex items-start gap-2">
-                                <Tag className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                                <div>
-                                  <span className="text-xs text-muted-foreground">Load</span>
-                                  <div className="font-medium">{req.itemName}</div>
+                                  <p className="text-xs text-gray-500">Phone</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.requesterPhone}</p>
                                 </div>
                               </div>
                             </div>
-                            {req.description && (
-                              <div className="mt-2 p-2 bg-gray-50 rounded text-xs italic text-muted-foreground">
-                                "{req.description}"
+
+                            {/* Request Details */}
+                            <div className="space-y-3 md:pl-6">
+                              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Request Details</h4>
+                              <div className="space-y-2">
+                                <div>
+                                  <p className="text-xs text-gray-500">Item</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.itemCategory} — {req.itemName}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Quantity</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.quantity} {req.unit}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Purpose</p>
+                                  <p className="text-sm font-medium text-gray-900">{req.purpose || '—'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Required Date</p>
+                                  <p className="text-sm font-medium text-gray-900">{formatRequestDateTime(req.requiredDate)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Priority</p>
+                                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${priorityConfig.bg} ${priorityConfig.color}`}>
+                                    {priorityConfig.icon} {req.priority.charAt(0).toUpperCase() + req.priority.slice(1)}
+                                  </span>
+                                </div>
+                                {req.description ? (
+                                  <div>
+                                    <p className="text-xs text-gray-500 mb-1">Notes</p>
+                                    <div className="text-sm text-gray-700 bg-white border border-gray-200 rounded-lg p-3">
+                                      {req.description}
+                                    </div>
+                                  </div>
+                                ) : null}
                               </div>
-                            )}
-                          </div>
+                            </div>
 
-                          {/* PRIORITY */}
-                          <div className="lg:col-span-1">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Priority</div>
-                            <span className={cn(
-                              "inline-flex px-3 py-1 rounded-full text-xs font-semibold",
-                              req.priority === 'urgent' && 'bg-red-100 text-red-700',
-                              req.priority === 'high' && 'bg-orange-100 text-orange-700',
-                              req.priority === 'medium' && 'bg-yellow-100 text-yellow-700',
-                              req.priority === 'low' && 'bg-gray-100 text-gray-700'
-                            )}>
-                              {req.priority.toUpperCase()}
-                            </span>
-                          </div>
-
-                          {/* STATUS */}
-                          <div className="lg:col-span-1">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Status</div>
-                            <span className="inline-flex px-3 py-1 rounded bg-amber-100 text-amber-700 text-xs font-semibold border border-amber-200">
-                              Pending
-                            </span>
-                          </div>
-
-                          {/* ACTIONS */}
-                          <div className="lg:col-span-1">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Actions</div>
-                            <div className="flex flex-col gap-2">
-                              {req.receiverId !== 'ADMIN' ? (
-                                <button
-                                  onClick={() => {
-                                    setInventoryRequests(prev => prev.map(r => 
-                                      r.id === req.id ? { ...r, receiverId: 'ADMIN', receiverName: 'Admin Review Pending' } : r
-                                    ));
-                                    toast.success('Request sent to Admin for review');
-                                  }}
-                                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1"
-                                >
-                                  <FileText className="w-3 h-3" />
-                                  Send to Admin Request
-                                </button>
-                              ) : (
-                                <>
+                            {/* Actions */}
+                            <div className="space-y-3 md:pl-6">
+                              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Actions</h4>
+                              {req.status === 'pending' ? (
+                                <div className="flex flex-col gap-2">
                                   <button
                                     onClick={() => handleApproveRequest(req.id)}
-                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors"
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
                                   >
                                     Approve
                                   </button>
                                   <button
                                     onClick={() => handleRejectRequest(req.id)}
-                                    className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium transition-colors"
+                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
                                   >
                                     Reject
                                   </button>
-                                </>
+                                </div>
+                              ) : (
+                                <p className="text-sm text-gray-600">No actions available</p>
                               )}
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      </details>
+                    );
+                  })
                 )}
               </div>
-            )}
-
-            {/* IN PROGRESS SECTION */}
-            {groupedRequests.in_progress.length > 0 && (
-              <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
-                <button
-                  onClick={() => toggleSection('in_progress')}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    {expandedSections.in_progress ? (
-                      <ChevronDown className="w-5 h-5 text-gray-600" />
-                    ) : (
-                      <ChevronRight className="w-5 h-5 text-gray-600" />
-                    )}
-                    <h3 className="text-lg font-semibold">In Progress</h3>
-                    <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">
-                      {groupedRequests.in_progress.length}
-                    </span>
-                  </div>
-                </button>
-              </div>
-            )}
-
-            {/* APPROVED SECTION */}
-            {groupedRequests.approved.length > 0 && (
-              <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
-                <button
-                  onClick={() => toggleSection('approved')}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    {expandedSections.approved ? (
-                      <ChevronDown className="w-5 h-5 text-gray-600" />
-                    ) : (
-                      <ChevronRight className="w-5 h-5 text-gray-600" />
-                    )}
-                    <h3 className="text-lg font-semibold">Approved</h3>
-                    <span className="px-2.5 py-0.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
-                      {groupedRequests.approved.length}
-                    </span>
-                  </div>
-                </button>
-              </div>
-            )}
-
-            {filteredRequests.length === 0 && (
-              <div className="p-12 text-center text-muted-foreground bg-white border border-border rounded-xl">
-                <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <p>No inventory requests found</p>
-              </div>
-            )}
+            </div>
           </div>
         )}
-      </div>      {/* --- MODAL: NEW REQUEST (SEND TO ADMIN) --- */}
+      </div>
+
+      {/* --- MODAL: NEW REQUEST (SEND TO ADMIN) --- */}
       {isNewRequestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -807,7 +815,7 @@ const Inventory = () => {
                 <p className="text-sm text-gray-600 mt-1">Submit an inventory request for admin approval</p>
               </div>
               <button 
-                onClick={() => setIsNewRequestModalOpen(false)}
+                onClick={() => { setIsNewRequestModalOpen(false); setAdminFuelSnapshot(null); }}
                 className="w-10 h-10 bg-white hover:bg-gray-100 rounded-lg flex items-center justify-center transition-colors"
               >
                 <X className="w-5 h-5 text-gray-600" />
@@ -815,164 +823,221 @@ const Inventory = () => {
             </div>
 
             <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Requester Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newRequest.requesterName}
-                    onChange={(e) => setNewRequest({...newRequest, requesterName: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                    placeholder="Enter your name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Phone Number <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="tel"
-                    value={newRequest.requesterPhone}
-                    onChange={(e) => setNewRequest({...newRequest, requesterPhone: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                    placeholder="+91 98765 43210"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Item Category <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={newRequest.itemCategory}
-                    onChange={(e) => setNewRequest({...newRequest, itemCategory: e.target.value as ItemCategory})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                  >
-                    <option value="Fertilizer">Fertilizer</option>
-                    <option value="Pesticide">Pesticide</option>
-                    <option value="Seeds">Seeds</option>
-                    <option value="Fuel">Fuel</option>
-                    <option value="Spare Parts">Spare Parts</option>
-                    <option value="Equipment">Equipment</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Item Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newRequest.itemName}
-                    onChange={(e) => setNewRequest({...newRequest, itemName: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                    placeholder="e.g., NPK Fertilizer"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Quantity <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={newRequest.quantity}
-                    onChange={(e) => setNewRequest({...newRequest, quantity: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                    placeholder="0"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Unit <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={newRequest.unit}
-                    onChange={(e) => setNewRequest({...newRequest, unit: e.target.value as UnitType})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                  >
-                    <option value="kg">kg</option>
-                    <option value="L">L</option>
-                    <option value="g">g</option>
-                    <option value="units">units</option>
-                    <option value="bags">bags</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Priority <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={newRequest.priority}
-                    onChange={(e) => setNewRequest({...newRequest, priority: e.target.value as RequestPriority})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-                </div>
-              </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Purpose <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={newRequest.purpose}
-                  onChange={(e) => setNewRequest({...newRequest, purpose: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="e.g., Field 12-A Cultivation"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Required Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  value={newRequest.requiredDate}
-                  onChange={(e) => setNewRequest({...newRequest, requiredDate: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
-                  min={new Date().toISOString().split('T')[0]}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description <span className="text-red-500">*</span>
+                  Note
                 </label>
                 <textarea
-                  value={newRequest.description}
-                  onChange={(e) => setNewRequest({...newRequest, description: e.target.value})}
+                  value={newRequest.note}
+                  onChange={(e) => setNewRequest({ ...newRequest, note: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none resize-none"
                   rows={3}
-                  placeholder="Describe the purpose and urgency of this request..."
+                  placeholder="Write a note..."
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Options</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setNewRequest({ ...newRequest, option: 'fuel' })}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setNewRequest({ ...newRequest, option: 'fuel' }); }}
+                    className={cn(
+                      'text-left p-4 rounded-lg border transition-colors',
+                      newRequest.option === 'fuel' ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50'
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-gray-900">Fuel Request</div>
+                        <div className="text-xs text-gray-600 mt-0.5">Fetch all fuel requirements</div>
+                      </div>
+                      <Fuel className={cn('w-5 h-5', newRequest.option === 'fuel' ? 'text-blue-700' : 'text-gray-500')} />
+                    </div>
+
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const result = await fetchFuelRequests();
+                          if (result) setAdminFuelSnapshot(result);
+                        }}
+                        disabled={isFuelLoading}
+                        className={cn(
+                          'px-2 py-1 rounded-md text-xs font-semibold border transition-colors',
+                          isFuelLoading ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white hover:bg-gray-50 border-gray-200'
+                        )}
+                      >
+                        {isFuelLoading ? 'Fetching…' : 'Fetch'}
+                      </button>
+                      <div className="text-xs text-gray-600">
+                        Pending: <span className="font-semibold">{pendingFuelRequests}</span> • Total: <span className="font-semibold">{fuelRequests.length}</span>
+                      </div>
+                    </div>
+
+                    {newRequest.option === 'fuel' && (
+                      <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                        {adminFuelSnapshot === null ? (
+                          <div className="text-xs text-gray-600">Click “Fetch” to attach the current fuel requests.</div>
+                        ) : adminFuelSnapshot.length === 0 ? (
+                          <div className="text-xs text-gray-600">No fuel requests found.</div>
+                        ) : (
+                          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                              <div className="text-xs font-semibold text-gray-700">Fetched Fuel Requests</div>
+                              <div className="text-xs text-gray-600">
+                                Count: <span className="font-semibold">{adminFuelSnapshot.length}</span> • Total: <span className="font-semibold">{adminFuelSnapshot.reduce((s, r) => s + (Number(r.requestedAmount) || 0), 0)} L</span>
+                              </div>
+                            </div>
+                            <div className="max-h-40 overflow-y-auto">
+                              <table className="w-full text-xs">
+                                <thead className="sticky top-0 bg-white">
+                                  <tr className="text-left text-gray-500">
+                                    <th className="px-3 py-2 font-medium">ID</th>
+                                    <th className="px-3 py-2 font-medium">Vehicle</th>
+                                    <th className="px-3 py-2 font-medium text-right">L</th>
+                                    <th className="px-3 py-2 font-medium">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {adminFuelSnapshot.map((r) => (
+                                    <tr key={r.request_id} className="text-gray-700">
+                                      <td className="px-3 py-2 font-mono">{r.request_id}</td>
+                                      <td className="px-3 py-2 font-mono">{r.vehicleNumber}</td>
+                                      <td className="px-3 py-2 text-right">{r.requestedAmount}</td>
+                                      <td className="px-3 py-2">{r.status}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            <div className="px-3 py-2 bg-gray-50 border-t border-gray-200 text-xs text-gray-700 flex items-center justify-between">
+                              <span className="font-medium">Total Fuel Requirement</span>
+                              <span className="font-semibold">{adminFuelSnapshot.reduce((s, r) => s + (Number(r.requestedAmount) || 0), 0)} L</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setNewRequest({ ...newRequest, option: 'equipment' })}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setNewRequest({ ...newRequest, option: 'equipment' }); }}
+                    className={cn(
+                      'text-left p-4 rounded-lg border transition-colors',
+                      newRequest.option === 'equipment' ? 'border-slate-300 bg-slate-50' : 'border-gray-200 bg-white hover:bg-gray-50'
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-gray-900">Equipment Request</div>
+                        <div className="text-xs text-gray-600 mt-0.5">Add equipment and quantities to a cart</div>
+                      </div>
+                      <Package className={cn('w-5 h-5', newRequest.option === 'equipment' ? 'text-slate-700' : 'text-gray-500')} />
+                    </div>
+
+                    {newRequest.option === 'equipment' ? (
+                      <div className="mt-3 space-y-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                          <input
+                            type="text"
+                            value={newRequest.equipmentName}
+                            onChange={(e) => setNewRequest({ ...newRequest, equipmentName: e.target.value })}
+                            className="md:col-span-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                            placeholder="Equipment name"
+                          />
+                          <input
+                            type="number"
+                            min={1}
+                            value={newRequest.equipmentQty}
+                            onChange={(e) => setNewRequest({ ...newRequest, equipmentQty: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                            placeholder="Qty"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const name = newRequest.equipmentName.trim();
+                            const qty = Math.max(1, Number(newRequest.equipmentQty) || 1);
+                            if (!name) {
+                              toast.error('Enter equipment name');
+                              return;
+                            }
+                            setNewRequest({
+                              ...newRequest,
+                              equipmentCart: [...newRequest.equipmentCart, { name, quantity: qty }],
+                              equipmentName: '',
+                              equipmentQty: '1',
+                            });
+                          }}
+                          className="px-3 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
+                        >
+                          Add to Cart
+                        </button>
+
+                        {newRequest.equipmentCart.length > 0 ? (
+                          <div className="bg-white border border-gray-200 rounded-lg divide-y">
+                            {newRequest.equipmentCart.map((it, idx) => (
+                              <div key={`${it.name}-${idx}`} className="flex items-center justify-between px-3 py-2 text-sm">
+                                <div className="min-w-0">
+                                  <div className="font-medium text-gray-900 truncate">{it.name}</div>
+                                  <div className="text-xs text-gray-600">Qty: {it.quantity}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setNewRequest({
+                                      ...newRequest,
+                                      equipmentCart: newRequest.equipmentCart.filter((_, i) => i !== idx),
+                                    });
+                                  }}
+                                  className="px-2 py-1 text-xs font-medium border border-gray-200 rounded hover:bg-gray-50"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-gray-600">Cart is empty</div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Priority of request</label>
+                <select
+                  value={newRequest.priority}
+                  onChange={(e) => setNewRequest({ ...newRequest, priority: e.target.value as RequestPriority })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 outline-none"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
               </div>
             </div>
 
-            <div className="p-6 bg-gray-50 border-t border-gray-200 flex gap-3">
-              <button
-                onClick={() => setIsNewRequestModalOpen(false)}
-                className="flex-1 px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
+            <div className="p-6 bg-gray-50 border-t border-gray-200 flex">
               <button
                 onClick={handleSubmitNewRequest}
-                className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-lg font-semibold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+                disabled={isSendingAdminRequest}
+                className="w-full px-4 py-3 bg-slate-900 text-white rounded-lg font-semibold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
               >
                 <FileText className="w-5 h-5" />
-                Send to Admin
+                {isSendingAdminRequest ? 'Sending…' : 'Send Request'}
               </button>
             </div>
           </div>
@@ -1202,22 +1267,6 @@ const Inventory = () => {
         </div>
       )}
 
-      {/* --- FLOATING FUEL REQUEST BUTTON --- */}
-      <button
-        onClick={() => setIsFuelRequestsOpen(true)}
-        className="fixed bottom-8 right-8 bg-gradient-to-br from-blue-600 to-blue-700 text-white p-4 rounded-full shadow-2xl hover:shadow-blue-500/50 hover:scale-110 transition-all duration-300 z-40 group"
-        title="View Fuel Requests"
-      >
-        <div className="relative">
-          <Fuel className="w-6 h-6" />
-          {pendingFuelRequests > 0 && (
-            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
-              {pendingFuelRequests}
-            </span>
-          )}
-        </div>
-      </button>
-
       {/* --- MODAL: FUEL REQUESTS --- */}
       {isFuelRequestsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1256,6 +1305,28 @@ const Inventory = () => {
                 </div>
                 <div className="flex items-start gap-2 ml-4">
                   <button
+                    onClick={selectAllFuelRequests}
+                    disabled={filteredFuelRequests.length === 0 || selectedFuelIds.length === filteredFuelRequests.length}
+                    className="px-3 py-2 border rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={deselectAllFuelRequests}
+                    disabled={selectedFuelIds.length === 0}
+                    className="px-3 py-2 border rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Deselect All
+                  </button>
+                  {selectedFuelIds.length > 0 && (
+                    <button
+                      onClick={makeFuelRequest}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                    >
+                      Make Fuel Request
+                    </button>
+                  )}
+                  <button
                     onClick={() => fetchFuelRequests()}
                     disabled={isFuelLoading}
                     title="Refresh"
@@ -1267,6 +1338,7 @@ const Inventory = () => {
                     onClick={() => {
                       setIsFuelRequestsOpen(false);
                       setFuelSearchQuery('');
+                      setSelectedFuelIds([]);
                     }}
                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   >
@@ -1286,6 +1358,7 @@ const Inventory = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50 border-b border-border">
                       <tr>
+                        <th className="px-4 py-4" />
                         <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Request ID</th>
                         <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Driver</th>
                         <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Vehicle</th>
@@ -1297,7 +1370,7 @@ const Inventory = () => {
                     <tbody className="divide-y divide-border">
                       {filteredFuelRequests.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                          <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
                             <Fuel className="w-12 h-12 mx-auto mb-3 opacity-20" />
                             <p>{fuelSearchQuery ? 'No matching fuel requests found' : 'No fuel requests found'}</p>
                           </td>
@@ -1305,6 +1378,13 @@ const Inventory = () => {
                       ) : (
                         filteredFuelRequests.map((request) => (
                           <tr key={request.request_id} className="hover:bg-muted/20">
+                            <td className="px-4 py-4">
+                              <input
+                                type="checkbox"
+                                checked={selectedFuelIds.includes(request.request_id)}
+                                onChange={() => toggleSelectFuel(request.request_id)}
+                              />
+                            </td>
                             <td className="px-6 py-4">
                               <span className="font-mono text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
                                 {request.request_id}
@@ -1370,6 +1450,7 @@ const Inventory = () => {
                 onClick={() => {
                   setIsFuelRequestsOpen(false);
                   setFuelSearchQuery('');
+                  setSelectedFuelIds([]);
                 }}
                 className="px-5 py-2.5 text-sm font-medium border rounded-lg hover:bg-gray-50 transition-colors"
               >

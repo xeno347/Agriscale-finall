@@ -41,11 +41,20 @@ type RequestPriority = 'urgent' | 'high' | 'medium' | 'low';
 
 type ApprovalStageStatus = 'pending' | 'approved' | 'approved_and_forwarded' | 'rejected';
 
+type FuelMetaDataItem = {
+  driver_name?: string;
+  fuel_amount?: number;
+  request_id?: string;
+  vehicle_number?: string;
+};
+
 type BackendDepartmentRequest = {
   first_department?: string;
   request_details: {
     note: string;
     request_location: string;
+    request_type?: string;
+    meta_data?: FuelMetaDataItem[];
   };
   date: string;
   created_at: string;
@@ -96,6 +105,15 @@ interface LogisticsRequest {
   concerned_department_approval_status?: ApprovalStageStatus;
   admin_ops_approval_status?: ApprovalStageStatus;
   forwarded_department_approval_status?: ApprovalStageStatus;
+
+  // Request subtype details (optional)
+  requestDetailsType?: string;
+  fuelMetaData?: Array<{
+    driver_name: string;
+    fuel_amount: number;
+    request_id: string;
+    vehicle_number: string;
+  }>;
 }
 
 interface CalendarEntry {
@@ -1112,6 +1130,7 @@ const RequestsSection = ({ requests, onApprove, onReject, onUpdateForwardedDepar
       farm_id: getRequestedLocationForCalendar(assignmentRequest),
       description: String(assignmentRequest.description || ''),
       requester_id: String(assignmentRequest.staff_id || assignmentRequest.requesterId || ''),
+      request_id: String(assignmentRequest.id || ''),
     };
 
     const res = await fetch(`${BASE_URL}/admin_vehicles/update_vehicle_calander`, {
@@ -1350,6 +1369,39 @@ const RequestsSection = ({ requests, onApprove, onReject, onUpdateForwardedDepar
                             <p className="text-xs italic text-gray-400 mb-1">(Direct note from sender)</p>
                             <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-sm text-gray-700">{req.description}</div>
                           </div>
+
+                          {req.requestDetailsType?.toLowerCase() === 'fuel' && Array.isArray(req.fuelMetaData) && req.fuelMetaData.length > 0 && (
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Fuel Requirements</p>
+                              <div className="bg-white border border-gray-200 rounded-lg p-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="text-xs font-semibold text-gray-700">Fuel Requests</div>
+                                  <div className="text-xs text-gray-600">
+                                    Total: {req.fuelMetaData.reduce((sum, r) => sum + (Number.isFinite(r.fuel_amount) ? r.fuel_amount : 0), 0)} L
+                                  </div>
+                                </div>
+
+                                <div className="max-h-40 overflow-auto">
+                                  <div className="grid grid-cols-4 gap-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wide pb-2 border-b border-gray-100">
+                                    <div>Request ID</div>
+                                    <div>Vehicle</div>
+                                    <div>Driver</div>
+                                    <div className="text-right">Liters</div>
+                                  </div>
+                                  <div className="divide-y divide-gray-100">
+                                    {req.fuelMetaData.map((r, idx) => (
+                                      <div key={`${r.request_id}-${idx}`} className="grid grid-cols-4 gap-2 py-2 text-xs text-gray-700">
+                                        <div className="font-mono truncate">{r.request_id}</div>
+                                        <div className="truncate">{r.vehicle_number}</div>
+                                        <div className="truncate">{r.driver_name}</div>
+                                        <div className="text-right font-medium">{r.fuel_amount}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           {req.adminNote && String(req.adminNote).trim() && (
                             <div>
@@ -1699,6 +1751,17 @@ const LogisticsManagement = () => {
 
       const mapped: LogisticsRequest[] = list.map((item) => {
         const loc = parseRequestLocation(item?.request_details?.request_location);
+        const requestDetailsType = String(item?.request_details?.request_type || '').trim();
+        const rawMeta = item?.request_details?.meta_data;
+        const fuelMetaData = (requestDetailsType.toLowerCase() === 'fuel' && Array.isArray(rawMeta))
+          ? rawMeta.map((m) => ({
+              driver_name: String(m?.driver_name || '').trim() || '—',
+              fuel_amount: Number.isFinite(Number(m?.fuel_amount)) ? Number(m?.fuel_amount) : 0,
+              request_id: String(m?.request_id || '').trim() || '—',
+              vehicle_number: String(m?.vehicle_number || '').trim() || '—',
+            }))
+          : undefined;
+
         const concerned = item?.concerned_department_approval_status || 'pending';
         const adminOps = item?.admin_ops_approval_status || 'pending';
         const forwarded = item?.forwarded_department_approval_status || 'pending';
@@ -1735,6 +1798,9 @@ const LogisticsManagement = () => {
           forwarded_department_approval_status: forwarded,
 
           forwarded_to_departments: forwardedToDepartments,
+
+          requestDetailsType: requestDetailsType || undefined,
+          fuelMetaData,
         };
 
         return { ...base, status: deriveRequestStatus(base) };

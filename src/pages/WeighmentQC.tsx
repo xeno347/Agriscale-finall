@@ -1,344 +1,625 @@
-import { useState } from 'react';
-import { 
-  Scale, Beaker, Truck, Filter, 
-  CheckCircle2, AlertCircle, X, Save, 
-  Search, Printer, MessageSquare, Plus, FileText, Camera
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { BrowserQRCodeReader } from '@zxing/browser';
+import { DecodeHintType } from '@zxing/library';
+import getBaseUrl from '@/lib/config';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
-// --- TYPES ---
+type HarvestCardQrPayload = {
+  card_id?: string;
+  card_number?: string;
+  name?: string;
+  valid_till?: string;
+  emergency_contact?: {
+    designation?: string;
+    name?: string;
+    contact?: string;
+  };
+};
 
-interface WeighmentRecord {
-  id: string;
-  weighment_no: string;
-  date: string;
-  farmer_name: string;
-  farmer_id: string;
-  gross_weight: number;
-  tare_weight: number;
-  net_weight: number;
-  status: 'pending' | 'completed';
-  qc_status?: 'pending' | 'completed';
-  quality_grade?: string;
-  brix?: number;
-}
-
-// --- MOCK DATA ---
-const MOCK_DATA: WeighmentRecord[] = [
-  { 
-    id: 'w1', weighment_no: 'WGT-000007', date: '10 Jan 2026 22:11', 
-    farmer_name: 'Rakesh', farmer_id: 'SBR-F-68294',
-    gross_weight: 110, tare_weight: 100, net_weight: 10,
-    status: 'pending', qc_status: 'pending'
-  },
-  { 
-    id: 'w2', weighment_no: 'WGT-000006', date: '28 Dec 2025 13:38', 
-    farmer_name: 'Kishan', farmer_id: 'SBR-F-91356',
-    gross_weight: 100000, tare_weight: 100, net_weight: 99900,
-    status: 'pending', qc_status: 'pending'
-  },
-  { 
-    id: 'w3', weighment_no: 'WGT-000005', date: '27 Dec 2025 21:00', 
-    farmer_name: 'Rakesh', farmer_id: 'SBR-F-68294',
-    gross_weight: 25000, tare_weight: 6000, net_weight: 19000,
-    status: 'completed', qc_status: 'completed', quality_grade: 'Grade A (Premium)', brix: 19.5
-  },
-  { 
-    id: 'w4', weighment_no: 'WGT-000004', date: '25 Dec 2025 11:59', 
-    farmer_name: 'Kishan', farmer_id: 'SBR-F-91356',
-    gross_weight: 27000, tare_weight: 5000, net_weight: 22000,
-    status: 'completed', qc_status: 'completed', quality_grade: 'Grade A (Premium)', brix: 18.2
-  },
-];
+type DriverDetails = {
+  driver_name?: string;
+  driver_contact?: string;
+  vehicle_number?: string;
+};
 
 export default function WeighmentQCPage() {
-  const [records, setRecords] = useState<WeighmentRecord[]>(MOCK_DATA);
-  const [isWeighModalOpen, setIsWeighModalOpen] = useState(false);
-  const [isQCModalOpen, setIsQCModalOpen] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState<WeighmentRecord | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [entryOpen, setEntryOpen] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [activeCameraLabel, setActiveCameraLabel] = useState<string>('');
+  const [scanBusy, setScanBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  // --- DERIVED STATS ---
-  const totalWeighments = records.length;
-  const todayCount = 0; // Mock
-  const totalWeight = records.reduce((acc, curr) => acc + curr.net_weight, 0);
-  const pendingQC = records.filter(r => r.qc_status === 'pending').length;
+  const [scannedPayload, setScannedPayload] = useState<HarvestCardQrPayload | null>(null);
 
-  // --- ACTIONS ---
-  const handleOpenQC = (record: WeighmentRecord) => {
-    setSelectedRecord(record);
-    setIsQCModalOpen(true);
+  const [driverDetails, setDriverDetails] = useState<DriverDetails | null>(null);
+  const [driverLoading, setDriverLoading] = useState(false);
+  const [driverError, setDriverError] = useState<string | null>(null);
+  const driverAbortRef = useRef<AbortController | null>(null);
+
+  const [grossWeight, setGrossWeight] = useState('');
+  const [tareWeight, setTareWeight] = useState('');
+  const netWeight = useMemo(() => {
+    const g = Number(grossWeight);
+    const t = Number(tareWeight);
+    if (!Number.isFinite(g) || !Number.isFinite(t)) return '';
+    return String(Math.max(0, g - t));
+  }, [grossWeight, tareWeight]);
+
+  const [moisturePercentage, setMoisturePercentage] = useState('');
+  const [foreignMaterialPercentage, setForeignMaterialPercentage] = useState('');
+  const [choppingSize, setChoppingSize] = useState('');
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const readerRef = useRef<BrowserQRCodeReader | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const stopScanner = () => {
+    readerRef.current = null;
+    setScanBusy(false);
+
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) {
+        track.stop();
+      }
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setActiveCameraLabel('');
   };
 
-  const handleSaveWeighment = (e: React.FormEvent) => {
-    e.preventDefault();
-    toast.success("Weighment Recorded Successfully");
-    setIsWeighModalOpen(false);
+  const fetchDriverDetails = async (cardNumber: string) => {
+    const trimmed = cardNumber.trim();
+    if (!trimmed) return;
+
+    driverAbortRef.current?.abort();
+    const controller = new AbortController();
+    driverAbortRef.current = controller;
+
+    setDriverLoading(true);
+    setDriverError(null);
+    setDriverDetails(null);
+
+    try {
+      const base = getBaseUrl().replace(/\/$/, '');
+      const url = `${base}/Harvest_management/get_driver_details/${encodeURIComponent(trimmed)}`;
+      const res = await fetch(url, { method: 'GET', signal: controller.signal });
+      if (!res.ok) throw new Error(`Failed to fetch driver details: ${res.status}`);
+      const json = (await res.json().catch(() => null)) as DriverDetails | null;
+      setDriverDetails(json && typeof json === 'object' ? json : null);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      const message = e instanceof Error ? e.message : 'Failed to fetch driver details';
+      setDriverError(message);
+      setDriverDetails(null);
+    } finally {
+      setDriverLoading(false);
+    }
   };
 
-  const handleSaveQC = (e: React.FormEvent) => {
+  const getCameraErrorMessage = (e: unknown) => {
+    const maybeDomException = e as { name?: string; message?: string };
+    const name = (maybeDomException?.name || '').toString();
+
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return 'Camera permission denied. Please allow camera access in your browser site settings.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return 'No camera device found.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return 'Camera is already in use by another application (Zoom/Teams/etc). Close it and try again.';
+    }
+    if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+      return 'The selected camera does not support the required constraints. Try another camera.';
+    }
+    return e instanceof Error ? e.message : 'Failed to open camera';
+  };
+
+  const pickPreferredVideoDeviceId = (devices: MediaDeviceInfo[]) => {
+    const videoDevices = devices.filter((d) => d.kind === 'videoinput');
+    if (!videoDevices.length) return undefined;
+
+    // Heuristic: prefer non-front/external cameras when multiple exist.
+    // Labels are often empty until permission is granted; we still prefer the last deviceId.
+    const labeled = videoDevices.filter((d) => (d.label || '').trim().length > 0);
+    const haystack = (d: MediaDeviceInfo) => (d.label || '').toLowerCase();
+    const preferredFromLabel = labeled.find((d) =>
+      ['usb', 'external', 'rear', 'back', 'logitech', 'webcam'].some((k) => haystack(d).includes(k)),
+    );
+
+    const preferred = preferredFromLabel ?? videoDevices[videoDevices.length - 1];
+    setActiveCameraLabel(preferred.label || '');
+    return preferred.deviceId;
+  };
+
+  const openEntryForRaw = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+
+    stopScanner();
+    try {
+      const parsed = JSON.parse(trimmed) as HarvestCardQrPayload;
+      const nextPayload = parsed && typeof parsed === 'object' ? parsed : null;
+      setScannedPayload(nextPayload);
+      const cardNumber = (nextPayload?.card_number || '').trim();
+      if (cardNumber) {
+        void fetchDriverDetails(cardNumber);
+      } else {
+        setDriverDetails(null);
+        setDriverError(null);
+        setDriverLoading(false);
+      }
+    } catch {
+      // If QR is not JSON, assume it could be just the card number.
+      setScannedPayload({ card_number: trimmed });
+      void fetchDriverDetails(trimmed);
+    }
+    setScanOpen(false);
+    setEntryOpen(true);
+  };
+
+  const scanOnce = async () => {
+    if (scanBusy) return;
+    setScanError(null);
+
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) {
+      setScanError('Camera not ready. Please wait a moment and try again.');
+      return;
+    }
+
+    setScanBusy(true);
+    try {
+      const waitForVideoFrame = async (timeoutMs: number) => {
+        if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) return true;
+
+        return await new Promise<boolean>((resolve) => {
+          const timeoutId = window.setTimeout(() => resolve(false), timeoutMs);
+          const onCanPlay = () => {
+            window.clearTimeout(timeoutId);
+            video.removeEventListener('canplay', onCanPlay);
+            resolve(true);
+          };
+          video.addEventListener('canplay', onCanPlay, { once: true });
+        });
+      };
+
+      const videoReady = await waitForVideoFrame(1500);
+      if (!videoReady) {
+        setScanError('Camera is not ready yet. Please wait a moment and try again.');
+        return;
+      }
+
+      const detectWithBarcodeDetector = async (timeoutMs: number) => {
+        const BarcodeDetectorCtor = (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
+        if (typeof BarcodeDetectorCtor !== 'function') return null;
+
+        const detector = new (BarcodeDetectorCtor as new (opts: { formats: string[] }) => {
+          detect: (source: CanvasImageSource) => Promise<Array<{ rawValue?: string }>>;
+        })({ formats: ['qr_code'] });
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return null;
+
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < timeoutMs) {
+          if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            try {
+              const codes = await detector.detect(canvas);
+              const raw = codes?.[0]?.rawValue?.trim();
+              if (raw) return raw;
+            } catch {
+              // ignore and keep trying
+            }
+          }
+
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+
+        return null;
+      };
+
+      const detectWithZXing = async (timeoutMs: number) => {
+        const reader = readerRef.current;
+        if (!reader) return null;
+
+        return await new Promise<string | null>((resolve) => {
+          let done = false;
+          let timeoutId: number | null = null;
+
+          const finalize = (value: string | null) => {
+            if (done) return;
+            done = true;
+            if (timeoutId !== null) window.clearTimeout(timeoutId);
+            resolve(value);
+          };
+
+          reader
+            .decodeFromStream(stream, video, (result, _error, controls) => {
+              if (done) return;
+              if (result) {
+                try {
+                  controls.stop();
+                } catch {
+                  // ignore
+                }
+                finalize(result.getText());
+              }
+            })
+            .then((controls) => {
+              timeoutId = window.setTimeout(() => {
+                try {
+                  controls.stop();
+                } catch {
+                  // ignore
+                }
+                finalize(null);
+              }, timeoutMs);
+            })
+            .catch(() => finalize(null));
+        });
+      };
+
+      const rawFromNative = await detectWithBarcodeDetector(3500);
+      if (rawFromNative) {
+        openEntryForRaw(rawFromNative);
+        return;
+      }
+
+      const rawFromZXing = await detectWithZXing(5000);
+      if (rawFromZXing && rawFromZXing.trim()) {
+        openEntryForRaw(rawFromZXing);
+        return;
+      }
+
+      setScanError('No QR code detected. Please try again.');
+    } catch {
+      setScanError('No QR code detected. Please try again.');
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!scanOpen) {
+      stopScanner();
+      return;
+    }
+
+    setScanError(null);
+    setScanBusy(false);
+    let cancelled = false;
+    const start = async () => {
+      try {
+        const host = window.location.hostname;
+        const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        if (!window.isSecureContext && !isLocalhost) {
+          throw new Error('Camera requires HTTPS or http://localhost');
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Camera API not available in this browser');
+        }
+
+        // Ensure the dialog has mounted its video element.
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (!videoRef.current) return;
+
+        let preferredDeviceId: string | undefined;
+        try {
+          if (navigator.mediaDevices?.enumerateDevices) {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            preferredDeviceId = pickPreferredVideoDeviceId(devices);
+          }
+        } catch {
+          // ignore device enumeration failures; we'll fall back to default camera
+        }
+
+        const hints = new Map();
+        hints.set(DecodeHintType.TRY_HARDER, true);
+
+        const tunedReader = new BrowserQRCodeReader(hints, {
+          delayBetweenScanAttempts: 100,
+          delayBetweenScanSuccess: 750,
+          tryPlayVideoTimeout: 10000,
+        });
+        readerRef.current = tunedReader;
+
+        const makeConstraints = (deviceId?: string): MediaStreamConstraints => {
+          const baseVideoConstraints: MediaTrackConstraints = {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          };
+          if (deviceId) {
+            return { video: { ...baseVideoConstraints, deviceId: { exact: deviceId } } };
+          }
+          return { video: { ...baseVideoConstraints, facingMode: 'environment' } };
+        };
+
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(makeConstraints(preferredDeviceId));
+        } catch (e) {
+          // Retry once with generic constraints.
+          setActiveCameraLabel('');
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+
+        if (cancelled) {
+          for (const track of stream.getTracks()) track.stop();
+          return;
+        }
+        streamRef.current = stream;
+
+        // Attach stream explicitly so we can use BarcodeDetector (if available).
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          try {
+            await videoRef.current.play();
+          } catch {
+            // ignore autoplay errors; decode pipeline may still work
+          }
+        }
+
+        // Prefer native detector when available (more like phone QR scanning).
+        // Do not auto-scan; user will click the "Scan" button.
+      } catch (e) {
+        const message = getCameraErrorMessage(e);
+        setScanError(message);
+        toast.error(message);
+      }
+    };
+
+    start();
+    return () => {
+      cancelled = true;
+      stopScanner();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanOpen]);
+
+  const resetEntry = () => {
+    setGrossWeight('');
+    setTareWeight('');
+    setMoisturePercentage('');
+    setForeignMaterialPercentage('');
+    setChoppingSize('');
+
+    setSaving(false);
+
+    driverAbortRef.current?.abort();
+    driverAbortRef.current = null;
+    setDriverDetails(null);
+    setDriverError(null);
+    setDriverLoading(false);
+  };
+
+  const saveEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success("Quality Check Completed");
-    setIsQCModalOpen(false);
+
+    const cardNumber = (scannedPayload?.card_number || '').toString().trim();
+    if (!cardNumber) {
+      toast.error('Card number missing in QR data');
+      return;
+    }
+
+    const toNumberOrZero = (value: string) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const payload = {
+      card_number: cardNumber,
+      gross_weight: toNumberOrZero(grossWeight),
+      tare_weight: toNumberOrZero(tareWeight),
+      net_weight: toNumberOrZero(netWeight),
+      moisture_percentage: toNumberOrZero(moisturePercentage),
+      foreign_material_percentage: toNumberOrZero(foreignMaterialPercentage),
+      chopping_size: toNumberOrZero(choppingSize),
+    };
+    console.log('Saving payload', payload);
+
+    setSaving(true);
+    try {
+      const base = getBaseUrl().replace(/\/$/, '');
+      const url = `${base}/Harvest_management/save_weighment`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to save weighment: ${res.status}`);
+      }
+
+      const json: any = await res.json().catch(() => null);
+      const isSuccess = json === true || json?.success === true || json?.Success === true;
+      if (!isSuccess) {
+        const message = typeof json?.message === 'string' ? json.message : 'Failed to save weighment';
+        throw new Error(message);
+      }
+
+      toast.success('Data saved successfully');
+      setEntryOpen(false);
+      resetEntry();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save weighment';
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8 font-sans text-slate-900 animate-in fade-in duration-500">
-      
-      {/* 1. HEADER & TITLE */}
-      <div className="max-w-7xl mx-auto mb-6 flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-slate-900">Weighment & QC</h1>
-        <div className="flex gap-2">
-           <button className="p-2 text-gray-400 hover:text-gray-600"><span className="sr-only">Settings</span>⚙️</button>
-           <button className="p-2 text-gray-400 hover:text-gray-600"><span className="sr-only">Notifications</span>🔔</button>
+    <div className="p-8">
+      <div className="max-w-xl mx-auto space-y-6">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold text-foreground">Weighment & QC</h1>
+          <p className="text-sm text-muted-foreground">Scan Harvest Card QR code to enter weighment and QC data.</p>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-6">
+          <Button onClick={() => setScanOpen(true)} className="w-full">
+            Scan QR Code
+          </Button>
         </div>
       </div>
 
-      {/* 2. STATS CARDS */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs font-medium text-gray-500 uppercase mb-1">Total Weighments</p>
-          <h3 className="text-2xl font-bold text-slate-900">{totalWeighments}</h3>
-        </div>
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs font-medium text-gray-500 uppercase mb-1">Today</p>
-          <h3 className="text-2xl font-bold text-blue-600">{todayCount}</h3>
-        </div>
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs font-medium text-gray-500 uppercase mb-1">Total Weight (kg)</p>
-          <h3 className="text-2xl font-bold text-slate-900">{totalWeight.toLocaleString()}</h3>
-        </div>
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs font-medium text-gray-500 uppercase mb-1">Pending QC</p>
-          <h3 className="text-2xl font-bold text-amber-500">{pendingQC}</h3>
-        </div>
-      </div>
+      <Dialog
+        open={scanOpen}
+        onOpenChange={(open) => {
+          setScanOpen(open);
+          if (!open) stopScanner();
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Scan QR Code</DialogTitle>
+          </DialogHeader>
 
-      {/* 3. TOOLBAR */}
-      <div className="max-w-7xl mx-auto mb-6 flex gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input 
-            type="text" 
-            placeholder="Search by weighment number or farmer..." 
-            className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-200"
-          />
-        </div>
-        <button 
-          onClick={() => setIsWeighModalOpen(true)}
-          className="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> New Weighment
-        </button>
-      </div>
-
-      {/* 4. TABLE SECTION */}
-      <div className="max-w-7xl mx-auto bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-gray-100">
-          <h3 className="text-lg font-bold text-slate-900">Weighment Records</h3>
-        </div>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-gray-50 border-b border-gray-100 text-gray-500 font-medium">
-              <tr>
-                <th className="px-6 py-4">Weighment #</th>
-                <th className="px-6 py-4">Date</th>
-                <th className="px-6 py-4">Farmer</th>
-                <th className="px-6 py-4">Gross (kg)</th>
-                <th className="px-6 py-4">Tare (kg)</th>
-                <th className="px-6 py-4">Net (kg)</th>
-                <th className="px-6 py-4">QC Status</th>
-                <th className="px-6 py-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {records.map((record) => (
-                <tr key={record.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 font-mono text-gray-600">{record.weighment_no}</td>
-                  <td className="px-6 py-4 text-gray-600">{record.date}</td>
-                  <td className="px-6 py-4">
-                    <div className="font-bold text-slate-900">{record.farmer_name}</div>
-                    <div className="text-xs text-gray-400">{record.farmer_id}</div>
-                  </td>
-                  <td className="px-6 py-4 font-medium text-slate-900">{record.gross_weight.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-gray-500">{record.tare_weight.toLocaleString()}</td>
-                  <td className="px-6 py-4 font-bold text-slate-900">{record.net_weight.toLocaleString()}</td>
-                  <td className="px-6 py-4">
-                    {record.qc_status === 'pending' ? (
-                      <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-600 text-xs font-bold border border-gray-200">
-                        Pending
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 rounded-full bg-green-50 text-green-700 text-xs font-bold border border-green-100">
-                        {record.quality_grade}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      {record.qc_status === 'pending' ? (
-                        <button 
-                          onClick={() => handleOpenQC(record)}
-                          className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-md text-xs font-bold text-gray-600 hover:bg-gray-50 hover:text-slate-900 transition-colors"
-                        >
-                          <FileText className="w-3.5 h-3.5" /> QC
-                        </button>
-                      ) : (
-                        <>
-                          <button className="p-1.5 border border-gray-200 rounded-md text-gray-400 hover:text-slate-900 hover:bg-gray-50">
-                            <Printer className="w-4 h-4" />
-                          </button>
-                          <button className="p-1.5 border border-gray-200 rounded-md text-green-600 hover:bg-green-50 hover:border-green-200">
-                            <MessageSquare className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* --- MODAL 1: RECORD NEW WEIGHMENT --- */}
-      {isWeighModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl animate-in zoom-in-95">
-            <div className="flex justify-between items-center p-6 border-b border-gray-100">
-              <h3 className="font-bold text-xl text-slate-900">Record New Weighment</h3>
-              <button onClick={() => setIsWeighModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5"/></button>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-border overflow-hidden bg-muted">
+              <video ref={videoRef} className="w-full h-[320px] object-cover" autoPlay playsInline muted />
             </div>
-            
-            <form onSubmit={handleSaveWeighment} className="p-6 space-y-5">
-              
-              <div className="space-y-1.5">
-                <label className="text-sm font-bold text-slate-700">Farmer *</label>
-                <select className="w-full p-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-slate-200 outline-none">
-                  <option>Select farmer</option>
-                  <option>Rakesh (SBR-F-68294)</option>
-                  <option>Kishan (SBR-F-91356)</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-600">Vehicle (Optional)</label>
-                <select className="w-full p-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-slate-200 outline-none">
-                  <option>Select vehicle</option>
-                  {/* Reuse mock data if needed */}
-                  <option>MH-12-AB-1234</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-bold text-slate-700">Gross Weight (kg) *</label>
-                  <input type="number" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none" placeholder="0" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-600">Tare Weight (kg)</label>
-                  <input type="number" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none" placeholder="0" />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-600">Type</label>
-                <select className="w-full p-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-slate-200 outline-none">
-                  <option>Incoming</option>
-                  <option>Outgoing</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-600">Notes</label>
-                <textarea className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none h-24 resize-none" />
-              </div>
-
-              <button type="submit" className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition-colors">
-                Record Weighment
-              </button>
-            </form>
+            <p className="text-xs text-muted-foreground">Point the camera at the QR code, then click Scan.</p>
+            {activeCameraLabel ? (
+              <p className="text-xs text-muted-foreground">Using camera: {activeCameraLabel}</p>
+            ) : null}
+            {scanError ? <p className="text-xs text-destructive">{scanError}</p> : null}
           </div>
-        </div>
-      )}
 
-      {/* --- MODAL 2: QUALITY CHECK --- */}
-      {isQCModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto scrollbar-thin">
-            <div className="flex justify-between items-center p-6 border-b border-gray-100">
-              <h3 className="font-bold text-xl text-slate-900">Quality Check</h3>
-              <button onClick={() => setIsQCModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5"/></button>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setScanOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={scanOnce} disabled={scanBusy}>
+              {scanBusy ? 'Scanning…' : 'Scan'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={entryOpen}
+        onOpenChange={(open) => {
+          setEntryOpen(open);
+          if (!open) resetEntry();
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Enter Weighment & QC Data</DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={saveEntry} className="space-y-6">
+            <div className="rounded-xl border border-border bg-muted p-4">
+              <div className="text-xs text-muted-foreground">Scanned Card</div>
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">Card ID</div>
+                  <div className="font-medium text-foreground break-words">{scannedPayload?.card_id || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Card Number</div>
+                  <div className="font-medium text-foreground break-words">{scannedPayload?.card_number || '—'}</div>
+                </div>
+              </div>
             </div>
 
-            <form onSubmit={handleSaveQC} className="p-6 space-y-5">
-              
-              {/* Readings Grid */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-600">Brix Reading</label>
-                  <input type="number" step="0.1" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm outline-none focus:border-blue-500 text-center font-mono font-bold" defaultValue="0" />
+            <div className="rounded-xl border border-border bg-muted p-4">
+              <div className="text-xs text-muted-foreground">Driver Details</div>
+              {driverLoading ? <div className="mt-2 text-sm text-muted-foreground">Fetching driver details…</div> : null}
+              {driverError ? <div className="mt-2 text-sm text-destructive">{driverError}</div> : null}
+              {!driverLoading && !driverError ? (
+                <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Driver Name</div>
+                    <div className="font-medium text-foreground break-words">{driverDetails?.driver_name || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Driver Contact</div>
+                    <div className="font-medium text-foreground break-words">{driverDetails?.driver_contact || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Vehicle Number</div>
+                    <div className="font-medium text-foreground break-words">{driverDetails?.vehicle_number || '—'}</div>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-600">Pol Reading</label>
-                  <input type="number" step="0.1" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm outline-none focus:border-blue-500 text-center font-mono font-bold" defaultValue="0" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-600">Fiber Content (%)</label>
-                  <input type="number" step="0.1" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm outline-none focus:border-blue-500 text-center font-mono font-bold" defaultValue="0" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-600">Trash (%)</label>
-                  <input type="number" step="0.1" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm outline-none focus:border-blue-500 text-center font-mono font-bold" defaultValue="0" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-600">Moisture (%)</label>
-                  <input type="number" step="0.1" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm outline-none focus:border-blue-500 text-center font-mono font-bold" defaultValue="0" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-600">Deductions (%)</label>
-                  <input type="number" step="0.1" className="w-full p-2.5 border border-gray-300 rounded-lg text-sm outline-none focus:border-blue-500 text-center font-mono font-bold" defaultValue="0" />
-                </div>
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Gross Weight (kg)</Label>
+                <Input value={grossWeight} onChange={(e) => setGrossWeight(e.target.value)} inputMode="decimal" placeholder="0" />
               </div>
-
-              {/* Quality Grade */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-600">Quality Grade</label>
-                <select className="w-full p-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-slate-200 outline-none">
-                  <option>Grade A (Premium)</option>
-                  <option>Grade B (Standard)</option>
-                  <option>Grade C (Sub-standard)</option>
-                </select>
+              <div className="space-y-2">
+                <Label>Tare Weight (kg)</Label>
+                <Input value={tareWeight} onChange={(e) => setTareWeight(e.target.value)} inputMode="decimal" placeholder="0" />
               </div>
-
-              {/* Notes */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-600">Notes</label>
-                <textarea className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-200 outline-none h-20 resize-none" />
+              <div className="space-y-2">
+                <Label>Net Weight (kg)</Label>
+                <Input value={netWeight} readOnly />
               </div>
+            </div>
 
-              {/* Images */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-600">QC Images</label>
-                <div className="flex items-center gap-3">
-                  <button type="button" className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
-                    <Camera className="w-4 h-4" /> Add Photos
-                  </button>
-                  <span className="text-xs text-gray-400">0/5 images</span>
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Moisture (%)</Label>
+                <Input
+                  value={moisturePercentage}
+                  onChange={(e) => setMoisturePercentage(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0"
+                />
               </div>
+              <div className="space-y-2">
+                <Label>Foreign Material (%)</Label>
+                <Input
+                  value={foreignMaterialPercentage}
+                  onChange={(e) => setForeignMaterialPercentage(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Chopping Size</Label>
+                <Input value={choppingSize} onChange={(e) => setChoppingSize(e.target.value)} inputMode="decimal" placeholder="0" />
+              </div>
+            </div>
 
-              <button type="submit" className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition-colors">
-                Complete QC
-              </button>
-
-            </form>
-          </div>
-        </div>
-      )}
-
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEntryOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

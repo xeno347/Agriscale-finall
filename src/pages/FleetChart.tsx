@@ -2,6 +2,8 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
+  CheckCircle2,
+  CircleDashed,
   MapPin, 
   X, 
   Search,
@@ -79,6 +81,7 @@ interface FuelData {
 }
 
 interface DaySchedule {
+  plan_id?: string;
   date: string;
   tasks: TaskAssignment[]; // Support multiple tasks
   fuel?: FuelData;
@@ -96,6 +99,17 @@ interface DaySchedule {
 // Map: VehicleID -> DateString -> DaySchedule
 type ScheduleMap = Record<string, Record<string, DaySchedule>>;
 
+type LogisticsWsTaskStatusUpdated = {
+  event: 'TASK_STATUS_UPDATED' | string;
+  data?: {
+    plan_id?: string;
+    date?: string;
+    activity?: string;
+    farm_id?: string;
+    status?: string;
+  };
+};
+
 // --- Helper Functions ---
 
 const getDaysInMonth = (year: number, month: number) => {
@@ -109,7 +123,12 @@ const getDaysInMonth = (year: number, month: number) => {
 };
 
 const formatDateKey = (date: Date) => {
-  return date.toISOString().split('T')[0];
+  // IMPORTANT: Use local date parts (not UTC via toISOString), otherwise
+  // dates can shift into the previous/next day depending on timezone.
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 };
 
 type BackendPlanEntry = {
@@ -185,6 +204,25 @@ const combineTaskStatuses = (statuses: Array<'active' | 'completed' | 'pending'>
   const allPending = statuses.every((s) => s === 'pending');
   if (allPending) return 'pending';
   return 'partial';
+};
+
+const normalizeKey = (value: unknown) => String(value ?? '').trim().toLowerCase();
+
+const toBooleanSafe = (value: unknown) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const s = normalizeKey(value);
+  if (s === 'true' || s === '1' || s === 'yes') return true;
+  if (s === 'false' || s === '0' || s === 'no' || s === '') return false;
+  // Fallback: treat any other non-empty string as truthy
+  return Boolean(s);
+};
+
+const toDateKeySafe = (raw: unknown) => {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  // Most payloads come as YYYY-MM-DD; still guard for ISO timestamps.
+  return s.length >= 10 ? s.slice(0, 10) : s;
 };
 
 const fetchLogisticsPlan = async (): Promise<{ vehicles: ApiVehicle[]; schedule: ScheduleMap }> => {
@@ -283,10 +321,11 @@ const fetchLogisticsPlan = async (): Promise<{ vehicles: ApiVehicle[]; schedule:
           dayEntriesArray.map((e: any) => String(e?.damage_notes ?? '').trim()).filter((s: string) => s.length > 0)
         ).filter(Boolean);
 
-        const isLocked = Boolean(raw?.locked) || dayEntriesArray.every((e: any) => Boolean(e?.locked));
+        const isLocked = toBooleanSafe(raw?.locked) || dayEntriesArray.some((e: any) => toBooleanSafe(e?.locked));
         const statuses = tasks.map((t) => t.status);
 
         schedule[vehicleId][dateKey] = {
+          plan_id: planObj?.plan_id ? String(planObj.plan_id) : undefined,
           date: dateKey,
           tasks,
           fuel: { input: inputFuel, consumed: usageFuel },
@@ -398,6 +437,40 @@ const FleetChart = () => {
   const [selectedCell, setSelectedCell] = useState<(TaskAssignment & { vehicle: string, date: string }) | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
+  const lockFleetCard = async (payload: {
+    vehicle_id: string;
+    date: string;
+    distance_traveled: number;
+    fuel_consumed: number;
+    damage_notes: string;
+  }) => {
+    const base = getBaseUrl().replace(/\/$/, '');
+    const url = `${base}/admin_vehicles/lock_fleet_card`;
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    let data: any = null;
+    try {
+      data = await resp.json();
+    } catch {
+      // ignore
+    }
+
+    if (!resp.ok) {
+      const message = data?.message || data?.error || `Server responded ${resp.status}`;
+      throw new Error(message);
+    }
+
+    return data;
+  };
+
   // Keep a ref so websocket callbacks can access latest vehicles list
   const vehiclesRef = useRef<ApiVehicle[]>([]);
   useEffect(() => {
@@ -454,6 +527,128 @@ const FleetChart = () => {
       setLoading(false);
     };
     load();
+  }, []);
+
+  // WebSocket: listen for logistics task status updates and update task state in real-time
+  useEffect(() => {
+    const base = getBaseUrl().replace(/\/$/, '');
+    const wsPath = '/ws/logistics';
+
+    let ws: WebSocket | null = null;
+    let reconnectAttempts = 0;
+    let stopped = false;
+
+    const buildWsUrl = () => {
+      const isHttps = base.startsWith('https');
+      const host = base.replace(/^https?:\/\//, '');
+      return `${isHttps ? 'wss' : 'ws'}://${host}${wsPath}`;
+    };
+
+    const scheduleReconnect = () => {
+      if (stopped) return;
+      if (reconnectAttempts >= 5) {
+        console.warn('WS(/ws/logistics): max reconnect attempts reached');
+        return;
+      }
+      reconnectAttempts += 1;
+      const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+      setTimeout(() => { if (!stopped) connect(); }, delay);
+    };
+
+    const connect = () => {
+      const wsUrl = buildWsUrl();
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (err) {
+        console.warn('WS(/ws/logistics) connection failed', err);
+        scheduleReconnect();
+        return;
+      }
+
+      ws.onopen = () => {
+        reconnectAttempts = 0;
+      };
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg: LogisticsWsTaskStatusUpdated = JSON.parse(ev.data);
+          if (normalizeKey(msg?.event) !== 'task_status_updated') return;
+
+          const data = msg?.data || {};
+          const dateKey = toDateKeySafe(data.date);
+          const activityKey = normalizeKey(data.activity);
+          const farmKey = normalizeKey(data.farm_id);
+          const statusKey = normalizeKey(data.status);
+
+          if (!dateKey || !activityKey || !farmKey) return;
+          if (statusKey !== 'completed') return;
+
+          const toastMessage = `${String(data.activity)} is completed for ${dateKey} in the farm : ${String(data.farm_id)}`;
+
+          setSchedule((prev) => {
+            let didChange = false;
+            let next: ScheduleMap | null = null;
+
+            for (const [vehicleId, byDate] of Object.entries(prev)) {
+              const day = byDate?.[dateKey];
+              if (!day || !Array.isArray(day.tasks) || day.tasks.length === 0) continue;
+
+              let touchedThisDay = false;
+              const updatedTasks = day.tasks.map((t) => {
+                const tActivity = normalizeKey(t.location_name);
+                const tFarm = normalizeKey(t.farm_id);
+                if (tActivity === activityKey && tFarm === farmKey) {
+                  if (t.status !== 'completed') {
+                    touchedThisDay = true;
+                    didChange = true;
+                    return { ...t, status: 'completed' as const };
+                  }
+                }
+                return t;
+              });
+
+              if (!touchedThisDay) continue;
+
+              if (!next) next = { ...prev };
+              const statuses = updatedTasks.map((t) => t.status);
+              next[vehicleId] = {
+                ...(next[vehicleId] || byDate),
+                [dateKey]: {
+                  ...day,
+                  tasks: updatedTasks,
+                  tasksStatus: combineTaskStatuses(statuses),
+                },
+              };
+            }
+
+            if (didChange) {
+              // Avoid calling toast synchronously inside React state calculation.
+              queueMicrotask(() => toast.success(toastMessage));
+            }
+
+            return next || prev;
+          });
+        } catch (e) {
+          console.debug('WS(/ws/logistics) message parse error', e);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.warn('WS(/ws/logistics) error', err);
+      };
+
+      ws.onclose = (ev) => {
+        console.warn('WS(/ws/logistics) closed', ev);
+        if (!stopped) scheduleReconnect();
+      };
+    };
+
+    connect();
+
+    return () => {
+      stopped = true;
+      try { ws?.close(); } catch { /* ignore */ }
+    };
   }, []);
 
   // WebSocket: listen for driver check-in events and update vehicle state in real-time
@@ -547,11 +742,10 @@ const FleetChart = () => {
             const inputFuel = Number(rawInputFuel);
             const safeInputFuel = Number.isFinite(inputFuel) ? inputFuel : null;
 
-            const rawDate =
-              checkin?.date ||
-              raw?.date ||
-              (checkin?.timestamp ? new Date(checkin.timestamp).toISOString() : null);
-            const checkinDate = rawDate ? String(rawDate).split('T')[0] : null;
+            const rawDate = checkin?.date || raw?.date || null;
+            const checkinDate = rawDate
+              ? toDateKeySafe(rawDate)
+              : (checkin?.timestamp ? formatDateKey(new Date(checkin.timestamp)) : null);
 
             // Resolve vehicleId from the latest vehicles list (row = vehicle number)
             const currentVehicles = vehiclesRef.current;
@@ -603,6 +797,7 @@ const FleetChart = () => {
                   [matchedVehicleId]: {
                     ...(prev[matchedVehicleId] || {}),
                     [checkinDate]: {
+                      plan_id: existingDay?.plan_id,
                       date: checkinDate,
                       tasks: existingDay?.tasks || [],
                       fuel: nextFuel,
@@ -640,6 +835,163 @@ const FleetChart = () => {
     connect();
 
     return () => { stopped = true; try { ws?.close(); } catch (e) { /* ignore */ } };
+  }, []);
+
+  // WebSocket: listen for driver check-out events and update vehicle state in real-time
+  useEffect(() => {
+    const base = getBaseUrl().replace(/\/$/, '');
+    const wsPath = '/ws/check_out';
+
+    let ws: WebSocket | null = null;
+    let reconnectAttempts = 0;
+    let stopped = false;
+
+    const buildWsUrl = () => {
+      const isHttps = base.startsWith('https');
+      const host = base.replace(/^https?:\/\//, '');
+      return `${isHttps ? 'wss' : 'ws'}://${host}${wsPath}`;
+    };
+
+    const scheduleReconnect = () => {
+      if (stopped) return;
+      if (reconnectAttempts >= 5) {
+        console.warn('WS(/ws/check_out): max reconnect attempts reached');
+        return;
+      }
+      reconnectAttempts += 1;
+      const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+      console.debug(`WS(/ws/check_out): reconnect attempt ${reconnectAttempts} in ${delay}ms`);
+      setTimeout(() => { if (!stopped) connect(); }, delay);
+    };
+
+    const connect = () => {
+      const wsUrl = buildWsUrl();
+      console.debug('WS(/ws/check_out) connecting to', wsUrl);
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (err) {
+        console.warn('WS(/ws/check_out) connection failed', err);
+        scheduleReconnect();
+        return;
+      }
+
+      ws.onopen = () => {
+        console.debug('WS(/ws/check_out) connected to', wsUrl);
+        reconnectAttempts = 0;
+      };
+
+      ws.onmessage = (ev) => {
+        console.log('[WS] /ws/check_out raw message:', ev.data);
+        try {
+          const msg = JSON.parse(ev.data);
+          console.log('[WS] /ws/check_out parsed message:', msg);
+
+          const eventName = msg?.event || msg?.type || null;
+          if (normalizeKey(eventName) !== 'user_check_out') return;
+
+          const raw = msg?.checkout ?? msg?.payload ?? msg;
+          const checkout = msg?.checkout ?? raw;
+
+          const vehicleNumber = checkout?.vehicle_number || raw?.vehicle_number || '';
+          const staffName = checkout?.staff_name || raw?.staff_name || '';
+
+          const rawFinalHours =
+            checkout?.final_engine_hours ??
+            raw?.final_engine_hours ??
+            checkout?.finalEngineHours ??
+            raw?.finalEngineHours;
+          const finalEngineHours = Number(rawFinalHours);
+          const safeFinalEngineHours = Number.isFinite(finalEngineHours) ? finalEngineHours : 0;
+
+          const rawDate = checkout?.date || raw?.date || null;
+          const checkoutDate = rawDate
+            ? toDateKeySafe(rawDate)
+            : (checkout?.timestamp ? formatDateKey(new Date(checkout.timestamp)) : '');
+
+          if (!vehicleNumber) return;
+
+          // Resolve vehicleId from the latest vehicles list (row = vehicle number)
+          const currentVehicles = vehiclesRef.current;
+          const matched = currentVehicles.find((v) => {
+            const vNum = (v.vehicle_information?.vehicle_number || '').toString().trim().toLowerCase();
+            return vNum && vNum === vehicleNumber.toString().trim().toLowerCase();
+          });
+          const matchedVehicleId = matched?.vehicle_id || vehicleNumber.toString();
+
+          console.log('[WS] /ws/check_out mapping:', {
+            vehicleNumber,
+            matchedVehicleId,
+            checkoutDate,
+            safeFinalEngineHours,
+          });
+
+          // Update vehicle check-in badge/name
+          setVehicles((prev) =>
+            prev.map((v) => {
+              const vNum = (v.vehicle_information?.vehicle_number || '').toString().trim().toLowerCase();
+              if (vNum && vNum === vehicleNumber.toString().trim().toLowerCase()) {
+                return {
+                  ...v,
+                  driver: {
+                    name: String(staffName || v.driver?.name || '—'),
+                    phone: String(v.driver?.phone || '—'),
+                    checkedIn: false,
+                  },
+                };
+              }
+              return v;
+            })
+          );
+
+          // Update the exact cell (column = date) with final engine hours
+          if (checkoutDate) {
+            setSchedule((prev) => {
+              const existingDay = prev[matchedVehicleId]?.[checkoutDate];
+              return {
+                ...prev,
+                [matchedVehicleId]: {
+                  ...(prev[matchedVehicleId] || {}),
+                  [checkoutDate]: {
+                    plan_id: existingDay?.plan_id,
+                    date: checkoutDate,
+                    tasks: existingDay?.tasks || [],
+                    fuel: existingDay?.fuel,
+                    initialEngineHours: existingDay?.initialEngineHours ?? 0,
+                    finalEngineHours: safeFinalEngineHours,
+                    damageChecklist: existingDay?.damageChecklist ?? '',
+                    totalDistance: existingDay?.totalDistance,
+                    tasksStatus: existingDay?.tasksStatus,
+                    isLocked: existingDay?.isLocked,
+                    damageChecklistTouched: existingDay?.damageChecklistTouched ?? false,
+                  },
+                },
+              };
+            });
+          }
+
+          toast.success(`${staffName || 'Driver'} checked out (${vehicleNumber})`);
+        } catch (e) {
+          console.debug('WS(/ws/check_out) message parse error', e);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.warn('WS(/ws/check_out) error', err);
+        toast.error('WebSocket error');
+      };
+
+      ws.onclose = (ev) => {
+        console.warn('WS(/ws/check_out) closed', ev);
+        if (!stopped) scheduleReconnect();
+      };
+    };
+
+    connect();
+
+    return () => {
+      stopped = true;
+      try { ws?.close(); } catch { /* ignore */ }
+    };
   }, []);
 
   const days = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
@@ -749,6 +1101,56 @@ const FleetChart = () => {
                             <div className="font-bold text-gray-900 text-sm whitespace-nowrap">{vName}</div>
                             <div className="text-[10px] text-gray-400 font-medium uppercase mt-0.5">{vehicle.vehicle_information?.type}</div>
                           </div>
+
+                          {/* Fuel Level */}
+                          <div className="border-t border-gray-100 pt-2">
+                            <div className="flex items-center gap-1.5 text-[11px]">
+                              <Fuel className="w-3 h-3 text-gray-500" />
+                              <span className="text-gray-600">Fuel:</span>
+                              {typeof vehicle.currentFuelLevel === 'number' && Number.isFinite(vehicle.currentFuelLevel) ? (
+                                <span
+                                  className={cn(
+                                    "font-bold",
+                                    vehicle.currentFuelLevel > 50
+                                      ? "text-green-600"
+                                      : vehicle.currentFuelLevel > 20
+                                        ? "text-yellow-600"
+                                        : "text-red-600"
+                                  )}
+                                >
+                                  {vehicle.currentFuelLevel}L
+                                </span>
+                              ) : (
+                                <span className="font-bold text-gray-400">-</span>
+                              )}
+
+                              {/* Fuel Bar */}
+                              <div className="flex-1 ml-1">
+                                <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                  <div
+                                    className={cn(
+                                      "h-full transition-all duration-300 rounded-full",
+                                      typeof vehicle.currentFuelLevel === 'number' && Number.isFinite(vehicle.currentFuelLevel)
+                                        ? vehicle.currentFuelLevel > 50
+                                          ? "bg-green-500"
+                                          : vehicle.currentFuelLevel > 20
+                                            ? "bg-yellow-500"
+                                            : "bg-red-500"
+                                        : "bg-gray-300"
+                                    )}
+                                    style={{
+                                      width: `${Math.min(
+                                        100,
+                                        typeof vehicle.currentFuelLevel === 'number' && Number.isFinite(vehicle.currentFuelLevel)
+                                          ? vehicle.currentFuelLevel
+                                          : 0
+                                      )}%`,
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                           
                           {/* Driver Info */}
                           {vehicle.driver && (
@@ -771,38 +1173,6 @@ const FleetChart = () => {
                               </div>
                             </div>
                           )}
-                          
-                          {/* Fuel Level (optional; not provided by get_logistics_plan) */}
-                          {typeof vehicle.currentFuelLevel === 'number' && Number.isFinite(vehicle.currentFuelLevel) ? (
-                            <div className="border-t border-gray-100 pt-2">
-                              <div className="flex items-center gap-1.5 text-[11px]">
-                                <Fuel className="w-3 h-3 text-gray-500" />
-                                <span className="text-gray-600">Fuel:</span>
-                                <span className={cn(
-                                  "font-bold",
-                                  vehicle.currentFuelLevel > 50 ? "text-green-600" :
-                                  vehicle.currentFuelLevel > 20 ? "text-yellow-600" :
-                                  "text-red-600"
-                                )}>
-                                  {vehicle.currentFuelLevel}L
-                                </span>
-                                {/* Fuel Bar */}
-                                <div className="flex-1 ml-1">
-                                  <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                    <div 
-                                      className={cn(
-                                        "h-full transition-all duration-300 rounded-full",
-                                        vehicle.currentFuelLevel > 50 ? "bg-green-500" :
-                                        vehicle.currentFuelLevel > 20 ? "bg-yellow-500" :
-                                        "bg-red-500"
-                                      )}
-                                      style={{ width: `${Math.min(100, vehicle.currentFuelLevel)}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          ) : null}
                         </div>
                       </td>
 
@@ -837,7 +1207,18 @@ const FleetChart = () => {
                                         getCellColor(task.type)
                                       )}
                                     >
-                                      <span className="text-xs font-bold truncate w-full text-left">{task.location_name}</span>
+                                      <span className="text-xs font-bold w-full text-left flex items-center gap-1 min-w-0">
+                                        {task.status === 'completed' ? (
+                                          <span className="shrink-0">
+                                            <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                                          </span>
+                                        ) : (
+                                          <span className="shrink-0">
+                                            <CircleDashed className="w-3.5 h-3.5 text-amber-600" />
+                                          </span>
+                                        )}
+                                        <span className="truncate">{task.location_name}</span>
+                                      </span>
                                       <span className="text-[10px] opacity-70 truncate w-full text-left capitalize flex items-center gap-1">
                                         {task.type === 'hub' ? <Warehouse className="w-3 h-3" /> : null}
                                         {task.type}
@@ -889,7 +1270,32 @@ const FleetChart = () => {
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          updateScheduleData(vId, dateKey, 'isLocked', !dayData?.isLocked);
+                                          const currentlyLocked = Boolean(dayData?.isLocked);
+
+                                          // Unlock is local-only for now (no API provided).
+                                          if (currentlyLocked) {
+                                            updateScheduleData(vId, dateKey, 'isLocked', false);
+                                            return;
+                                          }
+
+                                          const distanceTraveled = Number(dayData?.totalDistance) || 0;
+                                          const fuelConsumed = Number(dayData?.fuel?.consumed) || 0;
+                                          const damageNotes = String(dayData?.damageChecklist ?? '');
+
+                                          lockFleetCard({
+                                            vehicle_id: vId,
+                                            date: dateKey,
+                                            distance_traveled: distanceTraveled,
+                                            fuel_consumed: fuelConsumed,
+                                            damage_notes: damageNotes,
+                                          })
+                                            .then(() => {
+                                              updateScheduleData(vId, dateKey, 'isLocked', true);
+                                              toast.success('Fleet card locked');
+                                            })
+                                            .catch((err) => {
+                                              toast.error(err instanceof Error ? err.message : 'Failed to lock fleet card');
+                                            });
                                         }}
                                         className={cn(
                                           "p-0.5 rounded transition-colors",
@@ -955,32 +1361,68 @@ const FleetChart = () => {
                         {/* No first TD here because of rowSpan above */}
                         {days.map((day, dIndex) => {
                             const dateKey = formatDateKey(day);
-                            const fuel = vSchedule[dateKey]?.fuel;
-                          const balance = fuel ? (Number(fuel.input) || 0) - (Number(fuel.consumed) || 0) : null;
+                            const dayData = vSchedule[dateKey];
+                            const fuel = dayData?.fuel;
+                            const hasDayData = Boolean(dayData?.tasks?.length) || Boolean(fuel);
+                            const inputFuel = fuel ? (Number(fuel.input) || 0) : 0;
+                            const usedFuel = fuel ? (Number(fuel.consumed) || 0) : 0;
+                            const balance = hasDayData ? inputFuel - usedFuel : null;
 
                             return (
                                 <td key={`${vId}-f-${dIndex}`} className="border-r border-b border-gray-100 p-1 h-12 text-center align-middle">
-                                    {fuel ? (
-                                <div className="flex items-center justify-between px-2 text-[10px] font-medium text-gray-500">
-                                  <span className={cn(
-                                    "flex items-center gap-1",
-                                    (balance ?? 0) > 0 ? "text-emerald-700 font-bold" :
-                                    (balance ?? 0) < 0 ? "text-red-700 font-bold" :
-                                    "text-gray-600"
-                                  )}>
-                                    Balance: {balance !== null ? `${balance}L` : '-'}
-                                  </span>
-                                  <span className="text-gray-300">|</span>
-                                  <span className={cn("flex items-center gap-1", fuel.input > 0 ? "text-green-600 font-bold" : "")}> 
-                                    In: {fuel.input > 0 ? `${fuel.input}L` : '-'}
-                                  </span>
-                                  <span className="text-gray-300">|</span>
-                                  <span className="text-gray-600">
-                                    Use: {fuel.consumed}L
-                                  </span>
-                                </div>
+                                    {hasDayData ? (
+                                      <div className="flex items-center justify-between gap-2 px-2 text-[10px] font-medium text-gray-500">
+                                        <span
+                                          className={cn(
+                                            "flex items-center gap-1 whitespace-nowrap",
+                                            (balance ?? 0) > 0
+                                              ? "text-emerald-700 font-bold"
+                                              : (balance ?? 0) < 0
+                                                ? "text-red-700 font-bold"
+                                                : "text-gray-600"
+                                          )}
+                                        >
+                                          Balance: {balance !== null ? `${balance}L` : '-'}
+                                        </span>
+                                        <span className="text-gray-300">|</span>
+                                        <span
+                                          className={cn(
+                                            "flex items-center gap-1 whitespace-nowrap",
+                                            inputFuel > 0 ? "text-green-600 font-bold" : ""
+                                          )}
+                                        >
+                                          In: {inputFuel > 0 ? `${inputFuel}L` : '-'}
+                                        </span>
+                                        <span className="text-gray-300">|</span>
+                                        <span className="flex items-center gap-1 whitespace-nowrap text-gray-600">
+                                          Use:
+                                          <input
+                                            type="number"
+                                            inputMode="decimal"
+                                            value={fuel ? (fuel.consumed ?? '') : ''}
+                                            onChange={(e) => {
+                                              const raw = e.target.value;
+                                              const nextUsed = raw === '' ? 0 : Number(raw);
+                                              const safeNextUsed = Number.isFinite(nextUsed) ? nextUsed : 0;
+
+                                              updateScheduleData(vId, dateKey, 'fuel', {
+                                                input: inputFuel,
+                                                consumed: safeNextUsed,
+                                              });
+                                            }}
+                                            disabled={dayData?.isLocked}
+                                            className={cn(
+                                              "w-12 px-1 border border-gray-300 rounded text-[9px] text-center",
+                                              dayData?.isLocked ? "bg-gray-100 cursor-not-allowed" : "bg-white"
+                                            )}
+                                            placeholder="L"
+                                            min={0}
+                                          />
+                                          L
+                                        </span>
+                                      </div>
                                     ) : (
-                                        <div className="text-[10px] text-gray-300">-</div>
+                                      <div className="text-[10px] text-gray-300">-</div>
                                     )}
                                 </td>
                             )

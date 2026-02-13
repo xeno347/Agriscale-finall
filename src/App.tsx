@@ -15,6 +15,7 @@ import CultivationPlan from "./pages/CultivationPlan";
 import CreateCultivationPlan from "./pages/CreateCultivationPlan";
 import CultivationCalendar from "./pages/CultivationCalendar";
 import HarvestOrders from "./pages/HarvestOrders";
+import HarvestCards from "./pages/HarvestCards";
 import StaffOnboarding from "./pages/StaffOnboarding";
 import LogisticsManagement from "./pages/LogisticsManagement";
 import AdminRequestPage from "./pages/AdminRequestPage";
@@ -53,6 +54,7 @@ const App = () => (
           {/* Harvest & Weighment */}
           <Route path="/harvest-planning" element={<AppLayout><HarvestPlanning /></AppLayout>} />
           <Route path="/harvest-orders" element={<AppLayout><HarvestOrders /></AppLayout>} />
+          <Route path="/harvest-cards" element={<AppLayout><HarvestCards /></AppLayout>} />
           <Route path="/weighment" element={<AppLayout><WeighmentQC /></AppLayout>} />
 
           {/* Management */}

@@ -22,7 +22,8 @@ import {
   User,
   MoreHorizontal,
   ClipboardCheck,
-  Activity
+  Activity,
+  CreditCard
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -253,6 +254,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         <NavGroup label="Harvest Management" isSidebarCollapsed={isCollapsed}>
           <NavItem to="/harvest-planning" icon={Sprout} label="Harvest Planning" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/harvest-orders" icon={Package} label="Harvest Orders" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/harvest-cards" icon={CreditCard} label="Harvest Cards" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/weighment" icon={Scale} label="Weighment & QC" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
