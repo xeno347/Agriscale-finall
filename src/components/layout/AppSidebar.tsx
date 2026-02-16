@@ -248,6 +248,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           />
           <NavItem to="/farmers" icon={UserCheck} label="Farmers" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/blocks" icon={Layers} label="Land Hierarchy" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/land-acquisition" icon={Map} label="Land Acquisition" isSidebarCollapsed={isCollapsed} />
         </NavGroup>
 
         {/* Group 2: Harvest Management */}

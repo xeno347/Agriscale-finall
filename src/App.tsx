@@ -28,6 +28,7 @@ import ServiceRequest from "./pages/ServiceRequest";
 import FleetChart from "./pages/FleetChart";
 import KhasraFinder from "./pages/khasra_finder";
 import FieldMonitoring from "./pages/FieldMonitoring";
+import LandAcquisition from "./pages/LandAcquisition";
 
 const queryClient = new QueryClient();
 
@@ -43,6 +44,7 @@ const App = () => (
           <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
           <Route path="/tasks-beta" element={<AppLayout><TasksBeta /></AppLayout>} />
           <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
+          <Route path="/land-acquisition" element={<AppLayout><LandAcquisition /></AppLayout>} />
           
           {/* Operations */}
           <Route path="/cultivation-calendar" element={<AppLayout><CultivationCalendar /></AppLayout>} />
