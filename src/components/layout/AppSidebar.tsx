@@ -203,7 +203,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
                 SaiBioresources
               </h1>
               <p className="text-xs text-gray-500 font-medium">
-                Farm Connect
+                Private Limited
               </p>
             </div>
           )}

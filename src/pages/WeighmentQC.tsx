@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 type HarvestCardQrPayload = {
   card_id?: string;
@@ -32,6 +33,41 @@ type DriverDetails = {
   vehicle_number?: string;
 };
 
+type WeighmentDetailsResponse = {
+  weighment_details?: Array<{
+    order_id?: string;
+    feild_id?: string;
+    trip_sheet?: Array<{
+      weighment?: {
+        gross_weight?: number;
+        tare_weight?: number;
+        net_weight?: number;
+      };
+      quality_check?: {
+        moisture_percentage?: number;
+        foreign_material_percentage?: number;
+        chopping_size?: number;
+      };
+    }>;
+  }>;
+};
+
+type TripWeighmentRow = {
+  row_id: string;
+  farm_id: string;
+  order_id: string;
+  weighment: {
+    gross_weight: number;
+    tare_weight: number;
+    net_weight: number;
+  };
+  quality_check: {
+    moisture_percentage: number;
+    foreign_material_percentage: number;
+    chopping_size: number;
+  };
+};
+
 export default function WeighmentQCPage() {
   const [scanOpen, setScanOpen] = useState(false);
   const [entryOpen, setEntryOpen] = useState(false);
@@ -39,6 +75,11 @@ export default function WeighmentQCPage() {
   const [activeCameraLabel, setActiveCameraLabel] = useState<string>('');
   const [scanBusy, setScanBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [weighmentRows, setWeighmentRows] = useState<TripWeighmentRow[]>([]);
+  const [weighmentLoading, setWeighmentLoading] = useState(false);
+  const [weighmentError, setWeighmentError] = useState<string | null>(null);
+  const weighmentAbortRef = useRef<AbortController | null>(null);
 
   const [scannedPayload, setScannedPayload] = useState<HarvestCardQrPayload | null>(null);
 
@@ -79,6 +120,153 @@ export default function WeighmentQCPage() {
     }
     setActiveCameraLabel('');
   };
+
+  const downloadTripReceipt = (row: TripWeighmentRow) => {
+    const header = 'Sai Bio Resources Private Limited , Weighment Slipt';
+
+    const escapeHtml = (value: string) =>
+      value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+
+    const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(header)}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color: #111; }
+      h1 { font-size: 18px; margin: 0 0 16px; }
+      .meta { font-size: 12px; color: #444; margin-bottom: 16px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 10px 8px; border: 1px solid #ddd; font-size: 14px; vertical-align: top; }
+      th { background: #f5f5f5; }
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(header)}</h1>
+    <div class="meta">Generated on: ${escapeHtml(new Date().toLocaleString())}</div>
+
+    <table>
+      <tbody>
+        <tr><th>farm_id</th><td>${escapeHtml(row.farm_id)}</td></tr>
+        <tr><th>order_id</th><td>${escapeHtml(row.order_id)}</td></tr>
+      </tbody>
+    </table>
+
+    <h2 style="font-size: 16px; margin: 18px 0 10px;">Weighment</h2>
+    <table>
+      <thead>
+        <tr><th>Gross Weight</th><th>Tare Weight</th><th>Net Weight</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>${row.weighment.gross_weight}</td>
+          <td>${row.weighment.tare_weight}</td>
+          <td>${row.weighment.net_weight}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 style="font-size: 16px; margin: 18px 0 10px;">QC</h2>
+    <table>
+      <thead>
+        <tr><th>Moisture (%)</th><th>Foreign Material (%)</th><th>Chopping Size</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>${row.quality_check.moisture_percentage}</td>
+          <td>${row.quality_check.foreign_material_percentage}</td>
+          <td>${row.quality_check.chopping_size}</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>`;
+
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const safe = (value: string) => value.replaceAll(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
+    const fileName = `weighment_receipt_${safe(row.order_id)}_${safe(row.farm_id)}.html`;
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+
+  const fetchWeighmentDetails = async () => {
+    weighmentAbortRef.current?.abort();
+    const controller = new AbortController();
+    weighmentAbortRef.current = controller;
+
+    setWeighmentLoading(true);
+    setWeighmentError(null);
+
+    try {
+      const base = getBaseUrl().replace(/\/$/, '');
+      const url = `${base}/Harvest_management/get_weighment_details`;
+      const res = await fetch(url, { method: 'GET', signal: controller.signal });
+      if (!res.ok) throw new Error(`Failed to fetch weighment details: ${res.status}`);
+
+      const json = (await res.json().catch(() => null)) as WeighmentDetailsResponse | null;
+      const details = Array.isArray(json?.weighment_details) ? json!.weighment_details! : [];
+
+      const rows: TripWeighmentRow[] = [];
+      for (const detail of details) {
+        const farmId = (detail?.feild_id || '').toString().trim();
+        const orderId = (detail?.order_id || '').toString().trim();
+        const tripSheet = Array.isArray(detail?.trip_sheet) ? detail!.trip_sheet! : [];
+
+        tripSheet.forEach((entry, index) => {
+          const weighment = entry?.weighment ?? {};
+          const quality = entry?.quality_check ?? {};
+          rows.push({
+            row_id: `${orderId || 'order'}-${farmId || 'farm'}-${index}`,
+            farm_id: farmId || '—',
+            order_id: orderId || '—',
+            weighment: {
+              gross_weight: Number(weighment.gross_weight ?? 0) || 0,
+              tare_weight: Number(weighment.tare_weight ?? 0) || 0,
+              net_weight: Number(weighment.net_weight ?? 0) || 0,
+            },
+            quality_check: {
+              moisture_percentage: Number(quality.moisture_percentage ?? 0) || 0,
+              foreign_material_percentage: Number(quality.foreign_material_percentage ?? 0) || 0,
+              chopping_size: Number(quality.chopping_size ?? 0) || 0,
+            },
+          });
+        });
+      }
+
+      setWeighmentRows(rows);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      const message = e instanceof Error ? e.message : 'Failed to fetch weighment details';
+      setWeighmentError(message);
+      setWeighmentRows([]);
+    } finally {
+      setWeighmentLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchWeighmentDetails();
+    return () => {
+      weighmentAbortRef.current?.abort();
+      weighmentAbortRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchDriverDetails = async (cardNumber: string) => {
     const trimmed = cardNumber.trim();
@@ -473,7 +661,7 @@ export default function WeighmentQCPage() {
 
   return (
     <div className="p-8">
-      <div className="max-w-xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold text-foreground">Weighment & QC</h1>
           <p className="text-sm text-muted-foreground">Scan Harvest Card QR code to enter weighment and QC data.</p>
@@ -483,6 +671,68 @@ export default function WeighmentQCPage() {
           <Button onClick={() => setScanOpen(true)} className="w-full">
             Scan QR Code
           </Button>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-foreground">Trip Weighment & QC</div>
+              <div className="text-xs text-muted-foreground">All weighment and QC entries captured in trips.</div>
+            </div>
+            <Button type="button" variant="outline" onClick={fetchWeighmentDetails} disabled={weighmentLoading}>
+              {weighmentLoading ? 'Refreshing…' : 'Refresh'}
+            </Button>
+          </div>
+
+          {weighmentError ? <div className="text-sm text-destructive">{weighmentError}</div> : null}
+          {weighmentLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : null}
+
+          {!weighmentLoading && !weighmentError && weighmentRows.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No weighment details found.</div>
+          ) : null}
+
+          {weighmentRows.length > 0 ? (
+            <div className="rounded-xl border border-border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead className="min-w-[240px]">farm_id</TableHead>
+                    <TableHead className="min-w-[170px]">order_id</TableHead>
+                    <TableHead className="min-w-[280px]">Weighment</TableHead>
+                    <TableHead className="min-w-[280px]">QC</TableHead>
+                    <TableHead className="w-40">Download</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {weighmentRows.map((row) => (
+                    <TableRow key={row.row_id}>
+                      <TableCell className="font-medium break-words">{row.farm_id}</TableCell>
+                      <TableCell className="break-words">{row.order_id}</TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          <div>Gross: {row.weighment.gross_weight}</div>
+                          <div>Tare: {row.weighment.tare_weight}</div>
+                          <div className="font-medium">Net: {row.weighment.net_weight}</div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          <div>Moisture: {row.quality_check.moisture_percentage}%</div>
+                          <div>Foreign: {row.quality_check.foreign_material_percentage}%</div>
+                          <div>Chopping: {row.quality_check.chopping_size}</div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Button type="button" variant="outline" onClick={() => downloadTripReceipt(row)}>
+                          Download
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : null}
         </div>
       </div>
 
