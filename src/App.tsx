@@ -10,6 +10,7 @@ import Farmers from "./pages/Farmers";
 import HarvestPlanning from "./pages/HarvestPlanning";
 import NotFound from "./pages/NotFound";
 import Inventory from "./pages/Inventory";
+import InventoryIndent from "./pages/InventoryIndent";
 import CultivationMaster from "./pages/CultivationMaster";
 import CultivationPlan from "./pages/CultivationPlan";
 import CreateCultivationPlan from "./pages/CreateCultivationPlan";
@@ -61,6 +62,7 @@ const App = () => (
 
           {/* Management */}
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
+          <Route path="/inventory-indents" element={<AppLayout><InventoryIndent /></AppLayout>} />
           <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
           <Route path="/admin-request" element={<AppLayout><AdminRequestPage /></AppLayout>} /> {/* [NEW ROUTE] */}
           <Route path="/resource-management" element={<AppLayout><FleetChart /></AppLayout>} />

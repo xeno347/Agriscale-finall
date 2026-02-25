@@ -50,6 +50,16 @@ type StockItem = {
   imageUrl: string;
   location: string;
   description: string;
+  // Vendor tiers (L1, L2, L3)
+  vendors: {
+    level: string;
+    company: string;
+    msmeCertificate: string;
+    gstNumber: string;
+    contact?: string;
+  }[];
+  // Series number like SBR/INV/P2/
+  seriesNumber: string;
   transactions: StockTransaction[];
 };
 
@@ -74,6 +84,8 @@ const initialItems: StockItem[] = [
     imageUrl: 'https://placehold.co/300x200/dcfce7/16a34a?text=Urea+Fertilizer',
     location: 'Warehouse A – Shelf 3',
     description: '46% Nitrogen fertilizer, granular form.',
+    vendors: [],
+    seriesNumber: 'SBR/INV/P2/',
     transactions: [
       { id: 't1', type: 'incoming', qty: 500, date: '2026-02-10', note: 'Supplier delivery', by: 'Ramesh K.' },
       { id: 't2', type: 'outgoing', qty: 100, date: '2026-02-14', note: 'Field B application', by: 'Suresh P.' },
@@ -91,6 +103,8 @@ const initialItems: StockItem[] = [
     imageUrl: 'https://placehold.co/300x200/fef9c3/ca8a04?text=Paddy+Seeds',
     location: 'Cold Storage – Bay 1',
     description: 'High-yield IR-36 paddy seed variety.',
+    vendors: [],
+    seriesNumber: 'SBR/INV/P2/',
     transactions: [
       { id: 't4', type: 'incoming', qty: 300, date: '2026-01-20', note: 'ICAR purchase', by: 'Admin' },
       { id: 't5', type: 'issued', qty: 215, date: '2026-02-01', note: 'Kharif season sowing', by: 'Anil D.' },
@@ -107,6 +121,8 @@ const initialItems: StockItem[] = [
     imageUrl: 'https://placehold.co/300x200/fee2e2/dc2626?text=Chlorpyrifos',
     location: 'Chemical Store – Rack 2',
     description: 'Broad-spectrum organophosphate insecticide.',
+    vendors: [],
+    seriesNumber: 'SBR/INV/P2/',
     transactions: [
       { id: 't6', type: 'incoming', qty: 200, date: '2026-02-05', note: 'BAYER supply', by: 'Admin' },
       { id: 't7', type: 'outgoing', qty: 60, date: '2026-02-22', note: 'Pest control – Block C', by: 'Rajan T.' },
@@ -123,6 +139,8 @@ const initialItems: StockItem[] = [
     imageUrl: 'https://placehold.co/300x200/dbeafe/1d4ed8?text=Power+Sprayer',
     location: 'Equipment Room – Row A',
     description: '16L battery-operated agricultural sprayer.',
+    vendors: [],
+    seriesNumber: 'SBR/INV/P2/',
     transactions: [
       { id: 't8', type: 'incoming', qty: 5, date: '2026-01-15', note: 'New procurement', by: 'Procurement' },
       { id: 't9', type: 'issued', qty: 3, date: '2026-02-12', note: 'Issued to field team', by: 'Suresh P.' },
@@ -139,6 +157,8 @@ const initialItems: StockItem[] = [
     imageUrl: 'https://placehold.co/300x200/f3e8ff/7c3aed?text=HDPE+Bags',
     location: 'Warehouse B – Pallet 5',
     description: 'Woven polypropylene bags for grain storage.',
+    vendors: [],
+    seriesNumber: 'SBR/INV/P2/',
     transactions: [
       { id: 't10', type: 'incoming', qty: 1000, date: '2026-02-01', note: 'Bulk supply', by: 'Admin' },
     ],
@@ -154,6 +174,8 @@ const initialItems: StockItem[] = [
     imageUrl: 'https://placehold.co/300x200/ecfdf5/059669?text=Drip+Tape',
     location: 'Irrigation Store – Shelf 1',
     description: '16mm inline drip tape, 200m per roll.',
+    vendors: [],
+    seriesNumber: 'SBR/INV/P2/',
     transactions: [
       { id: 't11', type: 'incoming', qty: 20, date: '2026-02-08', note: 'Order #4412', by: 'Procurement' },
       { id: 't12', type: 'issued', qty: 2, date: '2026-02-20', note: 'New drip layout – Field D', by: 'Mohan V.' },
@@ -263,10 +285,10 @@ const Inventory = () => {
         </div>
         <Button
           onClick={() => setAddOpen(true)}
-          className="bg-green-600 hover:bg-green-700 text-white gap-2"
+            className="bg-green-600 hover:bg-green-700 text-white gap-2"
         >
           <Plus className="w-4 h-4" />
-          Add New Stock
+            Create New Product
         </Button>
       </div>
 
@@ -697,7 +719,6 @@ const InventoryCard = ({
 // ADD STOCK MODAL
 // ─────────────────────────────────────────────────────────────
 type AddStockForm = Omit<StockItem, 'id' | 'transactions'>;
-
 const emptyForm = (): AddStockForm => ({
   name: '',
   category: 'Seeds',
@@ -708,6 +729,12 @@ const emptyForm = (): AddStockForm => ({
   imageUrl: '',
   location: '',
   description: '',
+  vendors: [
+    { level: 'L1', company: '', msmeCertificate: '', gstNumber: '', contact: '' },
+    { level: 'L2', company: '', msmeCertificate: '', gstNumber: '', contact: '' },
+    { level: 'L3', company: '', msmeCertificate: '', gstNumber: '', contact: '' },
+  ],
+  seriesNumber: 'SBR/INV/P2/',
 });
 
 const AddStockModal = ({
@@ -721,6 +748,16 @@ const AddStockModal = ({
 }) => {
   const [form, setForm] = useState<AddStockForm>(emptyForm());
 
+  const setVendor = (index: number, key: keyof AddStockForm['vendors'][0], value: string) => {
+    setForm((p) => {
+      const next = { ...p };
+      const v = [...(next.vendors || [])];
+      v[index] = { ...v[index], [key]: value } as any;
+      next.vendors = v;
+      return next;
+    });
+  };
+
   const set = (k: keyof AddStockForm, v: string | number) =>
     setForm((p) => ({ ...p, [k]: v }));
 
@@ -733,16 +770,16 @@ const AddStockModal = ({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="w-5 h-5 text-green-600" />
-            Add New Stock Item
+            Create New Product
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <Field label="Item Name *">
+          <Field label="Product Name *">
             <Input placeholder="e.g. Urea Fertilizer" value={form.name} onChange={(e) => set('name', e.target.value)} />
           </Field>
 
@@ -759,6 +796,55 @@ const AddStockModal = ({
             </Field>
           </div>
 
+          {/* Vendors L1 / L2 / L3 (clean card layout with MSME upload) */}
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-gray-600">Vendors (L1 · L2 · L3)</p>
+            <div className="grid grid-cols-1 gap-2">
+              {form.vendors?.map((v, idx) => (
+                <div key={v.level} className="bg-white border border-gray-100 rounded-lg p-3 grid grid-cols-12 gap-3 items-center">
+                  <div className="col-span-1 flex items-center justify-center">
+                    <div className="text-xs font-semibold text-gray-700">{v.level}</div>
+                  </div>
+                  <div className="col-span-4">
+                    <Input placeholder="Company" value={v.company} onChange={(e) => setVendor(idx, 'company', e.target.value)} />
+                  </div>
+                  <div className="col-span-3">
+                    <Input placeholder="GST number" value={v.gstNumber} onChange={(e) => setVendor(idx, 'gstNumber', e.target.value)} />
+                  </div>
+                  <div className="col-span-4 flex items-center gap-2">
+                    <div className="flex-1">
+                      <label className="text-xs text-gray-500 mb-1 block">MSME Certificate</label>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="text-sm"
+                        onChange={(e) => {
+                          const file = e.target.files && e.target.files[0];
+                          if (file) {
+                            const url = URL.createObjectURL(file);
+                            setVendor(idx, 'msmeCertificate', url);
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="w-16 h-10 flex-shrink-0">
+                      {v.msmeCertificate ? (
+                        // show image preview when possible, otherwise show filename
+                        v.msmeCertificate.endsWith('.pdf') ? (
+                          <div className="text-xs text-gray-600 truncate">PDF</div>
+                        ) : (
+                          <img src={v.msmeCertificate} alt={`msme-${v.level}`} className="w-16 h-10 object-cover rounded-md border" />
+                        )
+                      ) : (
+                        <div className="w-16 h-10 bg-gray-50 rounded-md border flex items-center justify-center text-xs text-gray-300">No file</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Unit">
               <SelectField value={form.unit} options={UNITS} onChange={(v) => set('unit', v)} />
@@ -772,14 +858,35 @@ const AddStockModal = ({
             <Field label="Opening Stock">
               <Input type="number" min={0} value={form.currentStock} onChange={(e) => set('currentStock', Number(e.target.value))} />
             </Field>
-            <Field label="Min Stock Level">
+            <Field label="Threshold Quantity">
               <Input type="number" min={0} value={form.minStock} onChange={(e) => set('minStock', Number(e.target.value))} />
             </Field>
           </div>
 
-          <Field label="Image URL">
-            <Input placeholder="https://…" value={form.imageUrl} onChange={(e) => set('imageUrl', e.target.value)} />
+          <Field label="Upload Image">
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  if (file) {
+                    const url = URL.createObjectURL(file);
+                    set('imageUrl', url);
+                  }
+                }}
+              />
+              {form.imageUrl && (
+                <img src={form.imageUrl} alt="preview" className="w-16 h-10 object-cover rounded-md border" />
+              )}
+            </div>
           </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Series Number">
+              <Input value={form.seriesNumber} onChange={(e) => set('seriesNumber', e.target.value)} />
+            </Field>
+          </div>
 
           <Field label="Description">
             <textarea
@@ -795,7 +902,7 @@ const AddStockModal = ({
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSave}>
-            Add to Inventory
+            Create Product
           </Button>
         </DialogFooter>
       </DialogContent>

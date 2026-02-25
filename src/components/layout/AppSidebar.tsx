@@ -262,6 +262,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         {/* Group 3: Management */}
         <NavGroup label="Management" isSidebarCollapsed={isCollapsed}>
           <NavItem to="/inventory" icon={Box} label="Inventory" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/inventory-indents" icon={FileText} label="Inventory Indents" isSidebarCollapsed={isCollapsed} />
           {/* Added notificationStatus="warning" to Logistics */}
           <NavItem 
             to="/logistics" 
