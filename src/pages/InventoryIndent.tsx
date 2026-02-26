@@ -20,7 +20,6 @@ import {
   readInventoryIndentConfig,
   writeInventoryIndentConfig,
 } from '@/lib/inventoryIndentConfig';
-import { readSignatureDiary, type SignatureDiary } from '@/lib/signatureDiary';
 
 type PRLineItem = {
   id: string;
@@ -48,6 +47,7 @@ type Indent = {
   // Header
   project: string;
   prNo: string; // will be auto-generated via API later
+  department?: string;
   date: string;
 
   // Footer
@@ -67,6 +67,16 @@ type Indent = {
 const genId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const today = () => new Date().toISOString().split('T')[0];
 
+const formatPersonDisplay = (p: any) => {
+  if (!p) return '';
+  if (typeof p === 'string') return p;
+  // try common fields for name and id
+  const name = p.name || p.full_name || p.username || '';
+  const id = p.id || p.user_id || p.emp_id || p.employee_id || '';
+  if (name && id) return `${name} / ${id}`;
+  return name || id || '';
+};
+
 const netPrQty = (it: PRLineItem) => Math.max(0, (it.totalQtyRequired || 0) - (it.lessQtyAvailableInStock || 0));
 const approxValue = (it: PRLineItem) => netPrQty(it) * (it.ratePerItem || 0);
 const totalValue = (items: PRLineItem[]) => items.reduce((sum, it) => sum + approxValue(it), 0);
@@ -77,6 +87,64 @@ const formatInr = (value: number) => {
   } catch {
     return `₹ ${Math.round(value).toLocaleString()}`;
   }
+};
+
+const toPurchaseFlowRow = (it: PRLineItem) => {
+  return {
+    sr_no: it.srNo,
+    item_code: it.itemCode,
+    part_name: it.partName,
+    specification: it.specification,
+    uom: it.uom,
+    total_qty_required: it.totalQtyRequired,
+    less_qty_available_in_stock: it.lessQtyAvailableInStock,
+    net_pr_qty: netPrQty(it),
+    procurement_lead_time_weeks: it.procurementLeadTimeWeeks,
+    material_required_by_date: it.materialRequiredByDate,
+    indigenous_or_imported: it.indigenousOrImported,
+    rate_per_item: it.ratePerItem,
+    approx_value: approxValue(it),
+    preferred_vendor_name: it.preferredVendorName,
+    validity_of_warranty_and_guarantee: it.validityOfWarrantyAndGuarantee,
+    full_life_hr: it.fullLifeHr,
+    actual_life_hr: it.actualLifeHr,
+    reason_for_replacement: it.reasonForReplacement,
+    repairing_possibility: it.repairingPossibility,
+  };
+};
+
+const createIndentApi = async (payload: {
+  item_row: Record<string, unknown>[];
+  project: string;
+  pr_number: string;
+  notes: string;
+  department: string;
+}) => {
+  const BASE_URL = getBaseUrl().replace(/\/$/, '');
+  const res = await fetch(`${BASE_URL}/purchase_flow/create_indent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if (!res.ok) {
+    const message =
+      (data && (data.detail || data.message)) ||
+      `Failed to create indent (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+
+  return data;
 };
 
 const emptyLineItem = (srNo: number): PRLineItem => ({
@@ -146,12 +214,6 @@ const InventoryIndent = () => {
   const [previewIndent, setPreviewIndent] = useState<Indent | null>(null);
   const [editIndent, setEditIndent] = useState<Indent | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-  const [attachments, setAttachments] = useState<SignatureDiary>({});
-  const [directorsAttachedMap, setDirectorsAttachedMap] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    setAttachments(readSignatureDiary());
-  }, []);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -370,6 +432,8 @@ const AddIndentModal = ({
   const [remarksNotes, setRemarksNotes] = useState('');
   const [budgetHead, setBudgetHead] = useState('');
 
+  const [submitting, setSubmitting] = useState(false);
+
   // Items
   const initialRow = useMemo(() => emptyLineItem(1), []);
   const [items, setItems] = useState<PRLineItem[]>([initialRow]);
@@ -433,10 +497,30 @@ const AddIndentModal = ({
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!project.trim()) return toast.error('Project is required');
     if (items.length === 0) return toast.error('Add at least 1 item row');
     if (items.some((i) => !i.partName.trim())) return toast.error('Each row must have Part Name');
+
+    if (mode === 'create') {
+      try {
+        setSubmitting(true);
+        await createIndentApi({
+          item_row: items.map(toPurchaseFlowRow),
+          project: project.trim(),
+          pr_number: prNo.trim(),
+          notes: remarksNotes,
+          department: 'INVENTORY',
+        });
+      } catch (err: any) {
+        toast.error(err?.message || 'Failed to create indent');
+        setSubmitting(false);
+        return;
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
     onSave({
       project: project.trim(),
       prNo: prNo.trim(), // API integration later
@@ -510,7 +594,7 @@ const AddIndentModal = ({
           <div className="space-y-4">
             <div className="bg-white rounded-lg border border-gray-100 p-4">
               <p className="text-sm font-semibold text-gray-800 mb-3">Header</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-500">Project *</label>
                   {configuredProjects.length > 0 ? (
@@ -529,10 +613,6 @@ const AddIndentModal = ({
                   ) : (
                     <Input value={project} onChange={(e) => setProject(e.target.value)} placeholder="e.g. Chhattisgarh 2250 Acres" />
                   )}
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500">PR No. (API later)</label>
-                  <Input value={prNo} onChange={(e) => setPrNo(e.target.value)} placeholder="e.g. SBR/NF/25-26/03" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 mt-3">
@@ -754,8 +834,12 @@ const AddIndentModal = ({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSave}>
-            {mode === 'edit' ? 'Save Changes' : 'Create Indent'}
+          <Button
+            className="bg-green-600 hover:bg-green-700 text-white"
+            onClick={handleSave}
+            disabled={submitting}
+          >
+            {submitting ? 'Creating…' : mode === 'edit' ? 'Save Changes' : 'Create Indent'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -786,25 +870,23 @@ const IndentPreviewModal = ({
            <DialogTitle>Indent Preview</DialogTitle>
          </DialogHeader>
 
-         {indent && (
-           <div className="bg-white rounded-lg border border-gray-100 p-4 overflow-x-auto">
-             <PRPreview
-               indent={{
-                 project: indent.project,
-                 prNo: indent.prNo,
-                 date: indent.date,
-                 indentedBy: indent.indentedBy,
-                 forwardedBy: indent.forwardedBy,
-                 directorsApproval: indent.directorsApproval,
-                 remarksNotes: indent.remarksNotes,
-                 budgetHead: indent.budgetHead,
-                 items: indent.items,
-               }}
-               attachments={attachments}
-               showDirectorSignature={showDirectorSignature}
-             />
-           </div>
-         )}
+        {indent && (
+          <div className="bg-white rounded-lg border border-gray-100 p-4 overflow-x-auto">
+            <PRPreview
+              indent={{
+                project: indent.project,
+                prNo: indent.prNo,
+                date: indent.date,
+                indentedBy: indent.indentedBy,
+                forwardedBy: indent.forwardedBy,
+                directorsApproval: indent.directorsApproval,
+                remarksNotes: indent.remarksNotes,
+                budgetHead: indent.budgetHead,
+                items: indent.items,
+              }}
+            />
+          </div>
+        )}
 
          <DialogFooter>
            <Button onClick={onClose}>Close</Button>
@@ -829,11 +911,12 @@ const PRPreview = ({ indent, attachments, showDirectorSignature }: { indent: Omi
           <div className="col-span-4 p-2 border-r border-gray-300">
             <span className="font-semibold">Project:</span> {indent.project || '—'}
           </div>
-          <div className="col-span-4 p-2 border-r border-gray-300 text-center font-semibold">
-            PURCHASE REQUISITION (PR.)
-          </div>
           <div className="col-span-2 p-2 border-r border-gray-300">
-            <span className="font-semibold">PR No.</span> {indent.prNo || '—'}
+            <span className="font-semibold">Department:</span> {indent.department || '—'}
+          </div>
+          <div className="col-span-4 p-2 border-r border-gray-300 text-center font-semibold">
+            <span>PURCHASE REQUISITION (PR.)</span>
+            <span className="ml-2 text-xs font-normal">{indent.prNo || '—'}</span>
           </div>
           <div className="col-span-2 p-2">
             <span className="font-semibold">Date:</span> {indent.date || '—'}
