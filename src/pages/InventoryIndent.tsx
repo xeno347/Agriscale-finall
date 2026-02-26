@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, Search, Send, Settings, Trash2, Paperclip } from 'lucide-react';
+import { Plus, Search, Settings, Trash2, Paperclip } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -20,6 +20,8 @@ import {
   readInventoryIndentConfig,
   writeInventoryIndentConfig,
 } from '@/lib/inventoryIndentConfig';
+import { getBaseUrl } from '@/lib/config';
+import { useAuth } from '@/context/AuthContext';
 
 type PRLineItem = {
   id: string;
@@ -60,21 +62,70 @@ type Indent = {
   // Body
   items: PRLineItem[];
 
+  // backend signature support
+  indentedByDetails?: {
+    nameId: string;
+    signature: string;
+    timestamp?: string;
+  };
+
   // workflow
-  status: 'open' | 'approved' | 'rejected';
+  status: 'open' | 'forwarded' | 'approved' | 'rejected';
+};
+
+type IndentApproval = {
+  staffName: string;
+  staffDesignation: string;
+  approvedAt: string; // YYYY-MM-DD
+  approvedTime: string; // HH:mm
 };
 
 const genId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const today = () => new Date().toISOString().split('T')[0];
+const currentDateYmd = () => {
+  try {
+    // en-CA yields YYYY-MM-DD in most browsers
+    return new Date().toLocaleDateString('en-CA');
+  } catch {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+};
+
+const currentTimeHm = () => {
+  try {
+    return new Date().toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    const d = new Date();
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }
+};
 
 const formatPersonDisplay = (p: any) => {
   if (!p) return '';
   if (typeof p === 'string') return p;
+  if (typeof p?.name_id === 'string') return p.name_id;
   // try common fields for name and id
   const name = p.name || p.full_name || p.username || '';
   const id = p.id || p.user_id || p.emp_id || p.employee_id || '';
   if (name && id) return `${name} / ${id}`;
   return name || id || '';
+};
+
+const ymdFromIsoTimestamp = (ts?: string) => {
+  if (!ts) return '';
+  const s = String(ts);
+  const ymd = s.split('T')[0];
+  return ymd || '';
 };
 
 const netPrQty = (it: PRLineItem) => Math.max(0, (it.totalQtyRequired || 0) - (it.lessQtyAvailableInStock || 0));
@@ -147,6 +198,38 @@ const createIndentApi = async (payload: {
   return data;
 };
 
+const indentByAttachSignApi = async (payload: {
+  pr_number: string;
+  name_id: string;
+  signature: string;
+}) => {
+  const BASE_URL = getBaseUrl().replace(/\/$/, '');
+  const res = await fetch(`${BASE_URL}/purchase_flow/indent_by_attach_sign`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if (!res.ok) {
+    const message =
+      (data && (data.detail || data.message)) ||
+      `Failed to attach sign (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+
+  return data;
+};
+
 const emptyLineItem = (srNo: number): PRLineItem => ({
   id: genId(),
   srNo,
@@ -206,14 +289,93 @@ const initialIndents: Indent[] = [
 ];
 
 const InventoryIndent = () => {
+  const { user } = useAuth();
+
   const [indents, setIndents] = useState<Indent[]>(initialIndents);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [configVersion, setConfigVersion] = useState(0);
   const [previewIndent, setPreviewIndent] = useState<Indent | null>(null);
-  const [editIndent, setEditIndent] = useState<Indent | null>(null);
-  const [editOpen, setEditOpen] = useState(false);
+
+  const [indentApprovalsMap, setIndentApprovalsMap] = useState<Record<string, IndentApproval>>({});
+  const [attachingApprovalMap, setAttachingApprovalMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let mounted = true;
+    const loadIndents = async () => {
+      try {
+        const BASE_URL = getBaseUrl().replace(/\/$/, '');
+        const res = await fetch(`${BASE_URL}/purchase_flow/get_indents`);
+        if (!res.ok) throw new Error(`Failed to fetch indents (HTTP ${res.status})`);
+        const data: any = await res.json();
+        const raw = Array.isArray(data?.indents) ? data.indents : [];
+
+        const mapped: Indent[] = raw.map((r: any, idx: number) => {
+          const items: PRLineItem[] = (r.indent_data?.item_row ?? []).map((row: any, i: number) => ({
+            id: genId(),
+            srNo: row.sr_no ?? i + 1,
+            itemCode: row.item_code ?? row.itemCode ?? '',
+            partName: row.part_name ?? row.partName ?? '',
+            specification: row.specification ?? '',
+            uom: row.uom ?? 'No',
+            totalQtyRequired: row.total_qty_required ?? row.totalQtyRequired ?? 0,
+            lessQtyAvailableInStock: row.less_qty_available_in_stock ?? row.lessQtyAvailableInStock ?? 0,
+            procurementLeadTimeWeeks: row.procurement_lead_time_weeks ?? row.procurementLeadTimeWeeks ?? 0,
+            materialRequiredByDate: row.material_required_by_date ?? today(),
+            indigenousOrImported: (row.indigenous_or_imported ?? 'Indigenous') === 'Imported' ? 'Imported' : 'Indigenous',
+            ratePerItem: row.rate_per_item ?? row.ratePerItem ?? 0,
+            preferredVendorName: row.preferred_vendor_name ?? row.preferredVendorName ?? '',
+            validityOfWarrantyAndGuarantee: row.validity_of_warranty_and_guarantee ?? 'NA',
+            fullLifeHr: row.full_life_hr ?? 'NA',
+            actualLifeHr: row.actual_life_hr ?? 'NA',
+            reasonForReplacement: row.reason_for_replacement ?? 'NA',
+            repairingPossibility: row.repairing_possibility ?? 'NA',
+          }));
+
+          const indentedByDetails =
+            r.indented_by &&
+            typeof r.indented_by === 'object' &&
+            typeof r.indented_by?.name_id === 'string' &&
+            typeof r.indented_by?.signature === 'string'
+              ? {
+                  nameId: String(r.indented_by.name_id ?? '').trim(),
+                  signature: String(r.indented_by.signature ?? '').trim(),
+                  timestamp: r.indented_by.timestamp ? String(r.indented_by.timestamp) : undefined,
+                }
+              : undefined;
+
+          const derivedStatus: Indent['status'] =
+            indentedByDetails?.signature ? 'forwarded' : 'open';
+
+          return {
+            id: r.pr_number ?? `${r.created_at ?? ''}-${idx}`,
+            project: r.indent_data?.project ?? '',
+            department: r.department ?? '',
+            prNo: r.pr_number ?? '',
+            date: r.created_at ? String(r.created_at).split('T')[0] : today(),
+            indentedBy: formatPersonDisplay(r.indented_by),
+            forwardedBy: formatPersonDisplay(r.forwarded_by),
+            directorsApproval: formatPersonDisplay(r.approved_by),
+            remarksNotes: r.notes ?? '',
+            budgetHead: '',
+            items,
+            indentedByDetails,
+            status: derivedStatus,
+          } as Indent;
+        });
+
+        if (mounted) setIndents(mapped);
+      } catch (err: any) {
+        toast.error(err?.message || 'Unable to load indents');
+      }
+    };
+
+    loadIndents();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -229,14 +391,75 @@ const InventoryIndent = () => {
     );
   }, [indents, search]);
 
-  const attachDirectorSignature = (id: string, indent: Indent) => {
-    const diary = readSignatureDiary();
-    const person = indent.directorsApproval?.trim();
-    if (!person) { toast.error('No director name set for this indent'); return; }
-    const entry = diary[person];
-    if (!entry || !entry.signature) { toast.error(`No signature found for ${person} in diary`); return; }
-    setDirectorsAttachedMap((p) => ({ ...p, [id]: true }));
-    toast.success(`Signature attached for ${person}`);
+  const attachIndentApproval = async (indentRef: Pick<Indent, 'id' | 'prNo'>) => {
+    const id = indentRef.id;
+    const cached = (() => {
+      try {
+        const raw = localStorage.getItem('fc_auth_v1');
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed?.user ?? null;
+      } catch {
+        return null;
+      }
+    })();
+
+    const staffName = String(user?.name ?? cached?.name ?? '').trim();
+    const staffDesignation = String(user?.designation ?? cached?.designation ?? '').trim();
+
+    if (!staffName || !staffDesignation) {
+      toast.error('No cached staff data found. Please login again.');
+      return;
+    }
+
+    const prNo = String(indentRef.prNo ?? '').trim();
+    if (!prNo) {
+      toast.error('PR number is missing for this indent.');
+      return;
+    }
+
+    const approval: IndentApproval = {
+      staffName,
+      staffDesignation,
+      approvedAt: currentDateYmd(),
+      approvedTime: currentTimeHm(),
+    };
+
+    const nameId = `${approval.staffName} / ${approval.staffDesignation}`;
+    const signature = `Approver | ${approval.staffName} | ${approval.approvedTime} | ${approval.approvedAt}`;
+
+    try {
+      setAttachingApprovalMap((prev) => ({ ...prev, [id]: true }));
+      await indentByAttachSignApi({
+        pr_number: prNo,
+        name_id: nameId,
+        signature,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to attach sign');
+      return;
+    } finally {
+      setAttachingApprovalMap((prev) => ({ ...prev, [id]: false }));
+    }
+
+    setIndentApprovalsMap((prev) => ({ ...prev, [id]: approval }));
+    setIndents((prev) =>
+      prev.map((it) =>
+        it.id === id
+          ? {
+              ...it,
+              indentedBy: nameId,
+              indentedByDetails: {
+                nameId,
+                signature,
+                timestamp: new Date().toISOString(),
+              },
+              status: 'forwarded',
+            }
+          : it,
+      ),
+    );
+    toast.success(`Approved by ${staffName} / ${staffDesignation}`);
   };
 
   return (
@@ -269,74 +492,61 @@ const InventoryIndent = () => {
       </div>
 
       <div className="space-y-3">
-        {filtered.map((it) => (
-          <div
-            key={it.id}
-            className="bg-white p-4 rounded-lg border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:border-gray-200"
-            onClick={() => setPreviewIndent(it)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') setPreviewIndent(it);
-            }}
-          >
-            <div>
-              <div className="flex items-baseline gap-3">
-                <h3 className="font-semibold text-gray-800">{it.prNo || 'PR (Draft)'}</h3>
-                <span className="text-xs text-gray-400">{it.project}</span>
-              </div>
-              <p className="text-sm text-gray-500">
-                Items: {(it.items ?? []).length} · Total: {formatInr(totalValue(it.items ?? []))} · Indented by {it.indentedBy || '—'}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                <p className={`text-sm font-semibold ${it.status === 'open' ? 'text-yellow-600' : it.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>{it.status.toUpperCase()}</p>
-                <p className="text-xs text-gray-400">{it.date}</p>
-              </div>
+        {filtered.map((it) => {
+          const alreadySigned =
+            Boolean(it.indentedByDetails?.signature) ||
+            Boolean(indentApprovalsMap[it.id]);
 
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setEditIndent(it);
-                    setEditOpen(true);
-                  }}
-                >
-                  <Pencil className="w-4 h-4" />
-                  Edit
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    toast.success('Indent sent');
-                  }}
-                >
-                  <Send className="w-4 h-4" />
-                  Send
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); attachDirectorSignature(it.id, it); }}
-                  disabled={Boolean(directorsAttachedMap[it.id])}
-                >
-                  <Paperclip className="w-4 h-4" />
-                  {directorsAttachedMap[it.id] ? 'Sig Attached' : 'Attach Sig'}
-                </Button>
+          return (
+            <div
+              key={it.id}
+              className="bg-white p-4 rounded-lg border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:border-gray-200"
+              onClick={() => setPreviewIndent(it)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') setPreviewIndent(it);
+              }}
+            >
+              <div>
+                <div className="flex items-baseline gap-3">
+                  <h3 className="font-semibold text-gray-800">{it.prNo || 'PR (Draft)'}</h3>
+                  <span className="text-xs text-gray-400">{it.project}</span>
+                </div>
+                <p className="text-sm text-gray-500">
+                  Items: {(it.items ?? []).length} · Total: {formatInr(totalValue(it.items ?? []))} · Indented by {it.indentedBy || '—'}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <p className={`text-sm font-semibold ${it.status === 'open' ? 'text-yellow-600' : it.status === 'forwarded' ? 'text-blue-600' : it.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>{it.status.toUpperCase()}</p>
+                  <p className="text-xs text-gray-400">{it.date}</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void attachIndentApproval({ id: it.id, prNo: it.prNo });
+                    }}
+                    disabled={alreadySigned || Boolean(attachingApprovalMap[it.id])}
+                  >
+                    <Paperclip className="w-4 h-4" />
+                    {alreadySigned
+                      ? 'Approved'
+                      : attachingApprovalMap[it.id]
+                        ? 'Attaching…'
+                        : 'Attach Sign'}
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <AddIndentModal
@@ -351,47 +561,12 @@ const InventoryIndent = () => {
         }}
       />
 
-      <AddIndentModal
-        open={editOpen}
-        onClose={() => {
-          setEditOpen(false);
-          setEditIndent(null);
-        }}
-        configVersion={configVersion}
-        mode="edit"
-        initialData={
-          editIndent
-            ? {
-                project: editIndent.project,
-                prNo: editIndent.prNo,
-                date: editIndent.date,
-                indentedBy: editIndent.indentedBy,
-                forwardedBy: editIndent.forwardedBy,
-                directorsApproval: editIndent.directorsApproval,
-                remarksNotes: editIndent.remarksNotes,
-                budgetHead: editIndent.budgetHead,
-                items: editIndent.items,
-              }
-            : null
-        }
-        onSave={(data) => {
-          if (!editIndent) return;
-          setIndents((prev) =>
-            prev.map((x) =>
-              x.id === editIndent.id ? { ...x, ...data } : x,
-            ),
-          );
-          setEditOpen(false);
-          setEditIndent(null);
-          toast.success('Indent updated');
-        }}
-      />
-
       <IndentPreviewModal
         indent={previewIndent}
-        attachments={attachments}
-        showDirectorSignature={previewIndent ? (previewIndent.status === 'approved' || Boolean(directorsAttachedMap[previewIndent.id])) : false}
+        approval={previewIndent ? indentApprovalsMap[previewIndent.id] : undefined}
         onClose={() => setPreviewIndent(null)}
+        attaching={previewIndent ? Boolean(attachingApprovalMap[previewIndent.id]) : false}
+        onAttachApproval={(indentRef: Pick<Indent, 'id' | 'prNo'>) => void attachIndentApproval(indentRef)}
       />
 
       <ConfigureIndentModal
@@ -403,41 +578,39 @@ const InventoryIndent = () => {
   );
 };
 
+type IndentDraft = Omit<Indent, 'id' | 'status'>;
+
 const AddIndentModal = ({
   open,
   onClose,
   configVersion,
   mode,
-  initialData,
   onSave,
+  initialData,
 }: {
   open: boolean;
   onClose: () => void;
   configVersion: number;
   mode: 'create' | 'edit';
-  initialData?: Omit<Indent, 'id' | 'status'> | null;
-  onSave: (d: Omit<Indent, 'id' | 'status'>) => void;
+  onSave: (data: IndentDraft) => void;
+  initialData?: IndentDraft | null;
 }) => {
-  // Header
+  const initialRow = useMemo(() => emptyLineItem(1), []);
+
   const [project, setProject] = useState('');
   const [prNo, setPrNo] = useState('');
   const [date, setDate] = useState(today());
 
-  const [configuredProjects, setConfiguredProjects] = useState<string[]>([]);
-
-  // Footer
   const [indentedBy, setIndentedBy] = useState('');
   const [forwardedBy, setForwardedBy] = useState('');
   const [directorsApproval, setDirectorsApproval] = useState('');
   const [remarksNotes, setRemarksNotes] = useState('');
   const [budgetHead, setBudgetHead] = useState('');
 
-  const [submitting, setSubmitting] = useState(false);
-
-  // Items
-  const initialRow = useMemo(() => emptyLineItem(1), []);
   const [items, setItems] = useState<PRLineItem[]>([initialRow]);
-  const [openRowId, setOpenRowId] = useState<string>(initialRow.id);
+  const [openRowId, setOpenRowId] = useState(initialRow.id);
+  const [configuredProjects, setConfiguredProjects] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -453,9 +626,10 @@ const AddIndentModal = ({
       setRemarksNotes(initialData.remarksNotes ?? '');
       setBudgetHead(initialData.budgetHead ?? '');
 
-      const nextItems = Array.isArray(initialData.items) && initialData.items.length > 0
-        ? initialData.items
-        : [emptyLineItem(1)];
+      const nextItems =
+        Array.isArray(initialData.items) && initialData.items.length > 0
+          ? initialData.items
+          : [emptyLineItem(1)];
       setItems(nextItems.map((x, idx) => ({ ...x, srNo: idx + 1 })));
       setOpenRowId(nextItems[nextItems.length - 1].id);
       setConfiguredProjects(readInventoryIndentConfig().projects ?? []);
@@ -467,12 +641,20 @@ const AddIndentModal = ({
 
     setIndentedBy((prev) => (prev.trim() ? prev : (cfg.indentedBy ?? '')));
     setForwardedBy((prev) => (prev.trim() ? prev : (cfg.forwardedBy ?? '')));
-    setDirectorsApproval((prev) => (prev.trim() ? prev : (cfg.directorsApproval ?? '')));
+    setDirectorsApproval((prev) =>
+      prev.trim() ? prev : (cfg.directorsApproval ?? ''),
+    );
 
     setProject((prev) => {
       if (prev.trim()) return prev;
       const first = (cfg.projects ?? [])[0];
       return first ?? '';
+    });
+
+    setItems((prev) => {
+      const next = prev.length > 0 ? prev : [emptyLineItem(1)];
+      setOpenRowId(next[next.length - 1].id);
+      return next;
     });
   }, [open, configVersion, initialData]);
 
@@ -575,19 +757,7 @@ const AddIndentModal = ({
         <div className="py-2 space-y-4">
           {/* Live Preview (PR format table) - placed above form for landscape visibility */}
           <div className="bg-white rounded-lg border border-gray-100 p-4 overflow-x-auto">
-            {
-              (() => {
-                const diary = readSignatureDiary();
-                const showDirectorSig = Boolean(previewIndent.directorsApproval && diary[previewIndent.directorsApproval]?.signature);
-                return (
-                  <PRPreview
-                    indent={previewIndent}
-                    attachments={diary}
-                    showDirectorSignature={showDirectorSig}
-                  />
-                );
-              })()
-            }
+            <PRPreview indent={previewIndent} />
           </div>
 
           {/* Form */}
@@ -849,15 +1019,19 @@ const AddIndentModal = ({
 
 const IndentPreviewModal = ({
    indent,
-   attachments,
-   showDirectorSignature,
+   approval,
+   attaching,
    onClose,
+   onAttachApproval,
  }: {
    indent: Indent | null;
-   attachments?: SignatureDiary;
-   showDirectorSignature?: boolean;
+   approval?: IndentApproval;
+   attaching?: boolean;
    onClose: () => void;
+   onAttachApproval?: (indentRef: Pick<Indent, 'id' | 'prNo'>) => void;
  }) => {
+   const alreadySigned = Boolean(indent?.indentedByDetails?.signature) || Boolean(approval);
+
    return (
      <Dialog
        open={Boolean(indent)}
@@ -869,26 +1043,37 @@ const IndentPreviewModal = ({
          <DialogHeader>
            <DialogTitle>Indent Preview</DialogTitle>
          </DialogHeader>
+         {indent && (
+           <div className="bg-white rounded-lg border border-gray-100 p-4 overflow-x-auto">
+             <PRPreview
+               indent={{
+                 project: indent.project,
+                 prNo: indent.prNo,
+                   department: indent.department,
+                 date: indent.date,
+                 indentedBy: indent.indentedBy,
+                 indentedByDetails: indent.indentedByDetails,
+                 forwardedBy: indent.forwardedBy,
+                 directorsApproval: indent.directorsApproval,
+                 remarksNotes: indent.remarksNotes,
+                 budgetHead: indent.budgetHead,
+                 items: indent.items,
+               }}
+               approval={approval}
+             />
+           </div>
+         )}
 
-        {indent && (
-          <div className="bg-white rounded-lg border border-gray-100 p-4 overflow-x-auto">
-            <PRPreview
-              indent={{
-                project: indent.project,
-                prNo: indent.prNo,
-                date: indent.date,
-                indentedBy: indent.indentedBy,
-                forwardedBy: indent.forwardedBy,
-                directorsApproval: indent.directorsApproval,
-                remarksNotes: indent.remarksNotes,
-                budgetHead: indent.budgetHead,
-                items: indent.items,
-              }}
-            />
-          </div>
-        )}
-
-         <DialogFooter>
+         <DialogFooter className="flex items-center gap-2">
+           {indent && onAttachApproval ? (
+             <Button
+               variant="outline"
+               onClick={() => onAttachApproval({ id: indent.id, prNo: indent.prNo })}
+               disabled={alreadySigned || Boolean(attaching)}
+             >
+               {alreadySigned ? 'Approved' : attaching ? 'Attaching…' : 'Attach Sign'}
+             </Button>
+           ) : null}
            <Button onClick={onClose}>Close</Button>
          </DialogFooter>
        </DialogContent>
@@ -896,8 +1081,24 @@ const IndentPreviewModal = ({
    );
 };
 
-const PRPreview = ({ indent, attachments, showDirectorSignature }: { indent: Omit<Indent, 'id' | 'status'>; attachments?: SignatureDiary; showDirectorSignature?: boolean }) => {
-  const sigFor = (name: string) => attachments?.[name] ?? null;
+const PRPreview = ({
+  indent,
+  approval,
+}: {
+  indent: Omit<Indent, 'id' | 'status'>;
+  approval?: IndentApproval;
+}) => {
+  const backendNameId = indent.indentedByDetails?.nameId;
+  const backendSignature = indent.indentedByDetails?.signature;
+  const backendDate = ymdFromIsoTimestamp(indent.indentedByDetails?.timestamp);
+
+  const localNameId = approval
+    ? `${approval.staffName} / ${approval.staffDesignation}`
+    : '';
+  const localSignature = approval
+    ? `Approver | ${approval.staffName} | ${approval.approvedTime} | ${approval.approvedAt}`
+    : '';
+
   return (
     <div className="min-w-[980px]">
       <div className="border border-gray-300">
@@ -994,9 +1195,19 @@ const PRPreview = ({ indent, attachments, showDirectorSignature }: { indent: Omi
 
             <div className="grid grid-cols-4 border-b border-gray-300">
               <div className="p-2 font-semibold">Indented By</div>
-              <div className="p-2 text-center">{indent.indentedBy || '—'}</div>
-              <div className="p-2 text-center text-gray-400">—</div>
-              <div className="p-2 text-center">{indent.date || '—'}</div>
+              <div className="p-2 text-center">
+                {backendNameId || localNameId || indent.indentedBy || '—'}
+              </div>
+              <div className="p-2 text-center">
+                {backendSignature || localSignature ? (
+                  <span className="inline-block border border-gray-400 rounded px-2 py-1 text-[10px] leading-tight">
+                    {backendSignature || localSignature}
+                  </span>
+                ) : (
+                  <span className="text-gray-400">—</span>
+                )}
+              </div>
+              <div className="p-2 text-center">{backendDate || approval?.approvedAt || indent.date || '—'}</div>
             </div>
             <div className="grid grid-cols-4 border-b border-gray-300">
               <div className="p-2 font-semibold">Forwarded By</div>
@@ -1007,16 +1218,7 @@ const PRPreview = ({ indent, attachments, showDirectorSignature }: { indent: Omi
             <div className="grid grid-cols-4">
               <div className="p-2 font-semibold">Director's Approval</div>
               <div className="p-2 text-center">{indent.directorsApproval || '—'}</div>
-              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
-                {showDirectorSignature && sigFor(indent.directorsApproval)?.signature ? (
-                  <img src={sigFor(indent.directorsApproval)!.signature} alt="Signature" className="h-8 object-contain" />
-                ) : (
-                  <span className="text-gray-400">—</span>
-                )}
-                {showDirectorSignature && sigFor(indent.directorsApproval)?.stamp ? (
-                  <img src={sigFor(indent.directorsApproval)!.stamp} alt="Stamp" className="h-8 object-contain" />
-                ) : null}
-              </div>
+              <div className="p-2 text-center text-gray-400">—</div>
               <div className="p-2 text-center">{indent.date || '—'}</div>
             </div>
           </div>

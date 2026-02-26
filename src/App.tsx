@@ -4,6 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import AppLayout from "./components/layout/AppLayout";
+import AuthLanding from "./pages/AuthLanding";
+import Login from "./pages/Login";
 import Index from "./pages/Index";
 import Leads from "./pages/Leads";
 import Farmers from "./pages/Farmers";
@@ -42,7 +44,9 @@ const App = () => (
       <Sonner />
       <BrowserRouter basename={import.meta.env.BASE_URL}>
         <Routes>
-          <Route path="/" element={<Index />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/" element={<AuthLanding />} />
+          <Route path="/index" element={<Index />} />
           
           <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
           <Route path="/tasks-beta" element={<AppLayout><TasksBeta /></AppLayout>} />

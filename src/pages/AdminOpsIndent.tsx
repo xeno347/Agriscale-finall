@@ -16,6 +16,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { getBaseUrl } from '@/lib/config';
 import {
   readAdminOpsIndentConfig,
   writeAdminOpsIndentConfig,
@@ -58,6 +59,8 @@ type Indent = {
   date: string;
   department: string;
   indentedBy: string;
+  indentedBySignature?: string;
+  indentedByTimestamp?: string;
   forwardedBy: string;
   directorsApproval: string;
   remarksNotes: string;
@@ -197,12 +200,16 @@ const PRPreview = ({
               <div className="p-2 flex flex-col items-center justify-center gap-0.5">
                 {sigFor(indent.indentedBy)?.signature ? (
                   <img src={sigFor(indent.indentedBy)!.signature} alt="Signature" className="h-8 object-contain" />
-                ) : <span className="text-gray-400">—</span>}
+                ) : indent.indentedBySignature ? (
+                  <div className="text-[11px] text-gray-700 text-center">{indent.indentedBySignature}</div>
+                ) : (
+                  <span className="text-gray-400">—</span>
+                )}
                 {sigFor(indent.indentedBy)?.stamp ? (
                   <img src={sigFor(indent.indentedBy)!.stamp} alt="Stamp" className="h-8 object-contain" />
                 ) : null}
               </div>
-              <div className="p-2 text-center">{indent.date || '—'}</div>
+              <div className="p-2 text-center">{indent.indentedByTimestamp ? indent.indentedByTimestamp : (indent.date || '—')}</div>
             </div>
             <div className="grid grid-cols-4 border-b border-gray-300">
               <div className="p-2 font-semibold">Forwarded By</div>
@@ -328,8 +335,71 @@ const AdminOpsIndent = () => {
 
   useEffect(() => writeDirectorsAttachedMap(directorsAttachedMap), [directorsAttachedMap]);
 
+  // Load indents from admin ops API
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const BASE_URL = getBaseUrl().replace(/\/$/, '');
+        const res = await fetch(`${BASE_URL}/purchase_flow/get_admin_ops_indents`);
+        if (!res.ok) throw new Error('Failed to fetch admin ops indents');
+        const json = await res.json();
+        const list: Indent[] = (json.admin_ops_indents || []).map((r: any, idx: number) => {
+          const items: PRLineItem[] = (r.indent_data?.item_row || []).map((it: any, i: number) => ({
+            id: `${r.pr_number ?? 'api'}-li-${i}`,
+            srNo: it.sr_no ?? i + 1,
+            itemCode: it.item_code ?? '',
+            partName: it.part_name ?? '',
+            specification: it.specification ?? '',
+            uom: it.uom ?? '',
+            totalQtyRequired: it.total_qty_required ?? 0,
+            lessQtyAvailableInStock: it.less_qty_available_in_stock ?? 0,
+            procurementLeadTimeWeeks: it.procurement_lead_time_weeks ?? 0,
+            materialRequiredByDate: it.material_required_by_date ?? '',
+            indigenousOrImported: it.indigenous_or_imported ?? 'Indigenous',
+            ratePerItem: it.rate_per_item ?? 0,
+            preferredVendorName: it.preferred_vendor_name ?? '',
+            validityOfWarrantyAndGuarantee: it.validity_of_warranty_and_guarantee ?? '',
+            fullLifeHr: it.full_life_hr ?? '',
+            actualLifeHr: it.actual_life_hr ?? '',
+            reasonForReplacement: it.reason_for_replacement ?? '',
+            repairingPossibility: it.repairing_possibility ?? 'NA',
+          }));
+
+          const indentedByName = r.indented_by?.name_id ?? '';
+          const signatureText = r.indented_by?.signature ?? '';
+          const timestamp = r.indented_by?.timestamp ?? r.created_at ?? '';
+
+          return {
+            id: r.pr_number ?? `api-${idx}`,
+            project: r.indent_data?.project ?? '',
+            prNo: r.pr_number ?? '',
+            date: timestamp ? new Date(timestamp).toISOString().slice(0, 10) : (r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : ''),
+            department: r.department ?? '',
+            indentedBy: indentedByName,
+            indentedBySignature: signatureText,
+            indentedByTimestamp: timestamp ? new Date(timestamp).toISOString().slice(0, 10) : '',
+            forwardedBy: (r.forwarded_by?.name_id) ?? '',
+            directorsApproval: (r.approved_by?.name_id) ?? '',
+            remarksNotes: r.notes ?? '',
+            budgetHead: '',
+            items,
+            status: signatureText ? 'forwarded' : 'pending',
+          } as Indent;
+        });
+        setIndents(list);
+      } catch (err) {
+        console.error(err);
+        toast.error('Failed to load indents');
+      }
+    };
+    load();
+  }, []);
+
   // per-indent state: whether attachment is done (enables Forward)
   const [attachedMap, setAttachedMap] = useState<Record<string, boolean>>({});
+  // per-indent approval state coming from attach-sign API
+  const [indentApprovalsMap, setIndentApprovalsMap] = useState<Record<string, boolean>>({});
+  const [attachingApprovalMap, setAttachingApprovalMap] = useState<Record<string, boolean>>({});
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -354,6 +424,50 @@ const AdminOpsIndent = () => {
     if (!attachedMap[id]) return;
     setIndents((prev) => prev.map((x) => (x.id === id ? { ...x, status: 'forwarded' } : x)));
     toast.success('Indent forwarded');
+  };
+
+  // API helper: POST to attach sign endpoint
+  const indentByAttachSignApi = async (payload: { pr_number: string; name_id: string; signature: string }) => {
+    const BASE_URL = getBaseUrl().replace(/\/$/, '');
+    const res = await fetch(`${BASE_URL}/purchase_flow/indent_by_attach_sign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error('attach-sign failed');
+    return res.json();
+  };
+
+  const attachIndentApproval = async ({ id, prNo }: { id: string; prNo: string }) => {
+    if (!prNo) { toast.error('Missing PR number'); return; }
+    const p = readUserProfile();
+    const staffName = (p.name || '').trim();
+    const staffDesignation = (p.role || '').trim();
+    const nameId = `${staffName}${staffDesignation ? ` / ${staffDesignation}` : ''}`;
+    const now = new Date();
+    const hhmm = now.toTimeString().slice(0,5);
+    const ymd = now.toISOString().slice(0,10);
+    const signature = `Approver | ${staffName} | ${hhmm} | ${ymd}`;
+
+    setAttachingApprovalMap((s) => ({ ...s, [id]: true }));
+    try {
+      const json = await indentByAttachSignApi({ pr_number: prNo, name_id: nameId, signature });
+      const backend = json.indented_by ?? { name_id: nameId, signature, timestamp: new Date().toISOString() };
+      const stampDate = backend.timestamp ? new Date(backend.timestamp).toISOString().slice(0,10) : ymd;
+      setIndents((prev) => prev.map((x) => x.id === id ? ({ ...x,
+        indentedBy: backend.name_id ?? x.indentedBy,
+        indentedBySignature: backend.signature ?? signature,
+        indentedByTimestamp: stampDate,
+        status: 'forwarded',
+      }) : x));
+      setIndentApprovalsMap((s) => ({ ...s, [id]: true }));
+      toast.success('Signature attached');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'Attach sign failed');
+    } finally {
+      setAttachingApprovalMap((s) => ({ ...s, [id]: false }));
+    }
   };
 
   return (
@@ -433,6 +547,8 @@ const AdminOpsIndent = () => {
                         date: it.date,
                         department: it.department,
                         indentedBy: it.indentedBy,
+                        indentedBySignature: it.indentedBySignature,
+                        indentedByTimestamp: it.indentedByTimestamp,
                         forwardedBy: it.forwardedBy,
                         directorsApproval: it.directorsApproval,
                         remarksNotes: it.remarksNotes,
@@ -453,6 +569,17 @@ const AdminOpsIndent = () => {
                       >
                         <Paperclip className="w-4 h-4" />
                         {attached ? 'Attached' : 'Attach'}
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => attachIndentApproval({ id: it.id, prNo: it.prNo })}
+                        className="gap-2"
+                        disabled={Boolean(it.indentedBySignature) || Boolean(attachingApprovalMap[it.id])}
+                      >
+                        <Paperclip className="w-4 h-4" />
+                        {attachingApprovalMap[it.id] ? 'Attaching…' : (it.indentedBySignature ? 'Approved' : 'Attach Sign')}
                       </Button>
 
                       <Button
