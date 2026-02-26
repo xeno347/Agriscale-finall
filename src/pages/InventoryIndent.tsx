@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, Search, Send, Settings, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Search, Send, Settings, Trash2, Paperclip } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -20,6 +20,7 @@ import {
   readInventoryIndentConfig,
   writeInventoryIndentConfig,
 } from '@/lib/inventoryIndentConfig';
+import { readSignatureDiary, type SignatureDiary } from '@/lib/signatureDiary';
 
 type PRLineItem = {
   id: string;
@@ -145,6 +146,12 @@ const InventoryIndent = () => {
   const [previewIndent, setPreviewIndent] = useState<Indent | null>(null);
   const [editIndent, setEditIndent] = useState<Indent | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [attachments, setAttachments] = useState<SignatureDiary>({});
+  const [directorsAttachedMap, setDirectorsAttachedMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setAttachments(readSignatureDiary());
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -159,6 +166,16 @@ const InventoryIndent = () => {
       ),
     );
   }, [indents, search]);
+
+  const attachDirectorSignature = (id: string, indent: Indent) => {
+    const diary = readSignatureDiary();
+    const person = indent.directorsApproval?.trim();
+    if (!person) { toast.error('No director name set for this indent'); return; }
+    const entry = diary[person];
+    if (!entry || !entry.signature) { toast.error(`No signature found for ${person} in diary`); return; }
+    setDirectorsAttachedMap((p) => ({ ...p, [id]: true }));
+    toast.success(`Signature attached for ${person}`);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -244,6 +261,16 @@ const InventoryIndent = () => {
                   <Send className="w-4 h-4" />
                   Send
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); attachDirectorSignature(it.id, it); }}
+                  disabled={Boolean(directorsAttachedMap[it.id])}
+                >
+                  <Paperclip className="w-4 h-4" />
+                  {directorsAttachedMap[it.id] ? 'Sig Attached' : 'Attach Sig'}
+                </Button>
               </div>
             </div>
           </div>
@@ -300,6 +327,8 @@ const InventoryIndent = () => {
 
       <IndentPreviewModal
         indent={previewIndent}
+        attachments={attachments}
+        showDirectorSignature={previewIndent ? (previewIndent.status === 'approved' || Boolean(directorsAttachedMap[previewIndent.id])) : false}
         onClose={() => setPreviewIndent(null)}
       />
 
@@ -462,7 +491,19 @@ const AddIndentModal = ({
         <div className="py-2 space-y-4">
           {/* Live Preview (PR format table) - placed above form for landscape visibility */}
           <div className="bg-white rounded-lg border border-gray-100 p-4 overflow-x-auto">
-            <PRPreview indent={previewIndent} />
+            {
+              (() => {
+                const diary = readSignatureDiary();
+                const showDirectorSig = Boolean(previewIndent.directorsApproval && diary[previewIndent.directorsApproval]?.signature);
+                return (
+                  <PRPreview
+                    indent={previewIndent}
+                    attachments={diary}
+                    showDirectorSignature={showDirectorSig}
+                  />
+                );
+              })()
+            }
           </div>
 
           {/* Form */}
@@ -723,51 +764,58 @@ const AddIndentModal = ({
 };
 
 const IndentPreviewModal = ({
-  indent,
-  onClose,
-}: {
-  indent: Indent | null;
-  onClose: () => void;
-}) => {
-  return (
-    <Dialog
-      open={Boolean(indent)}
-      onOpenChange={(v) => {
-        if (!v) onClose();
-      }}
-    >
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Indent Preview</DialogTitle>
-        </DialogHeader>
+   indent,
+   attachments,
+   showDirectorSignature,
+   onClose,
+ }: {
+   indent: Indent | null;
+   attachments?: SignatureDiary;
+   showDirectorSignature?: boolean;
+   onClose: () => void;
+ }) => {
+   return (
+     <Dialog
+       open={Boolean(indent)}
+       onOpenChange={(v) => {
+         if (!v) onClose();
+       }}
+     >
+       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+         <DialogHeader>
+           <DialogTitle>Indent Preview</DialogTitle>
+         </DialogHeader>
 
-        {indent && (
-          <div className="bg-white rounded-lg border border-gray-100 p-4 overflow-x-auto">
-            <PRPreview
-              indent={{
-                project: indent.project,
-                prNo: indent.prNo,
-                date: indent.date,
-                indentedBy: indent.indentedBy,
-                forwardedBy: indent.forwardedBy,
-                directorsApproval: indent.directorsApproval,
-                remarksNotes: indent.remarksNotes,
-                budgetHead: indent.budgetHead,
-                items: indent.items,
-              }}
-            />
-          </div>
-        )}
+         {indent && (
+           <div className="bg-white rounded-lg border border-gray-100 p-4 overflow-x-auto">
+             <PRPreview
+               indent={{
+                 project: indent.project,
+                 prNo: indent.prNo,
+                 date: indent.date,
+                 indentedBy: indent.indentedBy,
+                 forwardedBy: indent.forwardedBy,
+                 directorsApproval: indent.directorsApproval,
+                 remarksNotes: indent.remarksNotes,
+                 budgetHead: indent.budgetHead,
+                 items: indent.items,
+               }}
+               attachments={attachments}
+               showDirectorSignature={showDirectorSignature}
+             />
+           </div>
+         )}
 
-        <DialogFooter>
-          <Button onClick={onClose}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+         <DialogFooter>
+           <Button onClick={onClose}>Close</Button>
+         </DialogFooter>
+       </DialogContent>
+     </Dialog>
+   );
 };
 
-const PRPreview = ({ indent }: { indent: Omit<Indent, 'id' | 'status'> }) => {
+const PRPreview = ({ indent, attachments, showDirectorSignature }: { indent: Omit<Indent, 'id' | 'status'>; attachments?: SignatureDiary; showDirectorSignature?: boolean }) => {
+  const sigFor = (name: string) => attachments?.[name] ?? null;
   return (
     <div className="min-w-[980px]">
       <div className="border border-gray-300">
@@ -876,7 +924,16 @@ const PRPreview = ({ indent }: { indent: Omit<Indent, 'id' | 'status'> }) => {
             <div className="grid grid-cols-4">
               <div className="p-2 font-semibold">Director's Approval</div>
               <div className="p-2 text-center">{indent.directorsApproval || '—'}</div>
-              <div className="p-2 text-center text-gray-400">—</div>
+              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
+                {showDirectorSignature && sigFor(indent.directorsApproval)?.signature ? (
+                  <img src={sigFor(indent.directorsApproval)!.signature} alt="Signature" className="h-8 object-contain" />
+                ) : (
+                  <span className="text-gray-400">—</span>
+                )}
+                {showDirectorSignature && sigFor(indent.directorsApproval)?.stamp ? (
+                  <img src={sigFor(indent.directorsApproval)!.stamp} alt="Stamp" className="h-8 object-contain" />
+                ) : null}
+              </div>
               <div className="p-2 text-center">{indent.date || '—'}</div>
             </div>
           </div>

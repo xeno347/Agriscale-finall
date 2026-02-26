@@ -30,6 +30,8 @@ import FleetChart from "./pages/FleetChart";
 import KhasraFinder from "./pages/khasra_finder";
 import FieldMonitoring from "./pages/FieldMonitoring";
 import LandAcquisition from "./pages/LandAcquisition";
+import AdminOpsIndent from "./pages/AdminOpsIndent";
+import FinanceAdminOpsIndent from "./pages/FinanceAdminOpsIndent";
 
 const queryClient = new QueryClient();
 
@@ -63,6 +65,8 @@ const App = () => (
           {/* Management */}
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
           <Route path="/inventory-indents" element={<AppLayout><InventoryIndent /></AppLayout>} />
+          <Route path="/admin-ops-indents" element={<AppLayout><AdminOpsIndent /></AppLayout>} />
+          <Route path="/finance-admin-ops-indents" element={<AppLayout><FinanceAdminOpsIndent /></AppLayout>} />
           <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
           <Route path="/admin-request" element={<AppLayout><AdminRequestPage /></AppLayout>} /> {/* [NEW ROUTE] */}
           <Route path="/resource-management" element={<AppLayout><FleetChart /></AppLayout>} />

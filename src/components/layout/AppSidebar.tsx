@@ -18,12 +18,12 @@ import {
   Tractor,
   FileText,
   Map,
-  AlertCircle, // Imported AlertCircle icon
+  AlertCircle,
   User,
   MoreHorizontal,
   ClipboardCheck,
   Activity,
-  CreditCard
+  CreditCard,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -263,6 +263,8 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
         <NavGroup label="Management" isSidebarCollapsed={isCollapsed}>
           <NavItem to="/inventory" icon={Box} label="Inventory" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/inventory-indents" icon={FileText} label="Inventory Indents" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/admin-ops-indents" icon={FileText} label="Admin Ops Indents" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/finance-admin-ops-indents" icon={FileText} label="Finance Admin Ops" isSidebarCollapsed={isCollapsed} />
           {/* Added notificationStatus="warning" to Logistics */}
           <NavItem 
             to="/logistics" 
