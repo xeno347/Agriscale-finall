@@ -265,6 +265,8 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavItem to="/inventory-indents" icon={FileText} label="Inventory Indents" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/admin-ops-indents" icon={FileText} label="Admin Ops Indents" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/finance-admin-ops-indents" icon={FileText} label="Finance Admin Ops" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/purchase-requisition" icon={FileText} label="Purchase Requisition" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/vendor-directory" icon={FileText} label="Vendor Directory" isSidebarCollapsed={isCollapsed} />
           {/* Added notificationStatus="warning" to Logistics */}
           <NavItem 
             to="/logistics" 

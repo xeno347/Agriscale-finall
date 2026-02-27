@@ -34,6 +34,8 @@ import FieldMonitoring from "./pages/FieldMonitoring";
 import LandAcquisition from "./pages/LandAcquisition";
 import AdminOpsIndent from "./pages/AdminOpsIndent";
 import FinanceAdminOpsIndent from "./pages/FinanceAdminOpsIndent";
+import PurchaseRequisition from "./pages/PurchaseRequisition";
+import VendorDirectory from "./pages/VendorDirectory";
 
 const queryClient = new QueryClient();
 
@@ -71,6 +73,22 @@ const App = () => (
           <Route path="/inventory-indents" element={<AppLayout><InventoryIndent /></AppLayout>} />
           <Route path="/admin-ops-indents" element={<AppLayout><AdminOpsIndent /></AppLayout>} />
           <Route path="/finance-admin-ops-indents" element={<AppLayout><FinanceAdminOpsIndent /></AppLayout>} />
+          <Route
+            path="/purchase-requisition"
+            element={
+              <AppLayout>
+                <PurchaseRequisition />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/vendor-directory"
+            element={
+              <AppLayout>
+                <VendorDirectory />
+              </AppLayout>
+            }
+          />
           <Route path="/logistics" element={<AppLayout><LogisticsManagement /></AppLayout>} />
           <Route path="/admin-request" element={<AppLayout><AdminRequestPage /></AppLayout>} /> {/* [NEW ROUTE] */}
           <Route path="/resource-management" element={<AppLayout><FleetChart /></AppLayout>} />
