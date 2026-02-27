@@ -61,6 +61,8 @@ type Indent = {
   indentedBy: string;
   indentedBySignature?: string;
   indentedByTimestamp?: string;
+  forwardedBySignature?: string;
+  forwardedByTimestamp?: string;
   forwardedBy: string;
   directorsApproval: string;
   remarksNotes: string;
@@ -198,13 +200,15 @@ const PRPreview = ({
               <div className="p-2 font-semibold">Indented By</div>
               <div className="p-2 text-center">{indent.indentedBy || '—'}</div>
               <div className="p-2 flex flex-col items-center justify-center gap-0.5">
-                {sigFor(indent.indentedBy)?.signature ? (
-                  <img src={sigFor(indent.indentedBy)!.signature} alt="Signature" className="h-8 object-contain" />
-                ) : indent.indentedBySignature ? (
-                  <div className="text-[11px] text-gray-700 text-center">{indent.indentedBySignature}</div>
-                ) : (
-                  <span className="text-gray-400">—</span>
-                )}
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {sigFor(indent.indentedBy)?.signature ? (
+                    <img src={sigFor(indent.indentedBy)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : indent.indentedBySignature ? (
+                    <div className="text-[11px] text-gray-700 text-center">{indent.indentedBySignature}</div>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </div>
                 {sigFor(indent.indentedBy)?.stamp ? (
                   <img src={sigFor(indent.indentedBy)!.stamp} alt="Stamp" className="h-8 object-contain" />
                 ) : null}
@@ -215,14 +219,20 @@ const PRPreview = ({
               <div className="p-2 font-semibold">Forwarded By</div>
               <div className="p-2 text-center">{indent.forwardedBy || '—'}</div>
               <div className="p-2 flex flex-col items-center justify-center gap-0.5">
-                {sigFor(indent.forwardedBy)?.signature ? (
-                  <img src={sigFor(indent.forwardedBy)!.signature} alt="Signature" className="h-8 object-contain" />
-                ) : <span className="text-gray-400">—</span>}
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {sigFor(indent.forwardedBy)?.signature ? (
+                    <img src={sigFor(indent.forwardedBy)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : indent.forwardedBySignature ? (
+                    <div className="text-[11px] text-gray-700 text-center">{indent.forwardedBySignature}</div>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </div>
                 {sigFor(indent.forwardedBy)?.stamp ? (
                   <img src={sigFor(indent.forwardedBy)!.stamp} alt="Stamp" className="h-8 object-contain" />
                 ) : null}
               </div>
-              <div className="p-2 text-center">{indent.date || '—'}</div>
+              <div className="p-2 text-center">{indent.forwardedByTimestamp ? indent.forwardedByTimestamp : (indent.date || '—')}</div>
             </div>
             {/* Director's Approval row */}
             <div className="grid grid-cols-4">
@@ -231,11 +241,13 @@ const PRPreview = ({
                 {indent.directorsApproval || '—'}
               </div>
               <div className="p-2 flex flex-col items-center justify-center gap-0.5">
-                {showDirectorSignature && sigFor(indent.directorsApproval)?.signature ? (
-                  <img src={sigFor(indent.directorsApproval)!.signature} alt="Signature" className="h-8 object-contain" />
-                ) : (
-                  <span className="text-gray-400">—</span>
-                )}
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {showDirectorSignature && sigFor(indent.directorsApproval)?.signature ? (
+                    <img src={sigFor(indent.directorsApproval)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </div>
                 {showDirectorSignature && sigFor(indent.directorsApproval)?.stamp ? (
                   <img src={sigFor(indent.directorsApproval)!.stamp} alt="Stamp" className="h-8 object-contain" />
                 ) : null}
@@ -368,6 +380,9 @@ const AdminOpsIndent = () => {
           const indentedByName = r.indented_by?.name_id ?? '';
           const signatureText = r.indented_by?.signature ?? '';
           const timestamp = r.indented_by?.timestamp ?? r.created_at ?? '';
+          const forwardedByName = r.forwarded_by?.name_id ?? '';
+          const forwardedSignatureText = r.forwarded_by?.signature ?? '';
+          const forwardedTimestamp = r.forwarded_by?.timestamp ?? '';
 
           return {
             id: r.pr_number ?? `api-${idx}`,
@@ -378,12 +393,14 @@ const AdminOpsIndent = () => {
             indentedBy: indentedByName,
             indentedBySignature: signatureText,
             indentedByTimestamp: timestamp ? new Date(timestamp).toISOString().slice(0, 10) : '',
-            forwardedBy: (r.forwarded_by?.name_id) ?? '',
+            forwardedBy: forwardedByName,
+            forwardedBySignature: forwardedSignatureText,
+            forwardedByTimestamp: forwardedTimestamp ? new Date(forwardedTimestamp).toISOString().slice(0,10) : '',
             directorsApproval: (r.approved_by?.name_id) ?? '',
             remarksNotes: r.notes ?? '',
             budgetHead: '',
             items,
-            status: signatureText ? 'forwarded' : 'pending',
+            status: forwardedSignatureText ? 'forwarded' : 'pending',
           } as Indent;
         });
         setIndents(list);
@@ -400,6 +417,7 @@ const AdminOpsIndent = () => {
   // per-indent approval state coming from attach-sign API
   const [indentApprovalsMap, setIndentApprovalsMap] = useState<Record<string, boolean>>({});
   const [attachingApprovalMap, setAttachingApprovalMap] = useState<Record<string, boolean>>({});
+  const [previewIndent, setPreviewIndent] = useState<Indent | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -429,13 +447,20 @@ const AdminOpsIndent = () => {
   // API helper: POST to attach sign endpoint
   const indentByAttachSignApi = async (payload: { pr_number: string; name_id: string; signature: string }) => {
     const BASE_URL = getBaseUrl().replace(/\/$/, '');
-    const res = await fetch(`${BASE_URL}/purchase_flow/indent_by_attach_sign`, {
+    const res = await fetch(`${BASE_URL}/purchase_flow/forward_indent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error('attach-sign failed');
-    return res.json();
+    // Some backends may return empty body; parse safely and return null if empty or unparsable
+    const text = await res.text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
   };
 
   const attachIndentApproval = async ({ id, prNo }: { id: string; prNo: string }) => {
@@ -452,14 +477,23 @@ const AdminOpsIndent = () => {
     setAttachingApprovalMap((s) => ({ ...s, [id]: true }));
     try {
       const json = await indentByAttachSignApi({ pr_number: prNo, name_id: nameId, signature });
-      const backend = json.indented_by ?? { name_id: nameId, signature, timestamp: new Date().toISOString() };
+      // For Admin Ops page, treat the attach-sign as signing the Forwarded By
+      // Guard against null responses from the API
+      const backend = (json && (json.forwarded_by ?? json.indented_by)) ?? { name_id: nameId, signature, timestamp: new Date().toISOString() };
       const stampDate = backend.timestamp ? new Date(backend.timestamp).toISOString().slice(0,10) : ymd;
       setIndents((prev) => prev.map((x) => x.id === id ? ({ ...x,
-        indentedBy: backend.name_id ?? x.indentedBy,
-        indentedBySignature: backend.signature ?? signature,
-        indentedByTimestamp: stampDate,
+        forwardedBy: backend.name_id ?? x.forwardedBy,
+        forwardedBySignature: backend.signature ?? signature,
+        forwardedByTimestamp: stampDate,
         status: 'forwarded',
       }) : x));
+      // If preview is open for this indent, update it so popup shows new signature immediately
+      setPreviewIndent((prev) => prev && prev.id === id ? ({ ...prev,
+        forwardedBy: backend.name_id ?? prev.forwardedBy,
+        forwardedBySignature: backend.signature ?? signature,
+        forwardedByTimestamp: stampDate,
+        status: 'forwarded',
+      }) : prev);
       setIndentApprovalsMap((s) => ({ ...s, [id]: true }));
       toast.success('Signature attached');
     } catch (err: any) {
@@ -504,116 +538,94 @@ const AdminOpsIndent = () => {
           <div className="text-right">Status</div>
         </div>
 
-        <Accordion type="single" collapsible value={openRowId} onValueChange={(v) => setOpenRowId(v)}>
+        <div className="space-y-3">
           {filtered.map((it) => {
             const attached = Boolean(attachedMap[it.id]);
+            const alreadySigned = Boolean(it.forwardedBySignature) || Boolean(indentApprovalsMap[it.id]);
             return (
-              <AccordionItem key={it.id} value={it.id} className="border-b border-gray-100 last:border-b-0">
-                <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:hidden">
-                  <div className="grid grid-cols-[minmax(220px,3fr)_minmax(140px,2fr)_minmax(180px,3fr)_minmax(130px,2fr)_80px_140px] gap-2 w-full items-center">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-gray-800 truncate">{it.prNo || 'PR (Draft)'}</div>
-                      <div className="text-xs text-gray-400 truncate">{it.project || '—'}</div>
-                    </div>
-                    <div className="text-sm text-gray-700 truncate">{it.department || '—'}</div>
-                    <div className="text-sm text-gray-700 truncate">{it.indentedBy || '—'}</div>
-                    <div className="text-sm text-gray-700 whitespace-nowrap">{it.date || '—'}</div>
-                    <div className="text-sm text-gray-700 text-center whitespace-nowrap tabular-nums">{(it.items ?? []).length}</div>
-                    <div className="flex items-center justify-end gap-1.5 min-w-0">
-                      <span
-                        className={
-                          `text-xs font-semibold tabular-nums ` +
-                          (it.status === 'pending' ? 'text-yellow-700' : 'text-green-700')
-                        }
-                      >
-                        {it.status === 'pending' ? 'PENDING' : 'FORWARDED'}
-                      </span>
-                      {directorsAttachedMap[it.id] && (
-                        <Paperclip className="w-4 h-4 text-gray-400 ml-2" />
-                      )}
-                      <ChevronDown
-                        className={`w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 ${openRowId === it.id ? 'rotate-180' : ''}`}
-                      />
-                    </div>
+              <div
+                key={it.id}
+                className="bg-white p-4 rounded-lg border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:border-gray-200"
+                onClick={() => setPreviewIndent(it)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setPreviewIndent(it); }}
+              >
+                <div>
+                  <div className="flex items-baseline gap-3">
+                    <h3 className="font-semibold text-gray-800">{it.prNo || 'PR (Draft)'}</h3>
+                    <span className="text-xs text-gray-400">{it.project}</span>
                   </div>
-                </AccordionTrigger>
-
-                <AccordionContent className="px-4 pb-4">
-                  <div className="bg-gray-50 rounded-lg border border-gray-100 p-4 overflow-x-auto">
-                    <PRPreview
-                      indent={{
-                        project: it.project,
-                        prNo: it.prNo,
-                        date: it.date,
-                        department: it.department,
-                        indentedBy: it.indentedBy,
-                        indentedBySignature: it.indentedBySignature,
-                        indentedByTimestamp: it.indentedByTimestamp,
-                        forwardedBy: it.forwardedBy,
-                        directorsApproval: it.directorsApproval,
-                        remarksNotes: it.remarksNotes,
-                        budgetHead: it.budgetHead,
-                        items: it.items,
-                      }}
-                      attachments={attachments}
-                      showDirectorSignature={Boolean(directorsAttachedMap[it.id])}
-                    />
-
-                    <div className="mt-4 flex items-center justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => markAttached(it.id)}
-                        className="gap-2"
-                        disabled={it.status === 'forwarded'}
-                      >
-                        <Paperclip className="w-4 h-4" />
-                        {attached ? 'Attached' : 'Attach'}
-                      </Button>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => attachIndentApproval({ id: it.id, prNo: it.prNo })}
-                        className="gap-2"
-                        disabled={Boolean(it.indentedBySignature) || Boolean(attachingApprovalMap[it.id])}
-                      >
-                        <Paperclip className="w-4 h-4" />
-                        {attachingApprovalMap[it.id] ? 'Attaching…' : (it.indentedBySignature ? 'Approved' : 'Attach Sign')}
-                      </Button>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => attachDirectorSignature(it.id, it)}
-                        className="gap-2"
-                        disabled={Boolean(directorsAttachedMap[it.id])}
-                      >
-                        <Paperclip className="w-4 h-4" />
-                        {directorsAttachedMap[it.id] ? 'Sig Attached' : 'Attach Sig'}
-                      </Button>
-
-                      <Button
-                        type="button"
-                        className="bg-green-600 hover:bg-green-700 text-white gap-2"
-                        onClick={() => forward(it.id)}
-                        disabled={!attached || it.status === 'forwarded'}
-                      >
-                        <Send className="w-4 h-4" />
-                        Forward
-                      </Button>
-                    </div>
-                    {!attached && it.status !== 'forwarded' && (
-                      <div className="mt-2 text-xs text-gray-400 text-right">Forward is enabled after Attach.</div>
-                    )}
+                  <p className="text-sm text-gray-500">Items: {(it.items ?? []).length} · Total: {formatInr(totalValue(it.items ?? []))} · Indented by {it.indentedBy || '—'}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className={`text-sm font-semibold ${it.status === 'pending' ? 'text-yellow-600' : it.status === 'forwarded' ? 'text-blue-600' : 'text-gray-600'}`}>{it.status.toUpperCase()}</p>
+                    <p className="text-xs text-gray-400">{it.date}</p>
                   </div>
-                </AccordionContent>
-              </AccordionItem>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); void attachIndentApproval({ id: it.id, prNo: it.prNo }); }}
+                      disabled={alreadySigned || Boolean(attachingApprovalMap[it.id])}
+                    >
+                      <Paperclip className="w-4 h-4" />
+                      {alreadySigned ? 'Approved' : attachingApprovalMap[it.id] ? 'Attaching…' : 'Attach Sign'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
             );
           })}
-        </Accordion>
+        </div>
       </div>
 
+      <Dialog open={Boolean(previewIndent)} onOpenChange={(v) => { if (!v) setPreviewIndent(null); }}>
+        <DialogContent className="max-w-[1200px] w-[1200px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>PR Preview</DialogTitle>
+          </DialogHeader>
+          {previewIndent && (
+            <PRPreview
+              indent={{
+                project: previewIndent.project,
+                prNo: previewIndent.prNo,
+                date: previewIndent.date,
+                department: previewIndent.department,
+                indentedBy: previewIndent.indentedBy,
+                indentedBySignature: previewIndent.indentedBySignature,
+                indentedByTimestamp: previewIndent.indentedByTimestamp,
+                forwardedBy: previewIndent.forwardedBy,
+                forwardedBySignature: previewIndent.forwardedBySignature,
+                forwardedByTimestamp: previewIndent.forwardedByTimestamp,
+                directorsApproval: previewIndent.directorsApproval,
+                remarksNotes: previewIndent.remarksNotes,
+                budgetHead: previewIndent.budgetHead,
+                items: previewIndent.items,
+              }}
+              attachments={attachments}
+              showDirectorSignature={Boolean(directorsAttachedMap[previewIndent.id])}
+            />
+          )}
+          {previewIndent && (
+            <DialogFooter>
+              <div className="flex justify-end gap-2 w-full">
+                <Button variant="outline" onClick={() => setPreviewIndent(null)}>Close</Button>
+                <Button
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!previewIndent) return; void attachIndentApproval({ id: previewIndent.id, prNo: previewIndent.prNo }); }}
+                  disabled={Boolean((previewIndent && (previewIndent.forwardedBySignature || indentApprovalsMap[previewIndent.id])) || (previewIndent && attachingApprovalMap[previewIndent.id]))}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {previewIndent && (previewIndent.forwardedBySignature || indentApprovalsMap[previewIndent.id]) ? 'Approved' : (previewIndent && attachingApprovalMap[previewIndent.id]) ? 'Attaching…' : 'Attach Sign'}
+                </Button>
+              </div>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
       <ConfigureModal open={configOpen} onClose={handleConfigClose} indents={indents} />
     </div>
   );
