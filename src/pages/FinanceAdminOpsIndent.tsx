@@ -65,6 +65,8 @@ type Indent = {
   forwardedByTimestamp?: string;
   forwardedBy: string;
   directorsApproval: string;
+  directorsApprovalSignature?: string;
+  directorsApprovalTimestamp?: string;
   remarksNotes: string;
   budgetHead: string;
   items: PRLineItem[];
@@ -241,16 +243,25 @@ const PRPreview = ({
                 {indent.directorsApproval || '—'}
               </div>
               <div className="p-2 flex flex-col items-center justify-center gap-0.5">
-                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
-                  {showDirectorSignature && sigFor(indent.directorsApproval)?.signature ? (
-                    <img src={sigFor(indent.directorsApproval)!.signature} alt="Signature" className="h-8 object-contain" />
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </div>
-                {showDirectorSignature && sigFor(indent.directorsApproval)?.stamp ? (
-                  <img src={sigFor(indent.directorsApproval)!.stamp} alt="Stamp" className="h-8 object-contain" />
-                ) : null}
+                  <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                    {(() => {
+                      const diaryEntry = sigFor(indent.directorsApproval);
+                      if (diaryEntry?.signature && showDirectorSignature) {
+                        return <img src={diaryEntry.signature} alt="Signature" className="h-8 object-contain" />;
+                      }
+                      if (indent.directorsApprovalSignature) {
+                        return <div className="text-[11px] text-gray-700 text-center">{indent.directorsApprovalSignature}</div>;
+                      }
+                      return <span className="text-gray-400">—</span>;
+                    })()}
+                  </div>
+                  {(() => {
+                    const diaryEntry = sigFor(indent.directorsApproval);
+                    if (diaryEntry?.stamp && showDirectorSignature) {
+                      return <img src={diaryEntry.stamp} alt="Stamp" className="h-8 object-contain" />;
+                    }
+                    return null;
+                  })()}
               </div>
               <div className="p-2 text-center">{indent.date || '—'}</div>
             </div>
@@ -310,14 +321,16 @@ const initialIndents: Indent[] = [
   },
 ];
 
-const FinanceAdminOpsIndent = () => {
+const AdminOpsIndent = () => {
   const [indents, setIndents] = useState<Indent[]>(initialIndents);
   const [search, setSearch] = useState('');
   const [openRowId, setOpenRowId] = useState<string>('');
   const [configOpen, setConfigOpen] = useState(false);
   const [attachments, setAttachments] = useState<SignatureDiary>({});
+  // per-indent flag to show director signature when explicitly attached
   const [directorsAttachedMap, setDirectorsAttachedMap] = useState<Record<string, boolean>>({});
 
+  // Load attachments config on mount
   useEffect(() => {
     setAttachments(readSignatureDiary());
     setDirectorsAttachedMap(readDirectorsAttachedMap());
@@ -345,14 +358,47 @@ const FinanceAdminOpsIndent = () => {
 
   useEffect(() => writeDirectorsAttachedMap(directorsAttachedMap), [directorsAttachedMap]);
 
+  // Load indents from admin ops API
   useEffect(() => {
     const load = async () => {
       try {
         const BASE_URL = getBaseUrl().replace(/\/$/, '');
-        const res = await fetch(`${BASE_URL}/purchase_flow/get_admin_ops_indents`);
-        if (!res.ok) throw new Error('Failed to fetch admin ops indents');
-        const json = await res.json();
-        const list: Indent[] = (json.admin_ops_indents || []).map((r: any, idx: number) => {
+        const financeUrl = `${BASE_URL}/purchase_flow/get_finance_ops_indents`;
+        const adminUrl = `${BASE_URL}/purchase_flow/get_admin_ops_indents`;
+
+        const tryFetch = async (url: string) => {
+          const r = await fetch(url);
+          const body = await r.text().catch(() => '');
+          return { ok: r.ok, status: r.status, statusText: r.statusText, body };
+        };
+
+        const first = await tryFetch(financeUrl);
+        let text = first.body;
+        let json: any = {};
+
+        if (!first.ok) {
+          // if finance endpoint missing (404), try admin endpoint as fallback
+          if (first.status === 404) {
+            console.warn(`Finance endpoint 404, retrying admin endpoint: ${adminUrl}`);
+            const alt = await tryFetch(adminUrl);
+            if (!alt.ok) {
+              throw new Error(`Fetch failed ${first.status} ${first.statusText}: ${first.body}`);
+            }
+            text = alt.body;
+          } else {
+            throw new Error(`Fetch failed ${first.status} ${first.statusText}: ${first.body}`);
+          }
+        }
+
+        try {
+          json = text ? JSON.parse(text) : {};
+        } catch (parseErr) {
+          console.error('Failed to parse indents JSON', parseErr, text);
+          throw new Error('Invalid JSON received from indents API');
+        }
+
+        const arr = json.finance_ops_indents ?? json.admin_ops_indents ?? json.finance_admin_ops_indents ?? [];
+        const list: Indent[] = (arr || []).map((r: any, idx: number) => {
           const items: PRLineItem[] = (r.indent_data?.item_row || []).map((it: any, i: number) => ({
             id: `${r.pr_number ?? 'api'}-li-${i}`,
             srNo: it.sr_no ?? i + 1,
@@ -380,6 +426,9 @@ const FinanceAdminOpsIndent = () => {
           const forwardedByName = r.forwarded_by?.name_id ?? '';
           const forwardedSignatureText = r.forwarded_by?.signature ?? '';
           const forwardedTimestamp = r.forwarded_by?.timestamp ?? '';
+          const approvedByName = r.approved_by?.name_id ?? '';
+          const approvedBySignature = r.approved_by?.signature ?? '';
+          const approvedByTimestamp = r.approved_by?.timestamp ?? '';
 
           return {
             id: r.pr_number ?? `api-${idx}`,
@@ -393,23 +442,29 @@ const FinanceAdminOpsIndent = () => {
             forwardedBy: forwardedByName,
             forwardedBySignature: forwardedSignatureText,
             forwardedByTimestamp: forwardedTimestamp ? new Date(forwardedTimestamp).toISOString().slice(0,10) : '',
-            directorsApproval: (r.approved_by?.name_id) ?? '',
+            directorsApproval: approvedByName,
+            directorsApprovalSignature: approvedBySignature,
+            directorsApprovalTimestamp: approvedByTimestamp ? new Date(approvedByTimestamp).toISOString().slice(0,10) : '',
             remarksNotes: r.notes ?? '',
             budgetHead: '',
             items,
-            status: forwardedSignatureText ? 'forwarded' : 'pending',
+            // Consider indent 'pending' when director's approval signature is missing
+            status: approvedBySignature ? 'forwarded' : 'pending',
           } as Indent;
         });
         setIndents(list);
-      } catch (err) {
-        console.error(err);
-        toast.error('Failed to load indents');
+      } catch (err: any) {
+        console.error('Load indents error:', err);
+        const msg = err?.message || (typeof err === 'string' ? err : JSON.stringify(err));
+        toast.error(`Failed to load indents: ${msg}`);
       }
     };
     load();
   }, []);
 
+  // per-indent state: whether attachment is done (enables Forward)
   const [attachedMap, setAttachedMap] = useState<Record<string, boolean>>({});
+  // per-indent approval state coming from attach-sign API
   const [indentApprovalsMap, setIndentApprovalsMap] = useState<Record<string, boolean>>({});
   const [attachingApprovalMap, setAttachingApprovalMap] = useState<Record<string, boolean>>({});
   const [previewIndent, setPreviewIndent] = useState<Indent | null>(null);
@@ -439,6 +494,7 @@ const FinanceAdminOpsIndent = () => {
     toast.success('Indent forwarded');
   };
 
+  // API helper: POST to attach sign endpoint
   const indentByAttachSignApi = async (payload: { pr_number: string; name_id: string; signature: string }) => {
     const BASE_URL = getBaseUrl().replace(/\/$/, '');
     const res = await fetch(`${BASE_URL}/purchase_flow/forward_indent`, {
@@ -447,37 +503,108 @@ const FinanceAdminOpsIndent = () => {
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error('attach-sign failed');
+    // Some backends may return empty body; parse safely and return null if empty or unparsable
     const text = await res.text();
     if (!text) return null;
-    try { return JSON.parse(text); } catch { return null; }
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  };
+
+  // API helper: POST to director approval endpoint
+  const directorApprovalApi = async (payload: { pr_number: string; name_id: string; signature: string }) => {
+    const BASE_URL = getBaseUrl().replace(/\/$/, '');
+    const res = await fetch(`${BASE_URL}/purchase_flow/director_approval`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error('director approval failed');
+    const text = await res.text();
+    if (!text) return { success: true } as any; // treat empty ok response as success
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { success: true } as any;
+    }
   };
 
   const attachIndentApproval = async ({ id, prNo }: { id: string; prNo: string }) => {
     if (!prNo) { toast.error('Missing PR number'); return; }
     const p = readUserProfile();
-    const staffName = (p.name || '').trim();
-    const staffDesignation = (p.role || '').trim();
+    let staffName = (p.name || '').trim();
+    let staffDesignation = (p.role || '').trim();
+
+    // If local profile is missing, try retrieving credentials from server
+    if (!staffName) {
+      try {
+        const BASE_URL = getBaseUrl().replace(/\/$/, '');
+        // read cached auth token (stored by AuthContext under key 'fc_auth_v1')
+        let token = '';
+        try {
+          const raw = window.localStorage.getItem('fc_auth_v1');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            token = String(parsed?.token ?? '');
+          }
+        } catch {
+          // ignore parse errors
+        }
+
+        const res = await fetch(`${BASE_URL}/login/get_credentials`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        if (res.ok) {
+          const cred = await res.json();
+          staffName = (cred?.staff_name || '').trim();
+          staffDesignation = (cred?.staff_designation || '')?.trim();
+          if (staffName) writeUserProfile({ name: staffName, role: staffDesignation });
+        }
+      } catch (e) {
+        console.warn('Failed to fetch credentials', e);
+      }
+    }
+
+    if (!staffName) {
+      toast.error('Unable to determine staff name; please login or set profile');
+      return;
+    }
+
     const nameId = `${staffName}${staffDesignation ? ` / ${staffDesignation}` : ''}`;
     const now = new Date();
     const hhmm = now.toTimeString().slice(0,5);
     const ymd = now.toISOString().slice(0,10);
-    const signature = `Approver | ${staffName} | ${hhmm} | ${ymd}`;
+    const signature = `Approved | ${staffName} | ${hhmm} | ${ymd}`;
 
     setAttachingApprovalMap((s) => ({ ...s, [id]: true }));
     try {
-      const json = await indentByAttachSignApi({ pr_number: prNo, name_id: nameId, signature });
-      const backend = (json && (json.forwarded_by ?? json.indented_by)) ?? { name_id: nameId, signature, timestamp: new Date().toISOString() };
+      const json = await directorApprovalApi({ pr_number: prNo, name_id: nameId, signature });
+      // If backend explicitly returned success:true, use our nameId and signature
+      let backend: any = null;
+      if (json && (json.success === true)) {
+        backend = { name_id: nameId, signature, timestamp: new Date().toISOString() };
+      } else if (json) {
+        backend = (json.approved_by ?? json.forwarded_by ?? json.indented_by) ?? { name_id: nameId, signature, timestamp: new Date().toISOString() };
+      } else {
+        backend = { name_id: nameId, signature, timestamp: new Date().toISOString() };
+      }
+
       const stampDate = backend.timestamp ? new Date(backend.timestamp).toISOString().slice(0,10) : ymd;
       setIndents((prev) => prev.map((x) => x.id === id ? ({ ...x,
-        forwardedBy: backend.name_id ?? x.forwardedBy,
-        forwardedBySignature: backend.signature ?? signature,
-        forwardedByTimestamp: stampDate,
+        directorsApproval: backend.name_id ?? x.directorsApproval,
+        directorsApprovalSignature: backend.signature ?? signature,
+        directorsApprovalTimestamp: stampDate,
         status: 'forwarded',
       }) : x));
+      // If preview is open for this indent, update it so popup shows new signature immediately
       setPreviewIndent((prev) => prev && prev.id === id ? ({ ...prev,
-        forwardedBy: backend.name_id ?? prev.forwardedBy,
-        forwardedBySignature: backend.signature ?? signature,
-        forwardedByTimestamp: stampDate,
+        directorsApproval: backend.name_id ?? prev.directorsApproval,
+        directorsApprovalSignature: backend.signature ?? signature,
+        directorsApprovalTimestamp: stampDate,
         status: 'forwarded',
       }) : prev);
       setIndentApprovalsMap((s) => ({ ...s, [id]: true }));
@@ -485,14 +612,16 @@ const FinanceAdminOpsIndent = () => {
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || 'Attach sign failed');
-    } finally { setAttachingApprovalMap((s) => ({ ...s, [id]: false })); }
+    } finally {
+      setAttachingApprovalMap((s) => ({ ...s, [id]: false }));
+    }
   };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Admin Ops Indents</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Finance Indent Approval</h1>
           <p className="text-sm text-gray-500 mt-0.5">Review indents, attach documents, and forward</p>
         </div>
         <Button variant="outline" onClick={() => setConfigOpen(true)} className="gap-2">
@@ -512,6 +641,7 @@ const FinanceAdminOpsIndent = () => {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-100 shadow-sm">
+        {/* header row */}
         <div className="grid grid-cols-[minmax(220px,3fr)_minmax(140px,2fr)_minmax(180px,3fr)_minmax(130px,2fr)_80px_140px] gap-2 px-4 py-3 text-xs font-semibold text-gray-500 border-b border-gray-100">
           <div>PR No / Project</div>
           <div>Department</div>
@@ -523,8 +653,8 @@ const FinanceAdminOpsIndent = () => {
 
         <div className="space-y-3">
           {filtered.map((it) => {
-            const attached = Boolean(attachedMap[it.id]);
-            const alreadySigned = Boolean(it.forwardedBySignature) || Boolean(indentApprovalsMap[it.id]);
+              const attached = Boolean(attachedMap[it.id]);
+              const alreadySigned = Boolean(it.directorsApprovalSignature) || Boolean(indentApprovalsMap[it.id]);
             return (
               <div
                 key={it.id}
@@ -553,7 +683,7 @@ const FinanceAdminOpsIndent = () => {
                       size="sm"
                       className="gap-2"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); void attachIndentApproval({ id: it.id, prNo: it.prNo }); }}
-                      disabled={alreadySigned || Boolean(attachingApprovalMap[it.id])}
+                        disabled={alreadySigned || Boolean(attachingApprovalMap[it.id])}
                     >
                       <Paperclip className="w-4 h-4" />
                       {alreadySigned ? 'Approved' : attachingApprovalMap[it.id] ? 'Attaching…' : 'Attach Sign'}
@@ -585,6 +715,8 @@ const FinanceAdminOpsIndent = () => {
                 forwardedBySignature: previewIndent.forwardedBySignature,
                 forwardedByTimestamp: previewIndent.forwardedByTimestamp,
                 directorsApproval: previewIndent.directorsApproval,
+                directorsApprovalSignature: previewIndent.directorsApprovalSignature,
+                directorsApprovalTimestamp: previewIndent.directorsApprovalTimestamp,
                 remarksNotes: previewIndent.remarksNotes,
                 budgetHead: previewIndent.budgetHead,
                 items: previewIndent.items,
@@ -593,16 +725,16 @@ const FinanceAdminOpsIndent = () => {
               showDirectorSignature={Boolean(directorsAttachedMap[previewIndent.id])}
             />
           )}
-          {previewIndent && (
+                {previewIndent && (
             <DialogFooter>
               <div className="flex justify-end gap-2 w-full">
                 <Button variant="outline" onClick={() => setPreviewIndent(null)}>Close</Button>
                 <Button
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!previewIndent) return; void attachIndentApproval({ id: previewIndent.id, prNo: previewIndent.prNo }); }}
-                  disabled={Boolean((previewIndent && (previewIndent.forwardedBySignature || indentApprovalsMap[previewIndent.id])) || (previewIndent && attachingApprovalMap[previewIndent.id]))}
+                  disabled={Boolean((previewIndent && (previewIndent.directorsApprovalSignature || indentApprovalsMap[previewIndent.id])) || (previewIndent && attachingApprovalMap[previewIndent.id]))}
                   className="bg-green-600 hover:bg-green-700 text-white"
                 >
-                  {previewIndent && (previewIndent.forwardedBySignature || indentApprovalsMap[previewIndent.id]) ? 'Approved' : (previewIndent && attachingApprovalMap[previewIndent.id]) ? 'Attaching…' : 'Attach Sign'}
+                  {previewIndent && (previewIndent.directorsApprovalSignature || indentApprovalsMap[previewIndent.id]) ? 'Approved' : (previewIndent && attachingApprovalMap[previewIndent.id]) ? 'Attaching…' : 'Attach Sign'}
                 </Button>
               </div>
             </DialogFooter>
@@ -614,6 +746,8 @@ const FinanceAdminOpsIndent = () => {
   );
 };
 
+// ─── Shared: read image file ─────────────────────────────────────────────────
+
 const readImageFile = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -621,6 +755,8 @@ const readImageFile = (file: File): Promise<string> =>
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+
+// ─── DiaryPersonRow — one card in the Signature Diary ────────────────────────
 
 const DiaryPersonRow = ({
   name,
@@ -650,10 +786,16 @@ const DiaryPersonRow = ({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
+        {/* Signature */}
         <div>
           <label className="text-[11px] font-medium text-gray-500 block mb-1">Signature</label>
           <input ref={sigRef} type="file" accept="image/*" className="hidden"
-            onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; onChange({ ...data, signature: await readImageFile(f) }); e.target.value = ''; }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              onChange({ ...data, signature: await readImageFile(file) });
+              e.target.value = '';
+            }}
           />
           {data.signature ? (
             <div className="space-y-1">
@@ -670,10 +812,16 @@ const DiaryPersonRow = ({
           )}
         </div>
 
+        {/* Stamp */}
         <div>
           <label className="text-[11px] font-medium text-gray-500 block mb-1">Stamp</label>
           <input ref={stampRef} type="file" accept="image/*" className="hidden"
-            onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; onChange({ ...data, stamp: await readImageFile(f) }); e.target.value = ''; }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              onChange({ ...data, stamp: await readImageFile(file) });
+              e.target.value = '';
+            }}
           />
           {data.stamp ? (
             <div className="space-y-1">
@@ -694,6 +842,8 @@ const DiaryPersonRow = ({
   );
 };
 
+// ─── Configure Modal ────────────────────────────────────────────────────────
+
 const ConfigureModal = ({
   open,
   onClose,
@@ -703,11 +853,15 @@ const ConfigureModal = ({
   onClose: () => void;
   indents: Indent[];
 }) => {
+  // ── User profile ──
   const [profileName, setProfileName] = useState('');
   const [profileRole, setProfileRole] = useState('');
+
+  // ── Signature Diary ──
   const [diary, setDiary] = useState<SignatureDiary>({});
   const [newPersonName, setNewPersonName] = useState('');
 
+  // Names detected automatically from indents
   const detectedNames = useMemo(() => {
     const names = new Set<string>();
     for (const ind of indents) {
@@ -718,6 +872,7 @@ const ConfigureModal = ({
     return Array.from(names);
   }, [indents]);
 
+  // All names shown = detected + any extra manually added
   const allDiaryNames = useMemo(() => {
     const set = new Set(detectedNames);
     Object.keys(diary).forEach((k) => set.add(k));
@@ -738,8 +893,12 @@ const ConfigureModal = ({
   };
 
   const removePerson = (name: string) => {
-    if (detectedNames.includes(name)) return;
-    setDiary((prev) => { const next = { ...prev }; delete next[name]; return next; });
+    if (detectedNames.includes(name)) return; // cannot remove auto-detected
+    setDiary((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   const addPerson = () => {
@@ -764,6 +923,8 @@ const ConfigureModal = ({
         </DialogHeader>
 
         <div className="space-y-5 py-2">
+
+          {/* ── Current User Profile ── */}
           <div className="bg-gray-50 rounded-lg border border-gray-100 p-4">
             <div className="flex items-center gap-2 mb-3">
               <UserCircle className="w-4 h-4 text-gray-500" />
@@ -792,6 +953,7 @@ const ConfigureModal = ({
             </div>
           </div>
 
+          {/* ── Signature Diary ── */}
           <div className="bg-gray-50 rounded-lg border border-gray-100 p-4">
             <div className="flex items-center gap-2 mb-1">
               <BookUser className="w-4 h-4 text-gray-500" />
@@ -818,6 +980,7 @@ const ConfigureModal = ({
                 <p className="text-xs text-gray-400 text-center py-2">No names detected yet. Add one below.</p>
               )}
 
+              {/* Add extra person */}
               <div className="flex gap-2 pt-1">
                 <Input
                   placeholder="Add person by name…"
@@ -845,4 +1008,4 @@ const ConfigureModal = ({
   );
 };
 
-export default FinanceAdminOpsIndent;
+export default AdminOpsIndent;

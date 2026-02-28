@@ -19,6 +19,7 @@ type Quote = {
   quotedRate: number;
   leadTimeDays?: number;
   notes?: string;
+  document?: { name: string; url?: string };
 };
 
 // Simple types used by this page
@@ -56,7 +57,13 @@ type Indent = {
   remarksNotes?: string;
   budgetHead?: string;
   items: PRLineItem[];
-  status: 'draft' | 'signed' | 'raised';
+  status: 'draft' | 'signed' | 'raised' | 'po';
+  purchaseOrder?: {
+    id: string;
+    date: string;
+    totalValue: number;
+    items: { lineItemId: string; quoteId: string; vendorName: string; quotedRate: number }[];
+  };
 };
 
 const genId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -370,6 +377,65 @@ const PurchaseRequisition = () => {
   const [newItemName, setNewItemName] = useState('');
   const [newItemQty, setNewItemQty] = useState(1);
   const [previewIndent, setPreviewIndent] = useState<Indent | null>(null);
+  const [activeTab, setActiveTab] = useState<'new' | 'process' | 'po'>('new');
+  const [openAddQuote, setOpenAddQuote] = useState<string | null>(null);
+  const [addQuoteForms, setAddQuoteForms] = useState<Record<string, { vendor: string; file?: File | null; prices: Record<string, string> }>>({});
+
+  const vendors = ['Vendor A', 'Vendor B', 'Vendor C'];
+
+  const openAddQuoteForm = (indent: Indent) => {
+    setOpenAddQuote((s) => (s === indent.id ? null : indent.id));
+    setAddQuoteForms((prev) => {
+      if (prev[indent.id]) return prev;
+      const prices: Record<string, string> = {};
+      indent.items.forEach((li) => { prices[li.id] = String(li.ratePerItem || 0); });
+      return { ...prev, [indent.id]: { vendor: vendors[0], file: null, prices } };
+    });
+  };
+
+  const handleFileChange = (indentId: string, f?: File) => {
+    setAddQuoteForms((p) => ({ ...p, [indentId]: { ...(p[indentId] || { vendor: vendors[0], prices: {} }), file: f || null } }));
+  };
+
+  const handlePriceChange = (indentId: string, lineItemId: string, value: string) => {
+    setAddQuoteForms((p) => ({ ...p, [indentId]: { ...(p[indentId] || { vendor: vendors[0], prices: {} }), prices: { ...(p[indentId]?.prices || {}), [lineItemId]: value } } }));
+  };
+
+  const handleVendorChange = (indentId: string, vendor: string) => {
+    setAddQuoteForms((p) => ({ ...p, [indentId]: { ...(p[indentId] || { vendor: vendors[0], prices: {} }), vendor } }));
+  };
+
+  const submitAddQuote = async (indentId: string) => {
+    const form = addQuoteForms[indentId];
+    if (!form || !form.vendor) return toast.error('Vendor required');
+    const indent = indents.find((i) => i.id === indentId);
+    if (!indent) return toast.error('Indent not found');
+
+    let dataUrl: string | undefined;
+    if (form.file) {
+      dataUrl = await new Promise<string>((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result));
+        fr.onerror = rej;
+        fr.readAsDataURL(form.file as File);
+      });
+    }
+
+    // add a quote per line item with provided price
+    indent.items.forEach((li) => {
+      const priceStr = form.prices[li.id] || '0';
+      const q: Quote = {
+        id: genId(),
+        vendorName: form.vendor,
+        quotedRate: Number(priceStr) || 0,
+        document: form.file ? { name: form.file.name, url: dataUrl } : undefined,
+      };
+      addQuote(indentId, li.id, q);
+    });
+
+    setOpenAddQuote(null);
+    toast.success('Quotation(s) added');
+  };
 
   useEffect(() => {
     setDiary(readSignatureDiary());
@@ -387,6 +453,40 @@ const PurchaseRequisition = () => {
   const canRaise = (it: Indent) => {
     const s = signaturesPresent(it);
     return s.indented && s.forwarded && s.director;
+  };
+
+  const hasAnyQuotes = (it: Indent) => it.items.some((li) => (li.quotes?.length || 0) > 0);
+
+  const createPO = (id: string) => {
+    setIndents((prev) => prev.map((x) => {
+      if (x.id !== id) return x;
+      // ensure every line item has at least one quote
+      const missing = x.items.some((li) => !(li.quotes && li.quotes.length > 0));
+      if (missing) {
+        toast.error('All items must have at least one quote to create PO');
+        return x;
+      }
+
+      const selected = x.items.map((li) => {
+        const best = (li.quotes || []).reduce((b: Quote | null, q) => {
+          if (!b) return q;
+          return q.quotedRate < b.quotedRate ? q : b;
+        }, null as Quote | null)!;
+        return { lineItemId: li.id, quoteId: best.id, vendorName: best.vendorName, quotedRate: best.quotedRate };
+      });
+
+      const total = x.items.reduce((s, li) => {
+        const sel = selected.find((si) => si.lineItemId === li.id)!;
+        return s + (sel.quotedRate * netPrQty(li));
+      }, 0);
+
+      return {
+        ...x,
+        status: 'po',
+        purchaseOrder: { id: genId(), date: today(), totalValue: total, items: selected },
+      };
+    }));
+    toast.success('Purchase Order created');
   };
 
   const raisePR = (id: string) => {
@@ -456,32 +556,170 @@ const PurchaseRequisition = () => {
         </div>
       </div>
 
-      <div className="space-y-3">
-        {indents.map((it) => {
-          const s = signaturesPresent(it);
-          return (
-            <div key={it.id} className="bg-white border rounded p-4 flex items-center justify-between">
-              <div>
-                <div className="font-semibold">{it.prNo} — {it.project}</div>
-                <div className="text-xs text-gray-500">Indented by {it.indentedBy} · Forwarded by {it.forwardedBy} · Director {it.directorsApproval}</div>
-                <div className="mt-2 text-xs flex gap-3">
-                  <div className={`px-2 py-1 rounded ${s.indented ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-400'}`}>Indented {s.indented ? '✓' : '✕'}</div>
-                  <div className={`px-2 py-1 rounded ${s.forwarded ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-400'}`}>Forwarded {s.forwarded ? '✓' : '✕'}</div>
-                  <div className={`px-2 py-1 rounded ${s.director ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-400'}`}>Director {s.director ? '✓' : '✕'}</div>
+      <div>
+        <div className="flex items-center gap-3 mb-4">
+          <button
+            onClick={() => setActiveTab('new')}
+            className={`px-3 py-2 rounded-t-md ${activeTab === 'new' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
+          >
+            New Indent ({indents.filter((it) => it.status === 'draft').length})
+          </button>
+          <button
+            onClick={() => setActiveTab('process')}
+            className={`px-3 py-2 rounded-t-md ${activeTab === 'process' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
+          >
+            Process ({indents.filter((it) => it.status !== 'po' && hasAnyQuotes(it)).length})
+          </button>
+          <button
+            onClick={() => setActiveTab('po')}
+            className={`px-3 py-2 rounded-t-md ${activeTab === 'po' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
+          >
+            Purchase Order ({indents.filter((it) => it.status === 'po').length})
+          </button>
+        </div>
+
+        <div className="bg-white rounded border">
+          <div className="divide-y divide-gray-100">
+            {activeTab === 'new' && indents.filter((it) => it.status === 'draft').map((it) => {
+              const s = signaturesPresent(it);
+              return (
+                <div key={it.id}>
+                  <div className="flex items-center justify-between py-3 px-4">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{it.prNo} — {it.project}</div>
+                      <div className="text-xs text-gray-500 truncate">Indented by {it.indentedBy} · Forwarded by {it.forwardedBy}</div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      <div className="text-xs text-gray-500 mr-4">
+                        <span className={`${s.indented ? 'text-green-700' : 'text-gray-400'}`}>Indented</span>
+                        <span className="mx-1">·</span>
+                        <span className={`${s.forwarded ? 'text-green-700' : 'text-gray-400'}`}>Forwarded</span>
+                      </div>
+                      <Button variant="outline" onClick={() => setPreviewIndent(it)} className="gap-2">
+                        <FilePlus className="w-4 h-4" /> Preview
+                      </Button>
+                      <Button variant="outline" onClick={() => openAddQuoteForm(it)} className="gap-2">
+                        <PlusCircle className="w-4 h-4" /> Add Quotation
+                      </Button>
+                    </div>
+                  </div>
+
+                  {openAddQuote === it.id ? (
+                    <div className="px-4 pb-3 bg-gray-50">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+                        <div>
+                          <label className="text-xs text-gray-600">Vendor</label>
+                          <select value={addQuoteForms[it.id]?.vendor || vendors[0]} onChange={(e) => handleVendorChange(it.id, e.target.value)} className="w-full border rounded px-2 py-1">
+                            {vendors.map((v) => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">Quotation PDF</label>
+                          <input type="file" accept="application/pdf" onChange={(e) => handleFileChange(it.id, e.target.files?.[0])} />
+                        </div>
+                        <div className="flex items-end">
+                          <div className="ml-auto">
+                            <Button onClick={() => submitAddQuote(it.id)} className="bg-blue-600 text-white mr-2">Save</Button>
+                            <Button variant="outline" onClick={() => setOpenAddQuote(null)}>Cancel</Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-sm font-medium mb-1">Quoted prices (per line)</div>
+                      <div className="space-y-2">
+                        {it.items.map((li) => (
+                          <div key={li.id} className="flex items-center gap-2">
+                            <div className="min-w-0 text-xs truncate">{li.partName}</div>
+                            <div className="w-32">
+                              <input type="number" value={addQuoteForms[it.id]?.prices[li.id] ?? String(li.ratePerItem || 0)} onChange={(e) => handlePriceChange(it.id, li.id, e.target.value)} className="w-full border rounded px-2 py-1 text-sm" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            {activeTab === 'process' && indents.filter((it) => it.status !== 'po' && hasAnyQuotes(it)).map((it) => {
+              return (
+                <div key={it.id}>
+                  <div className="flex items-center justify-between py-3 px-4">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{it.prNo} — {it.project}</div>
+                      <div className="text-xs text-gray-500 truncate">Quoted items: {it.items.reduce((c, li) => c + ((li.quotes?.length) || 0), 0)}</div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      <Button variant="outline" onClick={() => setPreviewIndent(it)} className="gap-2">
+                        <FilePlus className="w-4 h-4" /> Preview
+                      </Button>
+                      <Button variant="outline" onClick={() => openAddQuoteForm(it)} className="gap-2">
+                        <PlusCircle className="w-4 h-4" /> Add Quotation
+                      </Button>
+                      <Button
+                        onClick={() => createPO(it.id)}
+                        className={`gap-2 ${it.items.some(li => !(li.quotes && li.quotes.length > 0)) ? 'bg-gray-200 text-gray-600' : 'bg-blue-600 text-white'}`}
+                        disabled={it.items.some(li => !(li.quotes && li.quotes.length > 0))}
+                      >
+                        <Plus className="w-4 h-4" /> Create PO
+                      </Button>
+                    </div>
+                  </div>
+
+                  {openAddQuote === it.id ? (
+                    <div className="px-4 pb-3 bg-gray-50">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+                        <div>
+                          <label className="text-xs text-gray-600">Vendor</label>
+                          <select value={addQuoteForms[it.id]?.vendor || vendors[0]} onChange={(e) => handleVendorChange(it.id, e.target.value)} className="w-full border rounded px-2 py-1">
+                            {vendors.map((v) => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">Quotation PDF</label>
+                          <input type="file" accept="application/pdf" onChange={(e) => handleFileChange(it.id, e.target.files?.[0])} />
+                        </div>
+                        <div className="flex items-end">
+                          <div className="ml-auto">
+                            <Button onClick={() => submitAddQuote(it.id)} className="bg-blue-600 text-white mr-2">Save</Button>
+                            <Button variant="outline" onClick={() => setOpenAddQuote(null)}>Cancel</Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-sm font-medium mb-1">Quoted prices (per line)</div>
+                      <div className="space-y-2">
+                        {it.items.map((li) => (
+                          <div key={li.id} className="flex items-center gap-2">
+                            <div className="min-w-0 text-xs truncate">{li.partName}</div>
+                            <div className="w-32">
+                              <input type="number" value={addQuoteForms[it.id]?.prices[li.id] ?? String(li.ratePerItem || 0)} onChange={(e) => handlePriceChange(it.id, li.id, e.target.value)} className="w-full border rounded px-2 py-1 text-sm" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            {activeTab === 'po' && indents.filter((it) => it.status === 'po').map((it) => (
+              <div key={it.id} className="flex items-center justify-between py-3 px-4">
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{it.prNo} — {it.project}</div>
+                  <div className="text-xs text-gray-500 truncate">PO Date: {it.purchaseOrder?.date} · Total: {it.purchaseOrder ? formatInr(it.purchaseOrder.totalValue) : '—'}</div>
+                </div>
+                <div className="flex items-center gap-2 ml-4">
+                  <Button variant="outline" onClick={() => setPreviewIndent(it)} className="gap-2">
+                    <FilePlus className="w-4 h-4" /> View PO
+                  </Button>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => setPreviewIndent(it)} className="gap-2">
-                  <FilePlus className="w-4 h-4" /> Preview
-                </Button>
-                <Button onClick={() => canRaise(it) ? raisePR(it.id) : toast.error('All signatures required to raise PR')} className={`gap-2 ${it.status === 'raised' ? 'bg-gray-200 text-gray-700' : 'bg-green-600 text-white'}`} disabled={it.status === 'raised'}>
-                  <CheckCircle className="w-4 h-4" /> {it.status === 'raised' ? 'Raised' : 'Raise PR'}
-                </Button>
-              </div>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        </div>
       </div>
 
       <Dialog open={open} onOpenChange={(v) => { if (!v) setOpen(false); }}>
