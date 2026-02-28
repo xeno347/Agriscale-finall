@@ -36,6 +36,7 @@ import AdminOpsIndent from "./pages/AdminOpsIndent";
 import FinanceAdminOpsIndent from "./pages/FinanceAdminOpsIndent";
 import PurchaseRequisition from "./pages/PurchaseRequisition";
 import VendorDirectory from "./pages/VendorDirectory";
+import QuotationComparative from "./pages/QuotationComparative";
 
 const queryClient = new QueryClient();
 
@@ -106,6 +107,15 @@ const App = () => (
           {/* Tools (not in sidebar nav) */}
           <Route path="/tools/khasra_records" element={<KhasraFinder />} />
           <Route path="/khasra-finder" element={<Navigate to="/tools/khasra_records" replace />} />
+
+          <Route
+            path="/purchase-requisition/:indentId/quotation"
+            element={
+              <AppLayout>
+                <QuotationComparative />
+              </AppLayout>
+            }
+          />
 
           <Route path="*" element={<NotFound />} />
         </Routes>

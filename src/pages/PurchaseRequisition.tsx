@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, CheckCircle, FilePlus, PlusCircle, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -364,7 +365,29 @@ const PRPreview = ({
   );
 };
 
+const COMPARATIVE_KEY = 'farmconnect.prComparative.v1';
+
+const readComparatives = (): Record<string, any> => {
+  try {
+    const raw = window.localStorage.getItem(COMPARATIVE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeComparatives = (all: Record<string, any>) => {
+  try {
+    window.localStorage.setItem(COMPARATIVE_KEY, JSON.stringify(all));
+  } catch {
+    // ignore
+  }
+};
+
 const PurchaseRequisition = () => {
+  const navigate = useNavigate();
   const [indents, setIndents] = useState<Indent[]>(sample);
   const [open, setOpen] = useState(false);
   const [diary, setDiary] = useState<SignatureDiary>({});
@@ -542,6 +565,31 @@ const PurchaseRequisition = () => {
     }));
   };
 
+  const openQuotationPage = (indent: Indent) => {
+    const all = readComparatives();
+    if (!all[indent.id]) {
+      all[indent.id] = {
+        indentId: indent.id,
+        title: `Vendor Comparative Statement for ${indent.project}`,
+        gstPercent: 18,
+        vendors: [
+          { id: genId(), name: 'VENDOR 1' },
+          { id: genId(), name: 'VENDOR 2' },
+        ],
+        items: indent.items.map((li) => ({
+          id: li.id,
+          srNo: li.srNo,
+          partName: li.partName,
+          uom: li.uom,
+          qty: netPrQty(li),
+        })),
+        quotes: [],
+      };
+      writeComparatives(all);
+    }
+    navigate(`/purchase-requisition/${indent.id}/quotation`);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="flex items-center justify-between mb-4">
@@ -598,7 +646,7 @@ const PurchaseRequisition = () => {
                       <Button variant="outline" onClick={() => setPreviewIndent(it)} className="gap-2">
                         <FilePlus className="w-4 h-4" /> Preview
                       </Button>
-                      <Button variant="outline" onClick={() => openAddQuoteForm(it)} className="gap-2">
+                      <Button variant="outline" onClick={() => openQuotationPage(it)} className="gap-2">
                         <PlusCircle className="w-4 h-4" /> Add Quotation
                       </Button>
                     </div>
@@ -654,7 +702,7 @@ const PurchaseRequisition = () => {
                       <Button variant="outline" onClick={() => setPreviewIndent(it)} className="gap-2">
                         <FilePlus className="w-4 h-4" /> Preview
                       </Button>
-                      <Button variant="outline" onClick={() => openAddQuoteForm(it)} className="gap-2">
+                      <Button variant="outline" onClick={() => openQuotationPage(it)} className="gap-2">
                         <PlusCircle className="w-4 h-4" /> Add Quotation
                       </Button>
                       <Button
