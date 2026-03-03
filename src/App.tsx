@@ -37,6 +37,9 @@ import FinanceAdminOpsIndent from "./pages/FinanceAdminOpsIndent";
 import PurchaseRequisition from "./pages/PurchaseRequisition";
 import VendorDirectory from "./pages/VendorDirectory";
 import QuotationComparative from "./pages/QuotationComparative";
+import HOInbox from "@/pages/HOInbox";
+import HO from "@/pages/HO";
+import PurchaseFlow from "@/pages/PurchaseFlow";
 
 const queryClient = new QueryClient();
 
@@ -113,6 +116,32 @@ const App = () => (
             element={
               <AppLayout>
                 <QuotationComparative />
+              </AppLayout>
+            }
+          />
+
+          {/* HO Routes */}
+          <Route
+            path="/ho"
+            element={
+              <AppLayout>
+                <HOInbox />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/ho/:indentId"
+            element={
+              <AppLayout>
+                <HO />
+              </AppLayout>
+            }
+          />
+          <Route
+            path="/purchase-flow"
+            element={
+              <AppLayout>
+                <PurchaseFlow />
               </AppLayout>
             }
           />

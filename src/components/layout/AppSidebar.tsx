@@ -25,7 +25,7 @@ import {
   Activity,
   CreditCard,
 } from "lucide-react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 /* ---------------- NAV ITEM COMPONENT ---------------- */
@@ -45,55 +45,57 @@ const NavItem = ({
   notificationStatus = "none",
   isSidebarCollapsed,
 }: NavItemProps) => {
-  const location = useLocation();
-  const isActive =
-    location.pathname === to ||
-    location.pathname.startsWith(to + "/");
-
   return (
     <NavLink
       to={to}
       title={isSidebarCollapsed ? label : undefined}
-      className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative text-sm",
-        isActive
-          ? "bg-gray-100 text-[#1e293b] font-semibold"
-          : "text-gray-500 hover:bg-gray-50 hover:text-[#1e293b] font-medium",
-        isSidebarCollapsed && "justify-center px-2"
-      )}
-    >
-      <Icon
-        className={cn(
-          "shrink-0 transition-transform group-hover:scale-105",
-          isSidebarCollapsed ? "w-6 h-6" : "w-5 h-5",
+      className={({ isActive }) =>
+        cn(
+          "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative text-sm",
           isActive
-            ? "text-[#1e293b]"
-            : "text-gray-400 group-hover:text-[#1e293b]"
-        )}
-      />
+            ? "bg-gray-100 text-[#1e293b] font-semibold"
+            : "text-gray-500 hover:bg-gray-50 hover:text-[#1e293b] font-medium",
+          isSidebarCollapsed && "justify-center px-2"
+        )
+      }
+      end
+    >
+      {({ isActive }) => (
+        <>
+          <Icon
+            className={cn(
+              "shrink-0 transition-transform group-hover:scale-105",
+              isSidebarCollapsed ? "w-6 h-6" : "w-5 h-5",
+              isActive
+                ? "text-[#1e293b]"
+                : "text-gray-400 group-hover:text-[#1e293b]"
+            )}
+          />
 
-      {!isSidebarCollapsed && <span className="truncate">{label}</span>}
+          {!isSidebarCollapsed && <span className="truncate">{label}</span>}
 
-      {/* Updated notification logic to render AlertCircle icon for warnings */}
-      {notificationStatus === "warning" ? (
-        <AlertCircle 
-          className={cn(
-            "absolute text-orange-500 fill-orange-50",
-            isSidebarCollapsed 
-              ? "top-1 right-1 w-3 h-3" 
-              : "right-3 top-1/2 -translate-y-1/2 w-4 h-4"
-          )} 
-        />
-      ) : notificationStatus === "success" ? (
-        <span
-          className={cn(
-            "absolute w-2 h-2 rounded-full bg-green-500 ring-1 ring-white",
-            isSidebarCollapsed
-              ? "top-2 right-2"
-              : "right-3 top-1/2 -translate-y-1/2"
-          )}
-        />
-      ) : null}
+          {/* Updated notification logic to render AlertCircle icon for warnings */}
+          {notificationStatus === "warning" ? (
+            <AlertCircle
+              className={cn(
+                "absolute text-orange-500 fill-orange-50",
+                isSidebarCollapsed
+                  ? "top-1 right-1 w-3 h-3"
+                  : "right-3 top-1/2 -translate-y-1/2 w-4 h-4"
+              )}
+            />
+          ) : notificationStatus === "success" ? (
+            <span
+              className={cn(
+                "absolute w-2 h-2 rounded-full bg-green-500 ring-1 ring-white",
+                isSidebarCollapsed
+                  ? "top-2 right-2"
+                  : "right-3 top-1/2 -translate-y-1/2"
+              )}
+            />
+          ) : null}
+        </>
+      )}
     </NavLink>
   );
 };
@@ -267,6 +269,8 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavItem to="/finance-admin-ops-indents" icon={FileText} label="Finance Admin Ops" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/purchase-requisition" icon={FileText} label="Purchase Requisition" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/vendor-directory" icon={FileText} label="Vendor Directory" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/ho" icon={FileText} label="HO Module" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/purchase-flow" icon={FileText} label="Purchase Flow" isSidebarCollapsed={isCollapsed} />
           {/* Added notificationStatus="warning" to Logistics */}
           <NavItem 
             to="/logistics" 
