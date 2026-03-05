@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { getBaseUrl } from '@/lib/config';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from 'sonner';
 
 type QuoteVendor = {
@@ -34,6 +44,10 @@ type Comparative = {
   vendors: QuoteVendor[];
   items: PrItem[];
   quotes: VendorQuote[];
+  isDraft?: boolean;
+  technicalRecommendationVendorId?: string;
+  lastSavedAt?: string; // ISO or backend timestamp string
+  lastSavedSource?: 'server' | 'local';
   // summary rows
   paymentTerms?: Record<string, string>; // vendorId -> text
   deliveryTimeline?: Record<string, string>;
@@ -84,6 +98,30 @@ const inr = (n: number) => {
   }
 };
 
+const getApiBaseUrl = () => String(getBaseUrl() ?? '').replace(/\/$/, '');
+
+const safeTrim = (v: unknown) => String(v ?? '').trim();
+
+const toIsoNow = () => new Date().toISOString();
+
+const formatDateTime = (raw?: string) => {
+  const v = String(raw ?? '').trim();
+  if (!v) return '';
+  const d = new Date(v);
+  if (!Number.isFinite(d.getTime())) return v;
+  try {
+    return new Intl.DateTimeFormat('en-IN', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d);
+  } catch {
+    return d.toLocaleString();
+  }
+};
+
 type DirectoryVendor = {
   id: string;
   name: string;
@@ -118,6 +156,118 @@ const readVendorDirectory = (): DirectoryVendor[] => {
   } catch {
     return DUMMY_DIRECTORY_VENDORS;
   }
+};
+
+type GetVendorsApiVendor = {
+  vendor_id?: unknown;
+  vendor_name?: unknown;
+  vendor_address?: unknown;
+  vendor_contact?: unknown;
+};
+
+type GetComparativeDraftItemRow = {
+  item_name?: unknown;
+  UoM?: unknown;
+  gst_percentage?: unknown;
+  quantity?: unknown;
+};
+
+type GetComparativeDraftQuoter = {
+  vendor_id?: unknown;
+  item_costing?: unknown;
+  freight_charges?: unknown;
+  other_charges?: unknown;
+  subtotal?: unknown;
+  total_amount?: unknown;
+  payment_terms?: unknown;
+  delivery_time?: unknown;
+  warrenty_garantee?: unknown;
+};
+
+type GetComparativeDraftItem = {
+  created_at?: unknown;
+  pr_number?: unknown;
+  item_row?: unknown;
+  quoters?: unknown;
+  comparision_id?: unknown;
+  status?: unknown;
+};
+
+type GetComparativeDraftResponse = {
+  items?: unknown;
+};
+
+const fetchComparativeDraft = async (prNumber: string): Promise<GetComparativeDraftItem | null> => {
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) throw new Error('API base URL is not set');
+
+  const url = `${baseUrl}/purchase_flow/get_comparative_statement_draft`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ pr_number: prNumber }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(errText || `HTTP ${res.status}`);
+  }
+
+  const data: GetComparativeDraftResponse | null = await res.json().catch(() => null);
+  const items = Array.isArray((data as any)?.items) ? ((data as any).items as GetComparativeDraftItem[]) : [];
+  return items[0] ?? null;
+};
+
+const stableItemId = (itemName: string, idx: number) => {
+  const base = safeTrim(itemName) || 'item';
+  const safe = base.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  return `it-${idx + 1}-${safe || 'x'}`;
+};
+
+const fetchVendorsForDropdown = async (): Promise<DirectoryVendor[]> => {
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) throw new Error('API base URL is not set');
+
+  const url = `${baseUrl}/purchase_flow/get_vendors`;
+
+  const doFetch = (method: 'GET' | 'POST') =>
+    fetch(url, {
+      method,
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+  let res = await doFetch('GET');
+  if (res.status === 405) res = await doFetch('POST');
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(errText || `HTTP ${res.status}`);
+  }
+
+  const data: any = await res.json().catch(() => null);
+  const list: GetVendorsApiVendor[] = Array.isArray(data?.vendors) ? data.vendors : [];
+
+  const mapped: DirectoryVendor[] = list
+    .map((v) => {
+      const id = String(v?.vendor_id ?? '').trim();
+      const name = String(v?.vendor_name ?? '').trim();
+      const phone = String(v?.vendor_contact ?? '').trim();
+      const address = String(v?.vendor_address ?? '').trim();
+      return {
+        id,
+        name,
+        phone: phone ? phone : undefined,
+        address: address ? address : undefined,
+      };
+    })
+    .filter((v) => v.id && v.name);
+
+  return mapped;
 };
 
 function AutoGrowTextarea({
@@ -159,8 +309,37 @@ export default function QuotationComparative() {
   const { indentId } = useParams();
   const navigate = useNavigate();
   const [model, setModel] = useState<Comparative | null>(null);
+  const [openRecommendation, setOpenRecommendation] = useState(false);
+  const [recommendationVendorId, setRecommendationVendorId] = useState<string>('');
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [savingFinal, setSavingFinal] = useState(false);
 
-  const directoryVendors = useMemo(() => readVendorDirectory(), []);
+  const normalizedIndentId = useMemo(() => {
+    if (!indentId) return '';
+    try {
+      return decodeURIComponent(indentId);
+    } catch {
+      return indentId;
+    }
+  }, [indentId]);
+
+  const [directoryVendors, setDirectoryVendors] = useState<DirectoryVendor[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const list = await fetchVendorsForDropdown();
+        if (list.length) {
+          setDirectoryVendors(list);
+          return;
+        }
+        setDirectoryVendors(readVendorDirectory());
+      } catch {
+        setDirectoryVendors(readVendorDirectory());
+      }
+    };
+    void load();
+  }, []);
 
   const updateVendorFromDirectory = (vendorId: string, directoryVendorId: string) => {
     const selected = directoryVendors.find((x) => x.id === directoryVendorId);
@@ -185,34 +364,177 @@ export default function QuotationComparative() {
   };
 
   useEffect(() => {
-    if (!indentId) return;
-    const all = readAll();
-    if (all[indentId]) {
-      setModel(all[indentId]);
-      return;
-    }
+    if (!normalizedIndentId) return;
+    let cancelled = false;
 
-    const empty: Comparative = {
-      indentId,
-      title: 'Price Comparative Statement',
-      subTitle: 'for office Porta Cabins at Chhattisgarh',
-      vendors: [
-        { id: genId(), name: 'CHHATTISGARH PORTABLE INFRATECH', location: '(Bhilai, Chhattisgarh -', phone: '9165271111)' },
-        { id: genId(), name: 'MAHAKAL PORTABLE CABIN & FABRICATION', location: '(Khasra, Durg, Chhattisgarh -', phone: '9702430797)' },
-      ],
-      items: [],
-      quotes: [],
-      // keep legacy field for older saves, but we don't use a default anymore
-      gstPercent: undefined,
-      freightCharges: {},
-      otherCharges: {},
-      baseAmountA: {},
-      baseAmountB: {},
+    const load = async () => {
+      // 1) Try server draft first (source of truth for last saved draft)
+      try {
+        const draft = await fetchComparativeDraft(normalizedIndentId);
+        if (cancelled) return;
+        if (draft) {
+          const createdAt = safeTrim((draft as any)?.created_at);
+          const itemRows: GetComparativeDraftItemRow[] = Array.isArray((draft as any)?.item_row)
+            ? ((draft as any).item_row as GetComparativeDraftItemRow[])
+            : [];
+          const quoters: GetComparativeDraftQuoter[] = Array.isArray((draft as any)?.quoters)
+            ? ((draft as any).quoters as GetComparativeDraftQuoter[])
+            : [];
+
+          const items: PrItem[] = itemRows.map((r, idx) => {
+            const itemName = safeTrim((r as any)?.item_name);
+            const uom = safeTrim((r as any)?.UoM);
+            const qty = Number((r as any)?.quantity ?? 0) || 0;
+            const gst = Number((r as any)?.gst_percentage ?? 0);
+            return {
+              id: stableItemId(itemName, idx),
+              srNo: idx + 1,
+              partName: itemName,
+              uom,
+              qty,
+              gstPercent: Number.isFinite(gst) ? gst : 0,
+            };
+          });
+
+          const vendors: QuoteVendor[] = quoters
+            .map((q) => safeTrim((q as any)?.vendor_id))
+            .filter(Boolean)
+            .map((vendorId) => ({
+              id: vendorId,
+              directoryVendorId: vendorId,
+              name: vendorId,
+            }));
+
+          const paymentTerms: Record<string, string> = {};
+          const deliveryTimeline: Record<string, string> = {};
+          const warranty: Record<string, string> = {};
+          const freightCharges: Record<string, number> = {};
+          const otherCharges: Record<string, number> = {};
+
+          const quotes: VendorQuote[] = quoters
+            .map((q) => ({ q, vendorId: safeTrim((q as any)?.vendor_id) }))
+            .filter((x) => Boolean(x.vendorId))
+            .map(({ q, vendorId }) => {
+              const unitRateByItemId: Record<string, number> = {};
+
+            const costing = (q as any)?.item_costing;
+            const costingObj = costing && typeof costing === 'object' ? costing : {};
+
+            for (const it of items) {
+              const name = safeTrim(it.partName);
+              const row = (costingObj as any)?.[name];
+              const perUnit = Number((row as any)?.per_unit_costing ?? 0);
+              unitRateByItemId[it.id] = Number.isFinite(perUnit) ? perUnit : 0;
+            }
+
+              freightCharges[vendorId] = Number((q as any)?.freight_charges ?? 0) || 0;
+              otherCharges[vendorId] = Number((q as any)?.other_charges ?? 0) || 0;
+
+              const pt = safeTrim((q as any)?.payment_terms);
+              const dt = safeTrim((q as any)?.delivery_time);
+              const wg = safeTrim((q as any)?.warrenty_garantee);
+              if (pt) paymentTerms[vendorId] = pt;
+              if (dt) deliveryTimeline[vendorId] = dt;
+              if (wg) warranty[vendorId] = wg;
+
+              return {
+                vendorId,
+                unitRateByItemId,
+              };
+            });
+
+          const next: Comparative = {
+            indentId: normalizedIndentId,
+            title: 'Price Comparative Statement',
+            subTitle: 'for office Porta Cabins at Chhattisgarh',
+            vendors,
+            items,
+            quotes,
+            gstPercent: undefined,
+            freightCharges,
+            otherCharges,
+            baseAmountA: {},
+            baseAmountB: {},
+            paymentTerms,
+            deliveryTimeline,
+            warranty,
+            lastSavedAt: createdAt || undefined,
+            lastSavedSource: createdAt ? 'server' : undefined,
+          };
+          setModel(next);
+          return;
+        }
+      } catch {
+        // ignore - we will fallback to local/empty
+      }
+
+      // 2) Fallback to local draft (older behavior)
+      const all = readAll();
+      if (cancelled) return;
+      if (all[normalizedIndentId]) {
+        setModel(all[normalizedIndentId]);
+        return;
+      }
+
+      // 3) Finally, start fresh
+      const empty: Comparative = {
+        indentId: normalizedIndentId,
+        title: 'Price Comparative Statement',
+        subTitle: 'for office Porta Cabins at Chhattisgarh',
+        vendors: [
+          { id: genId(), name: 'CHHATTISGARH PORTABLE INFRATECH', location: '(Bhilai, Chhattisgarh -', phone: '9165271111)' },
+          { id: genId(), name: 'MAHAKAL PORTABLE CABIN & FABRICATION', location: '(Khasra, Durg, Chhattisgarh -', phone: '9702430797)' },
+        ],
+        items: [],
+        quotes: [],
+        gstPercent: undefined,
+        freightCharges: {},
+        otherCharges: {},
+        baseAmountA: {},
+        baseAmountB: {},
+        lastSavedAt: undefined,
+        lastSavedSource: undefined,
+      };
+      setModel(empty);
     };
-    setModel(empty);
-  }, [indentId]);
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedIndentId]);
+
+  // After directory vendors list loads, hydrate names/phone/address for vendors coming from backend draft.
+  useEffect(() => {
+    if (!directoryVendors.length) return;
+    setModel((p) => {
+      if (!p) return p;
+      let changed = false;
+      const nextVendors = p.vendors.map((v) => {
+        if (!v.directoryVendorId) return v;
+        const dv = directoryVendors.find((x) => x.id === v.directoryVendorId);
+        if (!dv) return v;
+
+        const next = {
+          ...v,
+          name: dv.name || v.name,
+          phone: dv.phone || v.phone,
+          location: dv.address || v.location,
+        };
+        if (next.name !== v.name || next.phone !== v.phone || next.location !== v.location) changed = true;
+        return next;
+      });
+      return changed ? { ...p, vendors: nextVendors } : p;
+    });
+  }, [directoryVendors]);
 
   const vendorOrder = model?.vendors ?? [];
+
+  const vendorSelectedById = useMemo(() => {
+    const out: Record<string, boolean> = {};
+    for (const v of vendorOrder) out[v.id] = Boolean(v.directoryVendorId);
+    return out;
+  }, [vendorOrder]);
 
   const amountsByVendor = useMemo(() => {
     if (!model) return {} as Record<string, number[]>;
@@ -290,6 +612,37 @@ export default function QuotationComparative() {
     }
     return out;
   }, [vendorOrder, taxableSubtotalByVendor, gstByVendor]);
+
+  const vendorLTagByVendorId = useMemo(() => {
+    const totals = vendorOrder
+      .map((v) => ({ vendorId: v.id, total: Number(grandTotalByVendor[v.id] ?? 0) || 0 }))
+      .filter((x) => x.vendorId);
+
+    // Only rank vendors once they have a non-zero total.
+    const rankable = totals.filter((x) => x.total > 0);
+    if (rankable.length === 0) return {} as Record<string, string>;
+
+    rankable.sort((a, b) => a.total - b.total);
+
+    const out: Record<string, string> = {};
+    rankable.forEach((x, idx) => {
+      out[x.vendorId] = `L${idx + 1}`;
+    });
+    return out;
+  }, [vendorOrder, grandTotalByVendor]);
+
+  const eligibleRecommendationVendors = useMemo(() => {
+    return vendorOrder
+      .filter((v) => Boolean(v.directoryVendorId))
+      .map((v) => ({
+        vendorId: v.id,
+        vendorDirectoryId: String(v.directoryVendorId || '').trim(),
+        name: v.name,
+        total: Number(grandTotalByVendor[v.id] ?? 0) || 0,
+        status: String(vendorLTagByVendorId[v.id] || '').trim(),
+      }))
+      .filter((x) => x.vendorId);
+  }, [vendorOrder, grandTotalByVendor, vendorLTagByVendorId]);
 
   const setVendorRate = (vendorId: string, itemId: string, val: string) => {
     if (!model) return;
@@ -383,12 +736,268 @@ export default function QuotationComparative() {
     });
   };
 
-  const save = () => {
-    if (!indentId || !model) return;
+  const persist = (next: Comparative) => {
+    if (!normalizedIndentId) return;
     const all = readAll();
-    all[indentId] = model;
+    // Vendor Status (L1/L2/...) is derived from totals, but persist it as well
+    // so reloads/export-like flows keep the same snapshot.
+    const vendorStatus: Record<string, string> = {};
+    for (const v of vendorOrder) vendorStatus[v.id] = vendorLTagByVendorId[v.id] || '';
+    all[normalizedIndentId] = { ...next, vendorStatus };
     writeAll(all);
-    toast.success('Quotation saved');
+  };
+
+  type SaveComparativeDraftItemRow = {
+    item_name: string;
+    quantity: number;
+    UoM: string;
+    gst_percentage: number;
+  };
+
+  type SaveComparativeDraftQuoter = {
+    vendor_id: string;
+    item_costing: Record<
+      string,
+      {
+        per_unit_costing: number;
+        quanity: number;
+        final_costing: number;
+      }
+    >;
+    freight_charges?: number | null;
+    other_charges?: number | null;
+    subtotal: number;
+    total_amount: number;
+    payment_terms?: string | null;
+    delivery_time?: string | null;
+    warrenty_garantee?: string | null;
+  };
+
+  type SaveComparativeDraftPayload = {
+    pr_number: string;
+    item_row: SaveComparativeDraftItemRow[];
+    quoters: SaveComparativeDraftQuoter[];
+  };
+
+  type SaveComparativeFinalPayload = SaveComparativeDraftPayload & {
+    technical_recommendation: string;
+  };
+
+  const buildSaveDraftPayload = (m: Comparative): SaveComparativeDraftPayload => {
+    const prNumber = String(normalizedIndentId || m.indentId || '').trim();
+
+    const item_row: SaveComparativeDraftItemRow[] = (m.items ?? []).map((it) => {
+      const gst = Number.isFinite(Number(it.gstPercent)) ? Number(it.gstPercent) : 0;
+      return {
+        item_name: String(it.partName ?? '').trim(),
+        quantity: Number(it.qty ?? 0) || 0,
+        UoM: String(it.uom ?? '').trim(),
+        gst_percentage: Number.isFinite(gst) ? gst : 0,
+      };
+    });
+
+    const quoters: SaveComparativeDraftQuoter[] = (m.vendors ?? [])
+      .map((v) => {
+        const vendor_id = String(v.directoryVendorId ?? '').trim();
+        if (!vendor_id) return null;
+
+        const q = (m.quotes ?? []).find((x) => x.vendorId === v.id);
+        const item_costing: SaveComparativeDraftQuoter['item_costing'] = {};
+        for (const it of m.items ?? []) {
+          const productName = String(it.partName ?? '').trim();
+          if (!productName) continue;
+          const unit = Number(q?.unitRateByItemId?.[it.id] ?? 0) || 0;
+          const quantity = Number(it.qty ?? 0) || 0;
+          const final = unit * quantity;
+          item_costing[productName] = {
+            per_unit_costing: unit,
+            quanity: quantity,
+            final_costing: final,
+          };
+        }
+
+        const freight = Number(freightByVendor[v.id] ?? 0) || 0;
+        const other = Number(otherByVendor[v.id] ?? 0) || 0;
+        const subtotal = Number(taxableSubtotalByVendor[v.id] ?? 0) || 0;
+        const total_amount = Number(grandTotalByVendor[v.id] ?? 0) || 0;
+
+        const payment_terms = String((m.paymentTerms as any)?.[v.id] ?? '').trim();
+        const delivery_time = String((m.deliveryTimeline as any)?.[v.id] ?? '').trim();
+        const warrenty_garantee = String((m.warranty as any)?.[v.id] ?? '').trim();
+
+        return {
+          vendor_id,
+          item_costing,
+          freight_charges: freight,
+          other_charges: other,
+          subtotal,
+          total_amount,
+          payment_terms: payment_terms ? payment_terms : null,
+          delivery_time: delivery_time ? delivery_time : null,
+          warrenty_garantee: warrenty_garantee ? warrenty_garantee : null,
+        } satisfies SaveComparativeDraftQuoter;
+      })
+      .filter(Boolean) as SaveComparativeDraftQuoter[];
+
+    return {
+      pr_number: prNumber,
+      item_row,
+      quoters,
+    };
+  };
+
+  const saveDraftToApi = async (payload: SaveComparativeDraftPayload) => {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) throw new Error('API base URL is not set');
+    const url = `${baseUrl}/purchase_flow/save_comparative_statement_draft`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(errText || `HTTP ${res.status}`);
+    }
+
+    return res.json().catch(() => null);
+  };
+
+  const saveFinalToApi = async (payload: SaveComparativeFinalPayload) => {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) throw new Error('API base URL is not set');
+    const url = `${baseUrl}/purchase_flow/save_comparative_statement`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(errText || `HTTP ${res.status}`);
+    }
+
+    return res.json().catch(() => null);
+  };
+
+  const saveDraft = async () => {
+    if (!model) return;
+    if (savingDraft) return;
+
+    if ((model.items ?? []).length === 0) {
+      toast.error('Add at least 1 item before saving draft');
+      return;
+    }
+
+    // Always persist locally first so the user never loses progress.
+    const localSnapshot: Comparative = { ...model, isDraft: true, lastSavedAt: toIsoNow(), lastSavedSource: 'local' };
+    persist(localSnapshot);
+    setModel(localSnapshot);
+
+    setSavingDraft(true);
+    try {
+      const payload = buildSaveDraftPayload(localSnapshot);
+      const apiRes: any = await saveDraftToApi(payload);
+
+      const serverSavedAt = safeTrim(apiRes?.created_at || apiRes?.updated_at || apiRes?.saved_at);
+      setModel((p) => {
+        if (!p) return p;
+        return {
+          ...p,
+          lastSavedAt: serverSavedAt || p.lastSavedAt || toIsoNow(),
+          lastSavedSource: serverSavedAt ? 'server' : p.lastSavedSource || 'local',
+        };
+      });
+      toast.success('Draft saved');
+    } catch (e: any) {
+      const msg = String(e?.message ?? e ?? '').trim();
+      toast.error(`Draft saved locally, but server save failed${msg ? `: ${msg}` : ''}`);
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const askRecommendationAndSave = () => {
+    if (!model) return;
+
+    if ((model.items ?? []).length === 0) {
+      toast.error('No items found to save');
+      return;
+    }
+
+    // model.technicalRecommendationVendorId stores the DIRECTORY vendor_id.
+    // recommendationVendorId state stores the internal column vendorId (QuoteVendor.id).
+    const alreadyChosenDirectoryId = String(model.technicalRecommendationVendorId || '').trim();
+    const alreadyChosenInternalId = alreadyChosenDirectoryId
+      ? vendorOrder.find((v) => String(v.directoryVendorId || '').trim() === alreadyChosenDirectoryId)?.id
+      : '';
+    const firstEligibleInternalId = eligibleRecommendationVendors[0]?.vendorId || '';
+    setRecommendationVendorId(alreadyChosenInternalId || firstEligibleInternalId);
+    setOpenRecommendation(true);
+  };
+
+  const confirmRecommendationAndSave = () => {
+    if (!model) return;
+    if (savingFinal) return;
+
+    const chosenInternalVendorId = String(recommendationVendorId || '').trim();
+    if (!chosenInternalVendorId) {
+      toast.error('Please select a vendor for technical recommendation');
+      return;
+    }
+
+    const chosenDirectoryVendorId = String(
+      model.vendors.find((v) => v.id === chosenInternalVendorId)?.directoryVendorId ||
+        chosenInternalVendorId,
+    ).trim();
+    if (!chosenDirectoryVendorId) {
+      toast.error('Selected vendor is missing Vendor ID');
+      return;
+    }
+
+    const nextModel: Comparative = {
+      ...model,
+      isDraft: false,
+      technicalRecommendationVendorId: chosenDirectoryVendorId,
+      lastSavedAt: toIsoNow(),
+      lastSavedSource: 'local',
+    };
+
+    // Always persist locally first so the user never loses progress.
+    persist(nextModel);
+
+    setSavingFinal(true);
+
+    const base = buildSaveDraftPayload(nextModel);
+    const payload: SaveComparativeFinalPayload = {
+      ...base,
+      technical_recommendation: chosenDirectoryVendorId,
+    };
+
+    void saveFinalToApi(payload)
+      .then(() => {
+        toast.success('Quotation saved');
+        setOpenRecommendation(false);
+        navigate('/purchase-requisition');
+      })
+      .catch((e: any) => {
+        const msg = String(e?.message ?? e ?? '').trim();
+        toast.error(`Saved locally, but server save failed${msg ? `: ${msg}` : ''}`);
+        setOpenRecommendation(false);
+      })
+      .finally(() => {
+        setSavingFinal(false);
+      });
   };
 
   const statusBgClass = (value: string) => {
@@ -432,18 +1041,87 @@ export default function QuotationComparative() {
           </Button>
           <div>
             <div className="text-lg font-bold">Add Quotation</div>
-            <div className="text-xs text-muted-foreground">Indent: {indentId}</div>
+            <div className="text-xs text-muted-foreground">Indent: {normalizedIndentId || indentId}</div>
+            {model.lastSavedAt ? (
+              <div className="text-[11px] text-muted-foreground">
+                Last saved: <span className="text-foreground/80 font-medium">{formatDateTime(model.lastSavedAt)}</span>
+                {model.lastSavedSource ? (
+                  <span className="text-muted-foreground"> ({model.lastSavedSource})</span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="gap-2" onClick={addVendor}>
+          <Button variant="outline" className="gap-2" onClick={addVendor} disabled={savingDraft || savingFinal}>
             <Plus className="w-4 h-4" /> Add Vendor
           </Button>
-          <Button className="gap-2" onClick={save}>
-            <Save className="w-4 h-4" /> Save
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={saveDraft}
+            disabled={savingDraft || savingFinal || (model.items ?? []).length === 0}
+          >
+            {savingDraft ? 'Saving draft…' : 'Save as draft'}
+          </Button>
+          <Button className="gap-2" onClick={askRecommendationAndSave} disabled={savingDraft || savingFinal}>
+            <Save className="w-4 h-4" /> {savingFinal ? 'Saving…' : 'Save'}
           </Button>
         </div>
       </div>
+
+      <Dialog open={openRecommendation} onOpenChange={setOpenRecommendation}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Technical Recommendation</DialogTitle>
+            <DialogDescription>Select one vendor quotation as the recommendation.</DialogDescription>
+          </DialogHeader>
+
+          {eligibleRecommendationVendors.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No vendors available to recommend. Select at least one vendor first.
+            </div>
+          ) : (
+            <RadioGroup value={recommendationVendorId} onValueChange={setRecommendationVendorId}>
+              {eligibleRecommendationVendors.map((v) => (
+                <label
+                  key={v.vendorId}
+                  className="flex items-center gap-3 rounded-md border border-border px-3 py-2"
+                >
+                  <RadioGroupItem value={v.vendorId} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] text-muted-foreground">
+                      Vendor ID: <span className="font-mono text-foreground">{v.vendorDirectoryId || '—'}</span>
+                    </div>
+                    <div className="text-sm font-medium truncate">{v.name || 'Vendor'}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>
+                        Total: <span className="text-foreground">{v.total ? inr(v.total) : '—'}</span>
+                      </span>
+                      <span>
+                        Status:{' '}
+                        <span className="text-foreground font-medium">{v.status || '-'}</span>
+                      </span>
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </RadioGroup>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpenRecommendation(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmRecommendationAndSave}
+              disabled={eligibleRecommendationVendors.length === 0 || !recommendationVendorId || savingFinal}
+            >
+              {savingFinal ? 'Saving…' : 'Confirm & Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Layout table matching provided image */}
       <div className="overflow-auto rounded-xl border border-border bg-card shadow-card">
@@ -455,10 +1133,10 @@ export default function QuotationComparative() {
             <col style={{ width: 80 }} />
             <col style={{ width: 80 }} />
             {vendorOrder.map((v) => (
-              <>
-                <col key={`${v.id}-col-ur`} style={{ width: 140 }} />
-                <col key={`${v.id}-col-amt`} style={{ width: 140 }} />
-              </>
+              <Fragment key={`${v.id}-cols`}>
+                <col style={{ width: 140 }} />
+                <col style={{ width: 140 }} />
+              </Fragment>
             ))}
           </colgroup>
 
@@ -480,13 +1158,14 @@ export default function QuotationComparative() {
                   />
                   <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
                     <span className="text-foreground/80">Indent:</span>
-                    <span className="font-medium text-foreground">{indentId}</span>
+                    <span className="font-medium text-foreground">{normalizedIndentId || indentId}</span>
                   </div>
                 </div>
               </th>
 
               {vendorOrder.map((v) => {
                 const selectedDirVendor = getDirectoryVendorById(v.directoryVendorId);
+                const isSelected = Boolean(v.directoryVendorId);
                 return (
                   <th key={v.id} className="border border-border bg-secondary/40 px-2 py-2" colSpan={2}>
                     <div className="flex items-start gap-2">
@@ -510,9 +1189,15 @@ export default function QuotationComparative() {
                             onChange={(e) => updateVendorFromDirectory(v.id, e.target.value)}
                             className="h-8 w-full rounded-md border border-input bg-background px-2 text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                           >
-                            <option value="" disabled>
-                              Select vendor
-                            </option>
+                            {directoryVendors.length === 0 ? (
+                              <option value="" disabled>
+                                Loading vendors...
+                              </option>
+                            ) : (
+                              <option value="" disabled>
+                                Select vendor
+                              </option>
+                            )}
                             {directoryVendors.map((dv) => (
                               <option key={dv.id} value={dv.id}>
                                 {dv.name}
@@ -536,6 +1221,7 @@ export default function QuotationComparative() {
                             }
                             className="h-7 bg-background text-[11px]"
                             placeholder="Address / location"
+                            disabled={!isSelected}
                           />
                           <Input
                             value={v.phone || ''}
@@ -551,6 +1237,7 @@ export default function QuotationComparative() {
                             }
                             className="h-7 bg-background text-[11px]"
                             placeholder="Phone"
+                            disabled={!isSelected}
                           />
                         </div>
                       </div>
@@ -569,10 +1256,10 @@ export default function QuotationComparative() {
               <th className="border border-border px-2 py-1 w-[80px]">QTY</th>
               <th className="border border-border px-2 py-1 w-[80px]">UOM</th>
               {vendorOrder.map((v) => (
-                <>
-                  <th key={`${v.id}-ur`} className="border border-border bg-info/10 px-2 py-1 w-[140px]">Unit Rate</th>
-                  <th key={`${v.id}-amt`} className="border border-border bg-info/10 px-2 py-1 w-[140px]">Amount</th>
-                </>
+                <Fragment key={`${v.id}-headcols`}>
+                  <th className="border border-border bg-info/10 px-2 py-1 w-[140px]">Unit Rate</th>
+                  <th className="border border-border bg-info/10 px-2 py-1 w-[140px]">Amount</th>
+                </Fragment>
               ))}
             </tr>
           </thead>
@@ -580,21 +1267,24 @@ export default function QuotationComparative() {
           <tbody>
             {model.items.length === 0 ? (
               <tr>
-                <td className="border border-gray-300 px-2 py-4 text-center text-gray-500" colSpan={4 + vendorOrder.length * 2}>
+                <td
+                  className="border border-border px-2 py-6 text-center text-muted-foreground"
+                  colSpan={4 + vendorOrder.length * 2}
+                >
                   No items found for this indent.
                 </td>
               </tr>
             ) : (
               model.items.map((it, idx) => (
                 <tr key={it.id}>
-                  <td className="border border-gray-300 px-2 py-1 text-center">{idx + 1}</td>
-                  <td className="border border-gray-300 px-2 py-1">
+                  <td className="border border-border px-2 py-1 text-center">{idx + 1}</td>
+                  <td className="border border-border px-2 py-1">
                     <div className="flex items-center justify-between gap-2">
                       <span>{it.partName}</span>
-                      <div className="flex items-center gap-1 text-[11px] text-gray-600">
+                      <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
                         <span>GST%</span>
                         <Input
-                          className="h-7 w-[70px] bg-white text-right"
+                          className="h-7 w-[70px] bg-background text-right"
                           value={String(Number.isFinite(it.gstPercent as any) ? it.gstPercent : '')}
                           onChange={(e) => {
                             const raw = e.target.value;
@@ -617,24 +1307,26 @@ export default function QuotationComparative() {
                       </div>
                     </div>
                   </td>
-                  <td className="border border-gray-300 px-2 py-1 text-center">{it.qty}</td>
-                  <td className="border border-gray-300 px-2 py-1 text-center">{it.uom}</td>
+                  <td className="border border-border px-2 py-1 text-center">{it.qty}</td>
+                  <td className="border border-border px-2 py-1 text-center">{it.uom}</td>
                   {vendorOrder.map((v) => {
                     const q = model.quotes.find((x) => x.vendorId === v.id);
                     const unit = q?.unitRateByItemId?.[it.id] ?? 0;
                     const amt = unit * it.qty;
+                    const locked = !vendorSelectedById[v.id];
                     return (
-                      <>
-                        <td className="border border-gray-300 px-2 py-1">
+                      <Fragment key={`${it.id}-${v.id}-cells`}>
+                        <td className="border border-border px-2 py-1">
                           <Input
                             className="h-8"
                             value={String(unit || '')}
                             onChange={(e) => setVendorRate(v.id, it.id, e.target.value)}
                             placeholder="0"
+                            disabled={locked}
                           />
                         </td>
-                        <td className="border border-gray-300 px-2 py-1 text-right">{amt ? inr(amt) : ''}</td>
-                      </>
+                        <td className="border border-border px-2 py-1 text-right">{amt ? inr(amt) : ''}</td>
+                      </Fragment>
                     );
                   })}
                 </tr>
@@ -650,12 +1342,12 @@ export default function QuotationComparative() {
                     Base Amount
                   </td>
                   {vendorOrder.map((v) => (
-                    <>
-                      <td key={`${v.id}-base-ur`} className="border border-border px-2 py-2"></td>
-                      <td key={`${v.id}-base-amt`} className="border border-border px-2 py-2 text-right">
+                    <Fragment key={`${v.id}-base`}> 
+                      <td className="border border-border px-2 py-2"></td>
+                      <td className="border border-border px-2 py-2 text-right">
                         {baseABByVendor[v.id] ? inr(baseABByVendor[v.id]) : ''}
                       </td>
-                    </>
+                    </Fragment>
                   ))}
                 </tr>
 
@@ -664,12 +1356,9 @@ export default function QuotationComparative() {
                     GST (as per item GST%)
                   </td>
                   {vendorOrder.map((v) => (
-                    <>
-                      <td key={`${v.id}-gst-ur`} className="border border-border px-2 py-1"></td>
-                      <td key={`${v.id}-gst-amt`} className="border border-border px-2 py-1 text-right">
-                        {gstByVendor[v.id] ? inr(gstByVendor[v.id]) : ''}
-                      </td>
-                    </>
+                    <td key={`${v.id}-gst`} className="border border-border px-2 py-1 text-right" colSpan={2}>
+                      {gstByVendor[v.id] ? inr(gstByVendor[v.id]) : ''}
+                    </td>
                   ))}
                 </tr>
 
@@ -678,17 +1367,15 @@ export default function QuotationComparative() {
                     Freight Charges
                   </td>
                   {vendorOrder.map((v) => (
-                    <>
-                      <td key={`${v.id}-freight-ur`} className="border border-border px-2 py-1"></td>
-                      <td key={`${v.id}-freight-amt`} className="border border-border px-2 py-1">
-                        <Input
-                          className="h-8"
-                          value={String(freightByVendor[v.id] || '')}
-                          onChange={(e) => setCharge('freightCharges', v.id, e.target.value)}
-                          placeholder="0"
-                        />
-                      </td>
-                    </>
+                    <td key={`${v.id}-freight`} className="border border-border px-2 py-1" colSpan={2}>
+                      <Input
+                        className="h-8 w-full"
+                        value={String(freightByVendor[v.id] || '')}
+                        onChange={(e) => setCharge('freightCharges', v.id, e.target.value)}
+                        placeholder="0"
+                        disabled={!vendorSelectedById[v.id]}
+                      />
+                    </td>
                   ))}
                 </tr>
 
@@ -697,17 +1384,15 @@ export default function QuotationComparative() {
                     Other Charges
                   </td>
                   {vendorOrder.map((v) => (
-                    <>
-                      <td key={`${v.id}-other-ur`} className="border border-border px-2 py-1"></td>
-                      <td key={`${v.id}-other-amt`} className="border border-border px-2 py-1">
-                        <Input
-                          className="h-8"
-                          value={String(otherByVendor[v.id] || '')}
-                          onChange={(e) => setCharge('otherCharges', v.id, e.target.value)}
-                          placeholder="0"
-                        />
-                      </td>
-                    </>
+                    <td key={`${v.id}-other`} className="border border-border px-2 py-1" colSpan={2}>
+                      <Input
+                        className="h-8 w-full"
+                        value={String(otherByVendor[v.id] || '')}
+                        onChange={(e) => setCharge('otherCharges', v.id, e.target.value)}
+                        placeholder="0"
+                        disabled={!vendorSelectedById[v.id]}
+                      />
+                    </td>
                   ))}
                 </tr>
 
@@ -716,12 +1401,9 @@ export default function QuotationComparative() {
                     Sub Total
                   </td>
                   {vendorOrder.map((v) => (
-                    <>
-                      <td key={`${v.id}-sub-ur`} className="border border-border px-2 py-1"></td>
-                      <td key={`${v.id}-sub-amt`} className="border border-border px-2 py-1 text-right">
-                        {taxableSubtotalByVendor[v.id] ? inr(taxableSubtotalByVendor[v.id]) : ''}
-                      </td>
-                    </>
+                    <td key={`${v.id}-sub`} className="border border-border px-2 py-1 text-right" colSpan={2}>
+                      {taxableSubtotalByVendor[v.id] ? inr(taxableSubtotalByVendor[v.id]) : ''}
+                    </td>
                   ))}
                 </tr>
 
@@ -730,12 +1412,9 @@ export default function QuotationComparative() {
                     Total Amount
                   </td>
                   {vendorOrder.map((v) => (
-                    <>
-                      <td key={`${v.id}-gt-ur`} className="border border-border px-2 py-1"></td>
-                      <td key={`${v.id}-gt-amt`} className="border border-border px-2 py-1 text-right">
-                        {grandTotalByVendor[v.id] ? inr(grandTotalByVendor[v.id]) : ''}
-                      </td>
-                    </>
+                    <td key={`${v.id}-gt`} className="border border-border px-2 py-1 text-right" colSpan={2}>
+                      {grandTotalByVendor[v.id] ? inr(grandTotalByVendor[v.id]) : ''}
+                    </td>
                   ))}
                 </tr>
               </>
@@ -754,36 +1433,33 @@ export default function QuotationComparative() {
               ] as const
             ).map(([label, key]) => (
               <tr key={key}>
-                <td className="border border-gray-300 px-2 py-1 font-semibold align-top" colSpan={4}>
+                <td className="border border-border px-2 py-1 font-semibold align-top" colSpan={4}>
                   {label}
                 </td>
                 {vendorOrder.map((v) => {
-                  const value = String((model as any)[key]?.[v.id] ?? '');
+                  const value =
+                    key === 'vendorStatus'
+                      ? String(vendorLTagByVendorId[v.id] || '')
+                      : String((model as any)[key]?.[v.id] ?? '');
                   const isStatus = key === 'vendorStatus';
-                  const cls = `border border-gray-300 px-2 py-1 align-top ${isStatus ? statusBgClass(value) : ''}`;
+                  const locked = !vendorSelectedById[v.id];
+                  const cls = `border border-border px-2 py-1 align-top ${isStatus ? statusBgClass(value) : ''}`;
                   return (
                     <td key={`${key}-${v.id}`} className={cls} colSpan={2}>
                       {isStatus ? (
                         <div className="min-h-[44px]">
-                          <Input
-                            className="h-8"
-                            value={value}
-                            onChange={(e) => setMeta(key, v.id, e.target.value)}
-                            placeholder="-"
-                          />
-                          {value ? (
-                            <div
-                              className={`mt-1 text-[12px] leading-[1.25] text-gray-900 ${statusTextClass(value)}`}
-                              style={{ whiteSpace: 'pre-wrap' }}
-                              dangerouslySetInnerHTML={{ __html: emphasizeLx(value) }}
-                            />
-                          ) : null}
+                          <div className="h-8 flex items-center">
+                            <span className={`text-[12px] ${statusTextClass(value)}`}>{value || '-'}</span>
+                          </div>
                         </div>
                       ) : (
                         <AutoGrowTextarea
                           value={value}
-                          onChange={(t) => setMeta(key, v.id, t)}
-                          placeholder="-"
+                          onChange={(t) => {
+                            if (locked) return;
+                            setMeta(key, v.id, t);
+                          }}
+                          placeholder={locked ? 'Select vendor first' : '-'}
                           className="w-full resize-none overflow-hidden bg-transparent outline-none text-[12px] leading-[1.25]"
                         />
                       )}

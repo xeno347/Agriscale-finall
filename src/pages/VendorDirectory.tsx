@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, Trash2, Building2, Package, Info, Edit2 } from 'lucide-react';
+import { Plus, Search, Trash2, Building2, Info, Edit2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -10,6 +10,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { getBaseUrl } from '@/lib/config';
 import { toast } from 'sonner';
 
 type VendorType = 'Machinery' | 'Seeds' | 'Fertilizer' | 'Chemicals' | 'Services' | 'Transport' | 'Other';
@@ -56,20 +57,99 @@ type Vendor = {
   tags?: string[];
 };
 
-const STORAGE_KEY = 'farmconnect.vendorDirectory.v1';
-
 const genId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const getApiBaseUrl = () => String(getBaseUrl() ?? '').replace(/\/$/, '');
+
+const VENDOR_TYPES: VendorType[] = ['Machinery', 'Seeds', 'Fertilizer', 'Chemicals', 'Services', 'Transport', 'Other'];
+
+const asVendorType = (value: unknown): VendorType => {
+  const s = String(value ?? '').trim();
+  return (VENDOR_TYPES as readonly string[]).includes(s) ? (s as VendorType) : 'Other';
+};
+
+const str = (value: unknown): string | undefined => {
+  if (value === null || value === undefined) return undefined;
+  const s = String(value).trim();
+  return s ? s : undefined;
+};
+
+const formatAddress = (addr: any): string | undefined => {
+  if (!addr || typeof addr !== 'object') return undefined;
+  const parts = [
+    addr.plot_flat_unit_no_and_floor,
+    addr.name_of_premises,
+    addr.road,
+    addr.taluka_locality,
+    addr.district,
+    addr.state,
+    addr.pin_code,
+  ]
+    .map((x) => str(x))
+    .filter(Boolean) as string[];
+
+  return parts.length ? parts.join(', ') : undefined;
+};
+
+const mapVendorRawToVendor = (raw: any): Vendor => {
+  const vendorDetails = raw?.vendor_details ?? {};
+  const bankDetails = raw?.bank_details ?? {};
+  const documentUrl = raw?.document_url ?? {};
+  const supply = vendorDetails?.address_for_place_of_supply_of_goods_services ?? {};
+
+  const tags = Array.isArray(raw?.tags) ? raw.tags.map(String) : undefined;
+
+  return {
+    id: String(raw?.vendor_id ?? raw?.id ?? genId()),
+    name: String(vendorDetails?.vendor_name ?? '').trim(),
+    type: asVendorType(vendorDetails?.nature_of_vendor),
+    contactNumber: str(vendorDetails?.vendor_contact),
+    phone: str(vendorDetails?.vendor_contact),
+    contactEmail: str(vendorDetails?.e_mail_id),
+    gst: str(vendorDetails?.gst_number),
+    pan: str(vendorDetails?.income_tax_pan),
+    aadhar: str(vendorDetails?.aadhar_card_number),
+    address: str(vendorDetails?.vendor_address) ?? formatAddress(vendorDetails?.address),
+    placeOfSupplyAddress: formatAddress(vendorDetails?.address_for_place_of_supply_of_goods_services),
+    supplyContactNumber: str(supply?.contact_number),
+    supplyContactEmail: str(supply?.e_mail_id),
+    bankName: str(bankDetails?.name_of_bank),
+    bankBranch: str(bankDetails?.branch_address_with_pin_code),
+    ifsCode: str(bankDetails?.ifs_code),
+    accountType: str(bankDetails?.account_type),
+    accountNumber: str(bankDetails?.account_number),
+    salesContactName: str(bankDetails?.sales_service_contract_authorised_person?.name),
+    salesContactMobile: str(bankDetails?.sales_service_contract_authorised_person?.mobile_number),
+    salesContactEmail: str(bankDetails?.sales_service_contract_authorised_person?.e_mail_id),
+    commercialContactName: str(bankDetails?.commercial_authorised_person?.name),
+    commercialContactMobile: str(bankDetails?.commercial_authorised_person?.mobile_number),
+    commercialContactEmail: str(bankDetails?.commercial_authorised_person?.e_mail_id),
+    masmeUdyamNo: str(bankDetails?.masme_udyam_no),
+    panFile: str(documentUrl?.pan_card),
+    aadharFile: str(documentUrl?.aadhar_card),
+    gstFile: str(documentUrl?.gst_registration_certificate),
+    cancelledChequeFile: str(documentUrl?.cancelled_cheque_or_passbook_front_page),
+    udyamCertificateFile: str(documentUrl?.udyam_akansha_msme_certificate),
+    tags,
+  };
+};
 
 const defaultVendors: Vendor[] = [
   {
     id: 'v1',
-    name: 'Vishwakarma Engineering',
+    name: 'Vishwakarma Engineering Pvt Ltd',
     type: 'Machinery',
     phone: '080-2345-6789',
     contactNumber: '08023456789',
     contactEmail: 'contact@vishwakarma.example',
     gst: '27ABCDE1234F1Z5',
     address: 'Plot 12, Industrial Estate, Pune, Maharashtra - 411001',
+    bankName: 'State Bank of India',
+    bankBranch: 'Pune Main Branch, 411001',
+    ifsCode: 'SBIN0001234',
+    accountType: 'Current',
+    accountNumber: '123456789012',
+    masmeUdyamNo: 'UDYAM-MH-12-0012345',
     tags: ['machinery', 'services'],
   },
   {
@@ -81,6 +161,12 @@ const defaultVendors: Vendor[] = [
     contactEmail: 'sales@greenseeds.example',
     gst: '27FGHIJ5678K2Z6',
     address: 'Block B, Agro Park, Nashik, Maharashtra - 422001',
+    bankName: 'HDFC Bank',
+    bankBranch: 'Nashik City Branch, 422001',
+    ifsCode: 'HDFC0000456',
+    accountType: 'Current',
+    accountNumber: '045612340987',
+    masmeUdyamNo: 'UDYAM-MH-15-0098765',
     tags: ['seeds', 'agriculture equipments'],
   },
   {
@@ -92,6 +178,12 @@ const defaultVendors: Vendor[] = [
     contactEmail: 'info@agritech.example',
     gst: '27KLMNO9012P3Z7',
     address: '3rd Floor, Tech Park, Mumbai, Maharashtra - 400001',
+    bankName: 'ICICI Bank',
+    bankBranch: 'Mumbai Fort Branch, 400001',
+    ifsCode: 'ICIC0000789',
+    accountType: 'Current',
+    accountNumber: '078912340056',
+    masmeUdyamNo: 'UDYAM-MH-22-0045678',
     tags: ['IOT devices', 'electronics', 'computer'],
   },
   {
@@ -103,62 +195,59 @@ const defaultVendors: Vendor[] = [
     contactEmail: 'support@fertico.example',
     gst: '19PQRST3456U4Z8',
     address: 'Village Road, Kolkata, West Bengal - 700001',
+    bankName: 'Axis Bank',
+    bankBranch: 'Kolkata Central Branch, 700001',
+    ifsCode: 'UTIB0000123',
+    accountType: 'Current',
+    accountNumber: '012300987654',
+    masmeUdyamNo: 'UDYAM-WB-10-0076543',
     tags: ['fertilizer', 'chemicals'],
+  },
+  {
+    id: 'v5',
+    name: 'Rapid Agro Logistics',
+    type: 'Transport',
+    phone: '044-5566-7788',
+    contactNumber: '4455667788',
+    contactEmail: 'ops@rapidlogistics.example',
+    gst: '33UVWXY6789Z5Z1',
+    address: 'Warehouse 7, Outer Ring Road, Chennai, Tamil Nadu - 600001',
+    bankName: 'Canara Bank',
+    bankBranch: 'Chennai Main Branch, 600001',
+    ifsCode: 'CNRB0000567',
+    accountType: 'Current',
+    accountNumber: '056712349999',
+    masmeUdyamNo: 'UDYAM-TN-02-0032109',
+    tags: ['transport', 'services'],
   },
 ];
 
-const readVendors = (): Vendor[] => {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultVendors;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return defaultVendors;
-    return parsed
-      .map((v: any) => ({
-        id: String(v?.id ?? genId()),
-        name: String(v?.name ?? ''),
-        type: String(v?.type ?? 'Other') as VendorType,
-        phone: v?.phone ? String(v.phone) : undefined,
-        contactEmail: v?.contactEmail ? String(v.contactEmail) : v?.email ? String(v.email) : undefined,
-        gst: v?.gst ? String(v.gst) : undefined,
-        pan: v?.pan ? String(v.pan) : undefined,
-        aadhar: v?.aadhar ? String(v.aadhar) : undefined,
-        address: v?.address ? String(v.address) : undefined,
-        placeOfSupplyAddress: v?.placeOfSupplyAddress ? String(v.placeOfSupplyAddress) : undefined,
-        bankName: v?.bankName ? String(v.bankName) : undefined,
-        bankBranch: v?.bankBranch ? String(v.bankBranch) : undefined,
-        ifsCode: v?.ifsCode ? String(v.ifsCode) : undefined,
-        accountType: v?.accountType ? String(v.accountType) : undefined,
-        accountNumber: v?.accountNumber ? String(v.accountNumber) : undefined,
-        salesContactName: v?.salesContactName ? String(v.salesContactName) : undefined,
-        salesContactMobile: v?.salesContactMobile ? String(v.salesContactMobile) : undefined,
-        salesContactEmail: v?.salesContactEmail ? String(v.salesContactEmail) : undefined,
-        commercialContactName: v?.commercialContactName ? String(v.commercialContactName) : undefined,
-        commercialContactMobile: v?.commercialContactMobile ? String(v.commercialContactMobile) : undefined,
-        commercialContactEmail: v?.commercialContactEmail ? String(v.commercialContactEmail) : undefined,
-        masmeUdyamNo: v?.masmeUdyamNo ? String(v.masmeUdyamNo) : undefined,
-        contactNumber: v?.contactNumber ? String(v.contactNumber) : undefined,
-        supplyContactNumber: v?.supplyContactNumber ? String(v.supplyContactNumber) : undefined,
-        supplyContactEmail: v?.supplyContactEmail ? String(v.supplyContactEmail) : undefined,
-        panFile: v?.panFile ? String(v.panFile) : undefined,
-        aadharFile: v?.aadharFile ? String(v.aadharFile) : undefined,
-        gstFile: v?.gstFile ? String(v.gstFile) : undefined,
-        cancelledChequeFile: v?.cancelledChequeFile ? String(v.cancelledChequeFile) : undefined,
-        udyamCertificateFile: v?.udyamCertificateFile ? String(v.udyamCertificateFile) : undefined,
-        tags: Array.isArray(v?.tags) ? v.tags.map(String) : undefined,
-      }))
-      .filter((v: Vendor) => v.name.trim());
-  } catch {
-    return defaultVendors;
-  }
-};
+const fetchVendorsFromApi = async (): Promise<Vendor[]> => {
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) throw new Error('API base URL is not set');
 
-const writeVendors = (vendors: Vendor[]) => {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(vendors));
-  } catch {
-    // ignore
+  const url = `${baseUrl}/purchase_flow/get_vendors_raw`;
+
+  const doFetch = (method: 'GET' | 'POST') =>
+    fetch(url, {
+      method,
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+  let res = await doFetch('GET');
+  if (res.status === 405) res = await doFetch('POST');
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(errText || `HTTP ${res.status}`);
   }
+
+  const data: any = await res.json().catch(() => null);
+  const list = Array.isArray(data?.vendors) ? data.vendors : [];
+  const mapped = list.map(mapVendorRawToVendor).filter((v: Vendor) => v.name.trim());
+  return mapped;
 };
 
 const VendorDirectory = () => {
@@ -233,14 +322,22 @@ const VendorDirectory = () => {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsVendor, setDetailsVendor] = useState<Vendor | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const refreshVendors = async () => {
+    try {
+      const serverVendors = await fetchVendorsFromApi();
+      setVendors(serverVendors);
+    } catch (e: any) {
+      const message = e?.message ? String(e.message) : 'Failed to fetch vendors';
+      toast.error(`Failed to load vendors${message ? `: ${message}` : ''}`);
+      setVendors((prev) => (prev.length ? prev : defaultVendors));
+    }
+  };
 
   useEffect(() => {
-    setVendors(readVendors());
+    void refreshVendors();
   }, []);
-
-  useEffect(() => {
-    writeVendors(vendors);
-  }, [vendors]);
 
   const types = useMemo(() => {
     const set = new Set<VendorType>();
@@ -309,7 +406,7 @@ const VendorDirectory = () => {
     setSelectedTags([]);
   };
 
-  const addVendor = () => {
+  const addVendor = async () => {
     if (!name.trim()) return toast.error('Vendor name is required');
     const next: Vendor = {
       id: genId(),
@@ -350,8 +447,97 @@ const VendorDirectory = () => {
       toast.success('Vendor updated');
       setEditingId(null);
     } else {
-      setVendors((p) => [next, ...p]);
-      toast.success('Vendor added');
+      const baseUrl = getApiBaseUrl();
+      if (!baseUrl) return toast.error('API base URL is not set');
+
+      const payload = {
+        vendor_details: {
+          nature_of_vendor: nature,
+          vendor_name: name,
+          income_tax_pan: pan,
+          gst_number: gst,
+          aadhar_card_number: aadhar,
+          vendor_contact: contactNumber || phone,
+          e_mail_id: contactEmail,
+          address: {
+            plot_flat_unit_no_and_floor: addressPlot,
+            name_of_premises: addressPremises,
+            road: addressRoad,
+            taluka_locality: addressLocality,
+            district: addressDistrict,
+            state: addressState,
+            pin_code: addressPin,
+          },
+          address_for_place_of_supply_of_goods_services: {
+            plot_flat_unit_no_and_floor: supplyPlot,
+            name_of_premises: supplyPremises,
+            road: supplyRoad,
+            taluka_locality: supplyLocality,
+            district: supplyDistrict,
+            state: supplyState,
+            pin_code: supplyPin,
+            contact_number: supplyContactNumber,
+            e_mail_id: supplyContactEmail,
+            gst_number: supplyGst,
+          },
+          vendor_address: next.address ?? '',
+        },
+        bank_details: {
+          name_of_bank: bankName,
+          branch_address_with_pin_code: bankBranch,
+          ifs_code: ifsCode,
+          account_type: accountType,
+          account_number: accountNumber,
+          sales_service_contract_authorised_person: {
+            name: salesName,
+            mobile_number: salesMobile,
+            e_mail_id: salesEmail,
+          },
+          commercial_authorised_person: {
+            name: commercialName,
+            mobile_number: commercialMobile,
+            e_mail_id: commercialEmail,
+          },
+          masme_udyam_no: masmeUdyamNo,
+        },
+        document_url: {
+          pan_card: panFile ?? '',
+          aadhar_card: aadharFile ?? '',
+          gst_registration_certificate: gstFile ?? '',
+          cancelled_cheque_or_passbook_front_page: cancelledChequeFile ?? '',
+          udyam_akansha_msme_certificate: udyamCertificateFile ?? '',
+        },
+        tags: selectedTags,
+      };
+
+      setIsSaving(true);
+      try {
+        const res = await fetch(`${baseUrl}/purchase_flow/add_new_vendor`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          toast.error(`Failed to add vendor${errText ? `: ${errText}` : ''}`);
+          return;
+        }
+
+        const data: any = await res.json().catch(() => null);
+        const returnedId = data?.vendor_id ?? data?.id;
+        const vendorToAdd = returnedId ? { ...next, id: String(returnedId) } : next;
+        setVendors((p) => [vendorToAdd, ...p]);
+        toast.success('Vendor added');
+        void refreshVendors();
+      } catch (e: any) {
+        toast.error(`Failed to add vendor${e?.message ? `: ${e.message}` : ''}`);
+        return;
+      } finally {
+        setIsSaving(false);
+      }
     }
     setOpen(false);
     resetForm();
@@ -420,7 +606,7 @@ const VendorDirectory = () => {
           <h1 className="text-2xl font-bold text-gray-900">Vendor Directory</h1>
           <p className="text-sm text-gray-500 mt-1">Manage and track all your vendors in one place.</p>
         </div>
-        <Button onClick={() => setOpen(true)} className="bg-green-600 hover:bg-green-700 text-white gap-2">
+        <Button onClick={() => { resetForm(); setEditingId(null); setOpen(true); }} className="bg-green-600 hover:bg-green-700 text-white gap-2">
           <Plus className="w-4 h-4" /> New Vendor
         </Button>
       </div>
@@ -691,7 +877,15 @@ const VendorDirectory = () => {
               <div className="flex items-center gap-2">
                 {step > 1 && <Button variant="outline" onClick={() => setStep((s) => s - 1)}>Back</Button>}
                 {step < 4 && <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={() => setStep((s) => Math.min(4, s + 1))}>Next</Button>}
-                {step === 4 && <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={addVendor}>{editingId ? 'Update' : 'Save'}</Button>}
+                {step === 4 && (
+                  <Button
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    onClick={addVendor}
+                    disabled={isSaving}
+                  >
+                    {editingId ? 'Update' : (isSaving ? 'Saving…' : 'Save')}
+                  </Button>
+                )}
               </div>
             </DialogFooter>
           </DialogContent>
