@@ -828,43 +828,62 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                       <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">4)</td>
                       <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Taxes</td>
                       <td className="px-3 py-1.5 border-t border-gray-300">
-                        <div className="no-print flex items-center gap-2 mb-2 flex-wrap">
-                          <button
-                            type="button"
-                            onClick={() => setP2Field('taxAutoCalcEnabled', !p2.taxAutoCalcEnabled)}
-                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors shrink-0 ${
-                              p2.taxAutoCalcEnabled
-                                ? 'bg-gray-100 border-gray-400 text-gray-800'
-                                : 'bg-white border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400'
-                            }`}
-                          >
-                            {p2.taxAutoCalcEnabled ? '✦ Auto' : '⊘ Auto'}
-                          </button>
-
-                          {p2.taxAutoCalcEnabled && (
+                        <div className="no-print mb-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <div className="flex items-center gap-2 flex-wrap text-[10px] text-gray-600">
-                              <span className="text-gray-500">GST</span>
-                              <Input
-                                value={p2.taxGstPercent}
-                                onChange={(e) => setP2Field('taxGstPercent', e.target.value)}
-                                inputMode="decimal"
-                                className="h-6 text-[10px] w-12 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0 py-0"
-                                placeholder="%"
-                              />
-                              <span className="text-gray-400">{computedTotals ? inr(computedTotals.auto.gstAmount) : '—'}</span>
-                              <span className="text-gray-300 mx-1">|</span>
-                              <span className="text-gray-500">Other</span>
-                              <Input
-                                value={p2.taxOtherPercent}
-                                onChange={(e) => setP2Field('taxOtherPercent', e.target.value)}
-                                inputMode="decimal"
-                                className="h-6 text-[10px] w-12 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0 py-0"
-                                placeholder="%"
-                              />
-                              <span className="text-gray-400">{computedTotals ? inr(computedTotals.auto.otherAmount) : '—'}</span>
-                              <span className="text-gray-300 mx-1">|</span>
-                              <span className="font-semibold text-gray-700">Tax: {computedTotals ? inr(computedTotals.auto.taxAmount) : '—'}</span>
-                              <span className="text-gray-400">• Gross: {computedTotals ? inr(computedTotals.gross) : '—'}</span>
+                              {p2.taxAutoCalcEnabled && (
+                                <div className="flex items-center gap-2 flex-wrap px-2 py-1 rounded-none border border-gray-200 bg-gray-50">
+                                  <span className="text-gray-500">GST</span>
+                                  <Input
+                                    value={p2.taxGstPercent}
+                                    onChange={(e) => setP2Field('taxGstPercent', e.target.value)}
+                                    inputMode="decimal"
+                                    className="h-6 text-[10px] w-14 rounded-none border border-gray-200 bg-white shadow-none focus-visible:ring-1 focus-visible:ring-gray-400 focus-visible:ring-offset-0 px-2 py-0 tabular-nums"
+                                    placeholder="%"
+                                  />
+                                  <span className="text-gray-500">Amt</span>
+                                  <span className="text-gray-700 tabular-nums min-w-[84px] text-right">{computedTotals ? inr(computedTotals.auto.gstAmount) : '—'}</span>
+
+                                  <span className="text-gray-300 mx-1">|</span>
+
+                                  <span className="text-gray-500">Other</span>
+                                  <Input
+                                    value={p2.taxOtherPercent}
+                                    onChange={(e) => setP2Field('taxOtherPercent', e.target.value)}
+                                    inputMode="decimal"
+                                    className="h-6 text-[10px] w-14 rounded-none border border-gray-200 bg-white shadow-none focus-visible:ring-1 focus-visible:ring-gray-400 focus-visible:ring-offset-0 px-2 py-0 tabular-nums"
+                                    placeholder="%"
+                                  />
+                                  <span className="text-gray-500">Amt</span>
+                                  <span className="text-gray-700 tabular-nums min-w-[84px] text-right">{computedTotals ? inr(computedTotals.auto.otherAmount) : '—'}</span>
+
+                                  <span className="text-gray-300 mx-1">|</span>
+
+                                  <span className="font-semibold text-gray-800 tabular-nums">Tax</span>
+                                  <span className="font-semibold text-gray-800 tabular-nums min-w-[92px] text-right">{computedTotals ? inr(computedTotals.auto.taxAmount) : '—'}</span>
+                                  <span className="text-gray-400">•</span>
+                                  <span className="text-gray-700 tabular-nums">Gross</span>
+                                  <span className="text-gray-700 tabular-nums min-w-[92px] text-right">{computedTotals ? inr(computedTotals.gross) : '—'}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setP2Field('taxAutoCalcEnabled', !p2.taxAutoCalcEnabled)}
+                              className={`ml-auto inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors shrink-0 ${
+                                p2.taxAutoCalcEnabled
+                                  ? 'bg-gray-100 border-gray-400 text-gray-800'
+                                  : 'bg-white border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400'
+                              }`}
+                            >
+                              {p2.taxAutoCalcEnabled ? '✦ Auto' : '⊘ Auto'}
+                            </button>
+                          </div>
+
+                          {!p2.taxAutoCalcEnabled && (
+                            <div className="mt-1 text-[10px] text-gray-500">
+                              Tip: enable <span className="font-semibold">Auto</span> to compute GST/Other on base amount.
                             </div>
                           )}
                         </div>
@@ -873,8 +892,8 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                           value={p2.taxAutoCalcEnabled ? taxesAutoText : p2.taxes}
                           onChange={(e) => setP2Field('taxes', e.target.value)}
                           readOnly={p2.taxAutoCalcEnabled}
-                          className={`w-full min-h-[56px] text-[11px] outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400 ${
-                            p2.taxAutoCalcEnabled ? 'text-gray-700' : 'text-gray-900'
+                          className={`w-full min-h-[56px] text-[11px] outline-none resize-none leading-5 bg-transparent border border-gray-200 rounded-none px-2 py-1 placeholder:text-gray-400 ${
+                            p2.taxAutoCalcEnabled ? 'text-gray-700 bg-gray-50' : 'text-gray-900 bg-white'
                           }`}
                           placeholder="Enter applicable tax terms…"
                         />
@@ -915,7 +934,7 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                             <button
                               type="button"
                               onClick={() => setP2Field('paymentAutoEnabled', !p2.paymentAutoEnabled)}
-                              className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors shrink-0 ${
+                              className={`ml-auto inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors shrink-0 ${
                                 p2.paymentAutoEnabled
                                   ? 'bg-gray-100 border-gray-400 text-gray-800'
                                   : 'bg-white border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400'
@@ -925,10 +944,8 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                             </button>
 
                             {p2.paymentAutoEnabled && (
-                              <div className="flex items-center gap-2 text-[10px] ml-auto">
-                                <span
-                                  className="font-semibold text-gray-700"
-                                >
+                              <div className="flex items-center gap-2 text-[10px]">
+                                <span className="font-semibold text-gray-700">
                                   {paymentInstallmentsSummary.totalPct.toFixed(
                                     paymentInstallmentsSummary.totalPct % 1 === 0 ? 0 : 2
                                   )}% allocated
@@ -939,45 +956,64 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                           </div>
 
                           {p2.paymentAutoEnabled && (
-                            <div className="mt-2 space-y-1.5">
-                              {(Array.isArray(p2.paymentInstallments) ? p2.paymentInstallments : []).map((row, idx) => {
-                                const pct = clampPercent(row.percent);
-                                const amt = computedTotals ? (pct / 100) * computedTotals.base : 0;
-                                return (
-                                  <div key={row.id} className="flex items-center gap-2">
-                                    <span className="text-[10px] text-gray-400 w-4 shrink-0 text-right">
-                                      {String.fromCharCode(97 + idx)})
-                                    </span>
-                                    <Input
-                                      value={row.percent}
-                                      onChange={(e) => updateInstallment(row.id, { percent: e.target.value })}
-                                      inputMode="decimal"
-                                      className="h-6 text-[10px] w-12 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0 py-0 shrink-0"
-                                      placeholder="%"
-                                    />
-                                    <span className="text-[10px] text-gray-400 shrink-0">%</span>
-                                    <Input
-                                      value={row.label}
-                                      onChange={(e) => updateInstallment(row.id, { label: e.target.value })}
-                                      className="h-6 text-[10px] flex-1 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0 py-0"
-                                      placeholder="milestone description…"
-                                    />
-                                    <span className="text-[10px] text-gray-400 shrink-0">{computedTotals ? inr(amt) : '—'}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeInstallment(row.id)}
-                                      disabled={(Array.isArray(p2.paymentInstallments) ? p2.paymentInstallments : []).length <= 1}
-                                      className="text-[10px] text-gray-400 hover:text-gray-700 disabled:opacity-30 shrink-0 px-1"
-                                    >
-                                      ✕
-                                    </button>
-                                  </div>
-                                );
-                              })}
+                            <div className="mt-2 border border-gray-200 bg-gray-50 px-2 py-2 rounded-none">
+                              <div className="grid grid-cols-12 gap-2 text-[10px] text-gray-500 mb-1">
+                                <div className="col-span-1">#</div>
+                                <div className="col-span-2">%</div>
+                                <div className="col-span-7">Milestone</div>
+                                <div className="col-span-2 text-right">Amount</div>
+                              </div>
+
+                              <div className="space-y-1.5">
+                                {(Array.isArray(p2.paymentInstallments) ? p2.paymentInstallments : []).map((row, idx) => {
+                                  const pct = clampPercent(row.percent);
+                                  const amt = computedTotals ? (pct / 100) * computedTotals.base : 0;
+                                  return (
+                                    <div key={row.id} className="grid grid-cols-12 gap-2 items-center">
+                                      <div className="col-span-1 text-[10px] text-gray-400 text-right pr-1">
+                                        {String.fromCharCode(97 + idx)})
+                                      </div>
+
+                                      <div className="col-span-2 flex items-center gap-1">
+                                        <Input
+                                          value={row.percent}
+                                          onChange={(e) => updateInstallment(row.id, { percent: e.target.value })}
+                                          inputMode="decimal"
+                                          className="h-7 text-[10px] w-full rounded-none border border-gray-200 bg-white shadow-none focus-visible:ring-1 focus-visible:ring-gray-400 focus-visible:ring-offset-0 px-2 py-0 tabular-nums"
+                                          placeholder="%"
+                                        />
+                                      </div>
+
+                                      <div className="col-span-7 flex items-center gap-2">
+                                        <Input
+                                          value={row.label}
+                                          onChange={(e) => updateInstallment(row.id, { label: e.target.value })}
+                                          className="h-7 text-[10px] w-full rounded-none border border-gray-200 bg-white shadow-none focus-visible:ring-1 focus-visible:ring-gray-400 focus-visible:ring-offset-0 px-2 py-0"
+                                          placeholder="milestone description…"
+                                        />
+                                      </div>
+
+                                      <div className="col-span-2 flex items-center justify-end gap-1">
+                                        <span className="text-[10px] text-gray-600 tabular-nums">{computedTotals ? inr(amt) : '—'}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeInstallment(row.id)}
+                                          disabled={(Array.isArray(p2.paymentInstallments) ? p2.paymentInstallments : []).length <= 1}
+                                          className="text-[10px] text-gray-400 hover:text-gray-700 disabled:opacity-30 shrink-0 px-1"
+                                          title="Remove"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
                               <button
                                 type="button"
                                 onClick={addInstallment}
-                                className="text-[10px] text-gray-700 hover:text-gray-900 font-medium mt-0.5"
+                                className="text-[10px] text-gray-700 hover:text-gray-900 font-medium mt-2"
                               >
                                 + Add milestone
                               </button>
@@ -989,8 +1025,8 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                           value={p2.paymentAutoEnabled ? paymentAutoText : p2.paymentTerms}
                           onChange={(e) => setP2Field('paymentTerms', e.target.value)}
                           readOnly={p2.paymentAutoEnabled}
-                          className={`w-full min-h-[74px] text-[11px] outline-none resize-none leading-5 bg-transparent border-none p-0 ${
-                            p2.paymentAutoEnabled ? 'text-gray-700' : 'text-gray-900'
+                          className={`w-full min-h-[74px] text-[11px] outline-none resize-none leading-5 bg-transparent border border-gray-200 rounded-none px-2 py-1 placeholder:text-gray-400 ${
+                            p2.paymentAutoEnabled ? 'text-gray-700 bg-gray-50' : 'text-gray-900 bg-white'
                           }`}
                         />
                       </td>
@@ -1040,7 +1076,7 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                           <button
                             type="button"
                             onClick={() => setP2Field('ldAutoEnabled', !p2.ldAutoEnabled)}
-                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors shrink-0 ${
+                            className={`ml-auto inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors shrink-0 ${
                               p2.ldAutoEnabled
                                 ? 'bg-gray-100 border-gray-400 text-gray-800'
                                 : 'bg-white border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400'
@@ -1050,26 +1086,28 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                           </button>
 
                           {p2.ldAutoEnabled && (
-                            <div className="flex items-center gap-2 flex-wrap text-[10px] text-gray-600">
+                            <div className="flex items-center gap-2 flex-wrap px-2 py-1 rounded-none border border-gray-200 bg-gray-50">
                               <span className="text-gray-500">LD / week</span>
                               <Input
                                 value={p2.ldPerWeekPercent}
                                 onChange={(e) => setP2Field('ldPerWeekPercent', e.target.value)}
                                 inputMode="decimal"
-                                className="h-6 text-[10px] w-12 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0 py-0"
+                                className="h-6 text-[10px] w-14 rounded-none border border-gray-200 bg-white shadow-none focus-visible:ring-1 focus-visible:ring-gray-400 focus-visible:ring-offset-0 px-2 py-0 tabular-nums"
                                 placeholder="%"
                               />
-                              <span className="text-gray-400">{computedTotals ? inr(ldAmounts.perWeekAmt) : '—'} / wk</span>
+                              <span className="text-gray-500">Amt</span>
+                              <span className="text-gray-700 tabular-nums min-w-[92px] text-right">{computedTotals ? inr(ldAmounts.perWeekAmt) : '—'} / wk</span>
                               <span className="text-gray-300 mx-1">|</span>
                               <span className="text-gray-500">Max cap</span>
                               <Input
                                 value={p2.ldMaxPercent}
                                 onChange={(e) => setP2Field('ldMaxPercent', e.target.value)}
                                 inputMode="decimal"
-                                className="h-6 text-[10px] w-12 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0 py-0"
+                                className="h-6 text-[10px] w-14 rounded-none border border-gray-200 bg-white shadow-none focus-visible:ring-1 focus-visible:ring-gray-400 focus-visible:ring-offset-0 px-2 py-0 tabular-nums"
                                 placeholder="%"
                               />
-                              <span className="text-gray-400">{ldAmounts.maxPct > 0 ? inr(ldAmounts.maxAmt) : 'No cap'}</span>
+                              <span className="text-gray-500">Amt</span>
+                              <span className="text-gray-700 tabular-nums min-w-[92px] text-right">{ldAmounts.maxPct > 0 ? inr(ldAmounts.maxAmt) : 'No cap'}</span>
                             </div>
                           )}
                         </div>
@@ -1078,8 +1116,8 @@ export function MakePurchaseOrderPopup({ open, comparative, vendorId, onClose, o
                           value={p2.ldAutoEnabled ? ldAutoText : p2.ldPenalty}
                           onChange={(e) => setP2Field('ldPenalty', e.target.value)}
                           readOnly={p2.ldAutoEnabled}
-                          className={`w-full min-h-[74px] text-[11px] outline-none resize-none leading-5 bg-transparent border-none p-0 ${
-                            p2.ldAutoEnabled ? 'text-gray-700' : 'text-gray-900'
+                          className={`w-full min-h-[74px] text-[11px] outline-none resize-none leading-5 bg-transparent border border-gray-200 rounded-none px-2 py-1 placeholder:text-gray-400 ${
+                            p2.ldAutoEnabled ? 'text-gray-700 bg-gray-50' : 'text-gray-900 bg-white'
                           }`}
                         />
                       </td>
