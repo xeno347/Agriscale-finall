@@ -32,6 +32,10 @@ type ApiTcComparative = {
   technical_recommendation?: unknown;
   status?: unknown;
   pr_number?: unknown;
+  approved_vendor_id?: unknown;
+  TC_status?: unknown;
+  NFA_status?: unknown;
+  comparison_id?: unknown;
   comparision_id?: unknown;
 };
 
@@ -44,6 +48,9 @@ type HoOverrides = Record<
     hoForwardedAt?: string;
     tcApprovedVendorId?: string;
     tcApprovedAt?: string;
+    poCreatedAt?: string;
+    poNo?: string;
+    poStatus?: string;
   }
 >;
 
@@ -83,7 +90,16 @@ const mapTcToModel = (x: ApiTcComparative): ComparativeModel | null => {
   const prNumber = safeTrim((x as any)?.pr_number);
   if (!prNumber) return null;
 
-  const comparisonId = safeTrim((x as any)?.comparision_id);
+  const comparisonId = safeTrim((x as any)?.comparison_id ?? (x as any)?.comparision_id);
+  const flowStatus = safeTrim((x as any)?.status);
+  const tcStatus = safeTrim((x as any)?.TC_status);
+  const nfaStatus = safeTrim((x as any)?.NFA_status);
+  const backendApprovedVendorId = safeTrim((x as any)?.approved_vendor_id);
+
+  const tcStatusLower = tcStatus.toLowerCase();
+  const isTcApproved =
+    tcStatusLower === 'approved' ||
+    (Boolean(backendApprovedVendorId) && (!tcStatusLower || tcStatusLower !== 'pending'));
 
   const rawItems = Array.isArray((x as any)?.item_row) ? ((x as any).item_row as ApiTcItemRow[]) : [];
   const itemIdByName: Record<string, string> = {};
@@ -175,9 +191,14 @@ const mapTcToModel = (x: ApiTcComparative): ComparativeModel | null => {
     technicalRecommendationVendorId: techRec || undefined,
     lastSavedAt: createdAt || undefined,
     isDraft: false,
-    hoSelectedVendorId: undefined,
+    hoSelectedVendorId: backendApprovedVendorId || undefined,
     hoForwardedAt: undefined,
-    tcApprovedVendorId: undefined,
+    backendApprovedVendorId: backendApprovedVendorId || undefined,
+    flowStatus: flowStatus || undefined,
+    tcStatus: tcStatus || undefined,
+    nfaStatus: nfaStatus || undefined,
+
+    tcApprovedVendorId: isTcApproved ? (backendApprovedVendorId || undefined) : undefined,
     tcApprovedAt: undefined,
   };
 
@@ -228,7 +249,19 @@ export default function HOInbox() {
         const next: Record<string, ComparativeModel> = {};
         for (const m of mapped) {
           const o = overrides[m.indentId];
-          next[m.indentId] = o ? { ...m, ...o } : m;
+          next[m.indentId] = o
+            ? {
+                ...m,
+                ...o,
+                // Prefer local selection when present (user may preselect before backend writes it)
+                hoSelectedVendorId: o.hoSelectedVendorId || m.hoSelectedVendorId,
+                // Prefer backend approval when present
+                tcApprovedVendorId: m.tcApprovedVendorId || o.tcApprovedVendorId,
+                // Only local for timestamps today
+                tcApprovedAt: o.tcApprovedAt || m.tcApprovedAt,
+                hoForwardedAt: o.hoForwardedAt || m.hoForwardedAt,
+              }
+            : m;
         }
 
         if (!cancelled) setAll(next);
@@ -271,6 +304,9 @@ export default function HOInbox() {
         hoForwardedAt: merged.hoForwardedAt,
         tcApprovedVendorId: merged.tcApprovedVendorId,
         tcApprovedAt: merged.tcApprovedAt,
+        poCreatedAt: (merged as any)?.poCreatedAt,
+        poNo: (merged as any)?.poNo,
+        poStatus: (merged as any)?.poStatus,
       };
       writeHoOverrides(overrides);
       return { ...prev, [indentId]: merged };

@@ -46,6 +46,12 @@ export type ComparativeModel = {
   warranty?: Record<string, string>;
   vendorStatus?: Record<string, string>;
 
+  // Backend status fields (optional; used by HO Inbox timeline)
+  flowStatus?: string;
+  tcStatus?: string;
+  nfaStatus?: string;
+  backendApprovedVendorId?: string;
+
   // HO approval
   tcApprovedVendorId?: string;
   tcApprovedAt?: string;

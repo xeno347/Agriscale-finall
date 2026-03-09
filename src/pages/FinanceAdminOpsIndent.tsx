@@ -30,154 +30,51 @@ import {
   writeDirectorsAttachedMap,
   type SignatureDiary,
 } from '@/lib/signatureDiary';
+import { PRPreview } from '@/components/purchase/PRPreview';
 
-const COMPARATIVE_KEY = 'farmconnect.prComparative.v1';
-const FINANCE_NFA_NOTES_KEY = 'farmconnect.financeAdminOps.nfaNotes.v1';
-
-type Comparative = {
-  indentId: string;
-  title: string;
-  subTitle?: string;
-  vendors: Array<{ id: string; name: string }>;
-  items: Array<{ id: string; qty: number; gstPercent?: number }>; // minimal for total calc
-  quotes: Array<{ vendorId: string; unitRateByItemId: Record<string, number> }>;
-  freightCharges?: Record<string, number>;
-  otherCharges?: Record<string, number>;
-  hoSelectedVendorId?: string;
-  hoForwardedAt?: string;
+type NfaApiItemRow = {
+  item_name?: string;
+  UoM?: string;
+  gst_percentage?: number;
+  quantity?: number;
 };
 
-type FinanceNfaNoteState = Record<string, { note: string; updatedAt: string }>;
-
-const readComparatives = (): Record<string, Comparative> => {
-  try {
-    const raw = window.localStorage.getItem(COMPARATIVE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
+type NfaApiQuoter = {
+  vendor_id?: string;
+  item_costing?: Record<
+    string,
+    {
+      quanity?: number;
+      quantity?: number;
+      per_unit_costing?: number;
+      final_costing?: number;
+    }
+  >;
+  freight_charges?: number;
+  other_charges?: number;
+  subtotal?: number;
+  total_amount?: number;
+  payment_terms?: string | null;
+  delivery_time?: string | null;
+  warrenty_garantee?: string | null;
 };
 
-const seedDummyComparativesIfEmpty = () => {
-  try {
-    const existing = readComparatives();
-    if (existing && Object.keys(existing).length > 0) return;
-
-    const dummy: Record<string, Comparative> = {
-      // Default dummy entries
-      'SBR/PR/25-26/001': {
-        indentId: 'SBR/PR/25-26/001',
-        title: 'Chhattisgarh 2250 Acres - PR 001',
-        subTitle: 'Comparative (Dummy)',
-        vendors: [
-          { id: 'v-a', name: 'Vishwakarma Implements' },
-          { id: 'v-b', name: 'Agro Tools & Co.' },
-          { id: 'v-c', name: 'Shree Tractors Spares' },
-        ],
-        items: [
-          { id: 'it-1', qty: 1, gstPercent: 18 },
-          { id: 'it-2', qty: 1, gstPercent: 18 },
-        ],
-        quotes: [
-          { vendorId: 'v-a', unitRateByItemId: { 'it-1': 15900, 'it-2': 5200 } },
-          { vendorId: 'v-b', unitRateByItemId: { 'it-1': 16500, 'it-2': 4800 } },
-          { vendorId: 'v-c', unitRateByItemId: { 'it-1': 15800, 'it-2': 5500 } },
-        ],
-        freightCharges: { 'v-a': 0, 'v-b': 800, 'v-c': 0 },
-        otherCharges: { 'v-a': 0, 'v-b': 0, 'v-c': 0 },
-        hoSelectedVendorId: 'v-a',
-        hoForwardedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-      'SBR/PR/25-26/003': {
-        indentId: 'SBR/PR/25-26/003',
-        title: 'Chhattisgarh 2250 Acres - PR 003',
-        subTitle: 'Comparative (Dummy)',
-        vendors: [
-          { id: 'v-d', name: 'Mahadev Engineering' },
-          { id: 'v-e', name: 'Patel Farm Machinery' },
-        ],
-        items: [{ id: 'it-1', qty: 2, gstPercent: 18 }],
-        quotes: [
-          { vendorId: 'v-d', unitRateByItemId: { 'it-1': 42000 } },
-          { vendorId: 'v-e', unitRateByItemId: { 'it-1': 48000 } },
-        ],
-        freightCharges: { 'v-d': 1200, 'v-e': 0 },
-        otherCharges: { 'v-d': 0, 'v-e': 0 },
-        hoSelectedVendorId: 'v-d',
-        hoForwardedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-
-      // IMPORTANT: Finance page indents currently use PR numbers like SBR/NF/25-26/03.
-      // Seed a dummy comparative for that key so clicking NFA rows works out-of-the-box.
-      'SBR/NF/25-26/03': {
-        indentId: 'SBR/NF/25-26/03',
-        title: 'Chhattisgarh 2250 Acres - NF 03',
-        subTitle: 'HO Comparative (Dummy)',
-        vendors: [
-          { id: 'v-x', name: 'Vishwakarma Implements' },
-          { id: 'v-y', name: 'Agro Tools & Co.' },
-          { id: 'v-z', name: 'Patel Farm Machinery' },
-        ],
-        items: [
-          { id: 'it-1', qty: 4, gstPercent: 18 },
-          { id: 'it-2', qty: 1, gstPercent: 18 },
-        ],
-        quotes: [
-          { vendorId: 'v-x', unitRateByItemId: { 'it-1': 44500, 'it-2': 5200 } },
-          { vendorId: 'v-y', unitRateByItemId: { 'it-1': 45200, 'it-2': 4800 } },
-          { vendorId: 'v-z', unitRateByItemId: { 'it-1': 46800, 'it-2': 4500 } },
-        ],
-        freightCharges: { 'v-x': 0, 'v-y': 1500, 'v-z': 0 },
-        otherCharges: { 'v-x': 0, 'v-y': 0, 'v-z': 0 },
-        hoSelectedVendorId: 'v-x',
-        hoForwardedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-    };
-
-    window.localStorage.setItem(COMPARATIVE_KEY, JSON.stringify(dummy));
-  } catch {
-    // ignore
-  }
-};
-
-const readFinanceNotes = (): FinanceNfaNoteState => {
-  try {
-    const raw = window.localStorage.getItem(FINANCE_NFA_NOTES_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-const writeFinanceNotes = (s: FinanceNfaNoteState) => {
-  try {
-    window.localStorage.setItem(FINANCE_NFA_NOTES_KEY, JSON.stringify(s));
-  } catch {
-    /**/
-  }
-};
-
-const calcHoSelectedTotal = (c: Comparative) => {
-  const vid = c.hoSelectedVendorId;
-  if (!vid) return null;
-  const q = (c.quotes || []).find((x) => x.vendorId === vid);
-  const base = (c.items || []).reduce((sum, it) => {
-    const unit = q?.unitRateByItemId?.[it.id] ?? 0;
-    return sum + unit * (Number(it.qty) || 0);
-  }, 0);
-  const gst = (c.items || []).reduce((sum, it) => {
-    const unit = q?.unitRateByItemId?.[it.id] ?? 0;
-    const amt = unit * (Number(it.qty) || 0);
-    const gp = Number(isFinite(Number(it.gstPercent)) ? it.gstPercent : 0) || 0;
-    return sum + amt * (gp / 100);
-  }, 0);
-  const freight = Number(c.freightCharges?.[vid] ?? 0) || 0;
-  const other = Number(c.otherCharges?.[vid] ?? 0) || 0;
-  return base + gst + freight + other;
+type NfaApiRow = {
+  pr_number?: string;
+  comparison_id?: string;
+  comparision_id?: string;
+  created_at?: string;
+  approved_vendor_id?: string;
+  approved_vendor?: {
+    vendor_id?: string;
+  };
+  technical_recommendation?: string;
+  status?: string;
+  TC_status?: string;
+  NFA_status?: string;
+  nfa_status?: string;
+  quoters?: NfaApiQuoter[];
+  item_row?: NfaApiItemRow[];
 };
 
 type PRLineItem = {
@@ -241,198 +138,13 @@ const formatInr = (value: number) => {
   }
 };
 
-const PRPreview = ({
-  indent,
-  attachments,
-  showDirectorSignature,
-}: {
-  indent: Omit<Indent, 'id' | 'status'>;
-  attachments?: SignatureDiary;
-  showDirectorSignature?: boolean;
-}) => {
-  const sigFor = (name: string) => attachments?.[name] ?? null;
-  return (
-    <div className="min-w-[980px]">
-      <div className="border border-gray-300 bg-white">
-        <div className="text-center font-semibold text-sm py-2 border-b border-gray-300">
-          SAI BIORESOURCES PRIVATE LIMITED
-        </div>
 
-        <div className="grid grid-cols-12 border-b border-gray-300 text-xs">
-          <div className="col-span-4 p-2 border-r border-gray-300">
-            <span className="font-semibold">Project:</span> {indent.project || '—'}
-          </div>
-          <div className="col-span-4 p-2 border-r border-gray-300 text-center font-semibold">
-            PURCHASE REQUISITION (PR.)
-          </div>
-          <div className="col-span-2 p-2 border-r border-gray-300">
-            <span className="font-semibold">PR No.</span> {indent.prNo || '—'}
-          </div>
-          <div className="col-span-2 p-2">
-            <span className="font-semibold">Date:</span> {indent.date || '—'}
-          </div>
-        </div>
+// ─── NFA Finalized Quotation (Compact) ─────────────────────────────────────
 
-        <div className="grid grid-cols-12 border-b border-gray-300 text-xs">
-          <div className="col-span-4 p-2 border-r border-gray-300">
-            <span className="font-semibold">Department:</span> {indent.department || '—'}
-          </div>
-          <div className="col-span-8 p-2">&nbsp;</div>
-        </div>
-
-        <table className="w-full text-[10px] border-collapse">
-          <thead>
-            <tr className="bg-gray-50">
-              <th className="border border-gray-300 px-1 py-1 w-[28px]">Sr. Nos.</th>
-              <th className="border border-gray-300 px-1 py-1 w-[70px]">Item Code</th>
-              <th className="border border-gray-300 px-1 py-1">Part Name</th>
-              <th className="border border-gray-300 px-1 py-1">Specification</th>
-              <th className="border border-gray-300 px-1 py-1 w-[50px]">UoM</th>
-              <th className="border border-gray-300 px-1 py-1 w-[70px]">Total Qty. Required</th>
-              <th className="border border-gray-300 px-1 py-1 w-[80px]">Less Qty. Available in Stocks</th>
-              <th className="border border-gray-300 px-1 py-1 w-[60px]">Net PR Qty</th>
-              <th className="border border-gray-300 px-1 py-1 w-[70px]">Procurement Lead time (weeks)</th>
-              <th className="border border-gray-300 px-1 py-1 w-[85px]">Material Required by Date</th>
-              <th className="border border-gray-300 px-1 py-1 w-[70px]">Indigenous / Imported</th>
-              <th className="border border-gray-300 px-1 py-1 w-[60px]">Rate/Item</th>
-              <th className="border border-gray-300 px-1 py-1 w-[85px]">Approx. Value Rs.</th>
-              <th className="border border-gray-300 px-1 py-1">Preferred Vendor Name</th>
-              <th className="border border-gray-300 px-1 py-1 w-[85px]">Validity of Warranty and Guarantee</th>
-              <th className="border border-gray-300 px-1 py-1 w-[60px]">Full life (Hr)</th>
-              <th className="border border-gray-300 px-1 py-1 w-[60px]">Actual Life (Hr)</th>
-              <th className="border border-gray-300 px-1 py-1 w-[90px]">Reason for replacement</th>
-              <th className="border border-gray-300 px-1 py-1 w-[85px]">Repairing possibility Yes/No/NA</th>
-            </tr>
-          </thead>
-          <tbody>
-            {indent.items.map((it) => (
-              <tr key={it.id}>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.srNo}</td>
-                <td className="border border-gray-300 px-1 py-1">{it.itemCode || ''}</td>
-                <td className="border border-gray-300 px-1 py-1">{it.partName || ''}</td>
-                <td className="border border-gray-300 px-1 py-1">{it.specification || ''}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.uom || ''}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.totalQtyRequired || 0}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.lessQtyAvailableInStock || 0}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{netPrQty(it)}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.procurementLeadTimeWeeks || 0}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.materialRequiredByDate || ''}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.indigenousOrImported}</td>
-                <td className="border border-gray-300 px-1 py-1 text-right">{it.ratePerItem ? it.ratePerItem.toLocaleString() : ''}</td>
-                <td className="border border-gray-300 px-1 py-1 text-right">{approxValue(it) ? formatInr(approxValue(it)) : ''}</td>
-                <td className="border border-gray-300 px-1 py-1">{it.preferredVendorName || ''}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.validityOfWarrantyAndGuarantee || ''}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.fullLifeHr || ''}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.actualLifeHr || ''}</td>
-                <td className="border border-gray-300 px-1 py-1">{it.reasonForReplacement || ''}</td>
-                <td className="border border-gray-300 px-1 py-1 text-center">{it.repairingPossibility || 'NA'}</td>
-              </tr>
-            ))}
-
-            <tr>
-              <td colSpan={12} className="border border-gray-300 px-1 py-1 text-right font-semibold">TOTAL</td>
-              <td colSpan={7} className="border border-gray-300 px-1 py-1 text-right font-semibold">
-                {formatInr(totalValue(indent.items))}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div className="grid grid-cols-12 text-xs border-t border-gray-300">
-          <div className="col-span-8 border-r border-gray-300">
-            <div className="grid grid-cols-4 border-b border-gray-300">
-              <div className="p-2 font-semibold">SAI BIORESOURCES PRIVATE LIMITED</div>
-              <div className="p-2 font-semibold text-center">Name/ID</div>
-              <div className="p-2 font-semibold text-center">Signature</div>
-              <div className="p-2 font-semibold text-center">Date</div>
-            </div>
-
-            <div className="grid grid-cols-4 border-b border-gray-300">
-              <div className="p-2 font-semibold">Indented By</div>
-              <div className="p-2 text-center">{indent.indentedBy || '—'}</div>
-              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
-                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
-                  {sigFor(indent.indentedBy)?.signature ? (
-                    <img src={sigFor(indent.indentedBy)!.signature} alt="Signature" className="h-8 object-contain" />
-                  ) : indent.indentedBySignature ? (
-                    <div className="text-[11px] text-gray-700 text-center">{indent.indentedBySignature}</div>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </div>
-                {sigFor(indent.indentedBy)?.stamp ? (
-                  <img src={sigFor(indent.indentedBy)!.stamp} alt="Stamp" className="h-8 object-contain" />
-                ) : null}
-              </div>
-              <div className="p-2 text-center">{indent.indentedByTimestamp ? indent.indentedByTimestamp : (indent.date || '—')}</div>
-            </div>
-            <div className="grid grid-cols-4 border-b border-gray-300">
-              <div className="p-2 font-semibold">Forwarded By</div>
-              <div className="p-2 text-center">{indent.forwardedBy || '—'}</div>
-              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
-                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
-                  {sigFor(indent.forwardedBy)?.signature ? (
-                    <img src={sigFor(indent.forwardedBy)!.signature} alt="Signature" className="h-8 object-contain" />
-                  ) : indent.forwardedBySignature ? (
-                    <div className="text-[11px] text-gray-700 text-center">{indent.forwardedBySignature}</div>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </div>
-                {sigFor(indent.forwardedBy)?.stamp ? (
-                  <img src={sigFor(indent.forwardedBy)!.stamp} alt="Stamp" className="h-8 object-contain" />
-                ) : null}
-              </div>
-              <div className="p-2 text-center">{indent.forwardedByTimestamp ? indent.forwardedByTimestamp : (indent.date || '—')}</div>
-            </div>
-            {/* Director's Approval row */}
-            <div className="grid grid-cols-4">
-              <div className="p-2 font-semibold">Director's Approval</div>
-              <div className="p-2 text-center">
-                {indent.directorsApproval || '—'}
-              </div>
-              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
-                  <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
-                    {(() => {
-                      const diaryEntry = sigFor(indent.directorsApproval);
-                      if (diaryEntry?.signature && showDirectorSignature) {
-                        return <img src={diaryEntry.signature} alt="Signature" className="h-8 object-contain" />;
-                      }
-                      if (indent.directorsApprovalSignature) {
-                        return <div className="text-[11px] text-gray-700 text-center">{indent.directorsApprovalSignature}</div>;
-                      }
-                      return <span className="text-gray-400">—</span>;
-                    })()}
-                  </div>
-                  {(() => {
-                    const diaryEntry = sigFor(indent.directorsApproval);
-                    if (diaryEntry?.stamp && showDirectorSignature) {
-                      return <img src={diaryEntry.stamp} alt="Stamp" className="h-8 object-contain" />;
-                    }
-                    return null;
-                  })()}
-              </div>
-              <div className="p-2 text-center">{indent.date || '—'}</div>
-            </div>
-          </div>
-
-          <div className="col-span-4">
-            <div className="grid grid-cols-1 border-b border-gray-300">
-              <div className="p-2 font-semibold">Remarks / Notes</div>
-              <div className="p-2 min-h-[56px] text-gray-700">{indent.remarksNotes || ''}</div>
-            </div>
-            <div className="p-2">
-              <div className="font-semibold">Budget Head</div>
-              <div className="text-gray-700">{indent.budgetHead || '—'}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+const numOr0 = (v: unknown) => {
+  const n = typeof v === 'number' ? v : Number(String(v ?? '').trim());
+  return Number.isFinite(n) ? n : 0;
 };
-
-// ─── HO Comparative Preview (PDF-style) ─────────────────────────────────────
 
 const formatDateYmd = (iso?: string) => {
   if (!iso) return '';
@@ -443,93 +155,115 @@ const formatDateYmd = (iso?: string) => {
   }
 };
 
-const HOPreview = ({ comp }: { comp: Comparative }) => {
-  const selectedVid = comp.hoSelectedVendorId;
-  const selectedVendorName = comp.vendors?.find((v) => v.id === selectedVid)?.name ?? (selectedVid || '—');
+const FinalizedVendorQuotationCompact = ({
+  nfa,
+  approved,
+}: {
+  nfa: NfaApiRow;
+  approved?: boolean;
+}) => {
+  const prNo = String(nfa.pr_number ?? '').trim();
+  const createdAt = formatDateYmd(nfa.created_at);
+  const approvedVendorId = String(
+    nfa.approved_vendor_id ??
+      (nfa as any)?.approved_vendor?.vendor_id ??
+      (nfa as any)?.approved_vendor?.vendorId ??
+      '',
+  ).trim();
 
-  // compute per-vendor totals for display
-  const rows = (comp.vendors || []).map((v) => {
-    const q = (comp.quotes || []).find((x) => x.vendorId === v.id);
-    const base = (comp.items || []).reduce((sum, it) => {
-      const unit = q?.unitRateByItemId?.[it.id] ?? 0;
-      return sum + unit * (Number(it.qty) || 0);
-    }, 0);
-    const gst = (comp.items || []).reduce((sum, it) => {
-      const unit = q?.unitRateByItemId?.[it.id] ?? 0;
-      const amt = unit * (Number(it.qty) || 0);
-      const gp = Number(isFinite(Number(it.gstPercent)) ? it.gstPercent : 0) || 0;
-      return sum + amt * (gp / 100);
-    }, 0);
-    const freight = Number(comp.freightCharges?.[v.id] ?? 0) || 0;
-    const other = Number(comp.otherCharges?.[v.id] ?? 0) || 0;
-    return { vendorId: v.id, vendorName: v.name, base, gst, freight, other, total: base + gst + freight + other };
-  });
+  const quoters = Array.isArray(nfa.quoters) ? nfa.quoters : [];
+  const items = Array.isArray(nfa.item_row) ? nfa.item_row : [];
 
-  const selectedTotal = typeof selectedVid === 'string' ? rows.find((r) => r.vendorId === selectedVid)?.total ?? null : null;
+  if (!approvedVendorId) {
+    return <div className="text-xs text-gray-500">No approved vendor found for this NFA.</div>;
+  }
+
+  const approvedQuote = quoters.find((q) => String(q.vendor_id ?? '').trim() === approvedVendorId);
+  if (!approvedQuote) {
+    return (
+      <div className="text-xs text-gray-500">
+        Approved vendor quotation not found in this NFA.
+      </div>
+    );
+  }
+
+  const itemCosting = approvedQuote.item_costing ?? {};
+  const base = Object.values(itemCosting).reduce((sum, v) => sum + numOr0(v?.final_costing), 0);
+  const freight = numOr0(approvedQuote.freight_charges);
+  const other = numOr0(approvedQuote.other_charges);
+  const subtotal = numOr0(approvedQuote.subtotal) || base + freight + other;
+  const total = numOr0(approvedQuote.total_amount) || subtotal;
+  const gst = Math.max(0, total - subtotal);
 
   return (
-    <div className="min-w-[980px] bg-white">
-      <div className="border border-gray-300">
-        <div className="text-center font-semibold text-sm py-2 border-b border-gray-300">
-          HO Comparative / Selected Quote
-        </div>
-
-        <div className="grid grid-cols-12 border-b border-gray-300 text-xs">
-          <div className="col-span-7 p-2 border-r border-gray-300">
-            <span className="font-semibold">Title:</span> {comp.title || '—'}
-            {comp.subTitle ? <span className="text-gray-600"> · {comp.subTitle}</span> : null}
-          </div>
-          <div className="col-span-5 p-2">
-            <span className="font-semibold">Forwarded:</span> {formatDateYmd(comp.hoForwardedAt) || '—'}
+    <div className="relative overflow-hidden rounded-md border border-gray-200 bg-gray-50 p-2">
+      {approved ? (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="-rotate-12 rounded-md border-4 border-green-600/40 px-8 py-3 text-3xl font-black tracking-[0.2em] text-green-700/30">
+            APPROVED
           </div>
         </div>
+      ) : null}
 
-        <div className="grid grid-cols-12 border-b border-gray-300 text-xs">
-          <div className="col-span-7 p-2 border-r border-gray-300">
-            <span className="font-semibold">Selected Vendor:</span> {selectedVendorName}
-          </div>
-          <div className="col-span-5 p-2">
-            <span className="font-semibold">Selected Total:</span>{' '}
-            {typeof selectedTotal === 'number' ? formatInr(selectedTotal) : '—'}
+      <div className="mb-2 flex items-center justify-between">
+        <div className="inline-flex items-center rounded border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+          HO Approved
+        </div>
+        <div className="text-[10px] text-gray-500">
+          {prNo ? <>PR: <span className="text-gray-700">{prNo}</span></> : null}
+        </div>
+      </div>
+
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-gray-800 truncate">Approved vendor: {approvedVendorId}</div>
+          <div className="text-[10px] text-gray-500">
+            {createdAt ? <>Created: <span className="text-gray-700">{createdAt}</span></> : 'Created: —'}
           </div>
         </div>
+        <div className="text-right">
+          <div className="text-xs font-semibold text-gray-900">{formatInr(total)}</div>
+          <div className="text-[10px] text-gray-500">Grand total</div>
+        </div>
+      </div>
 
-        <table className="w-full text-[11px] border-collapse">
+      <div className="mt-2 max-h-28 overflow-auto rounded border border-gray-200 bg-white">
+        <table className="w-full border-collapse text-[10px]">
           <thead>
             <tr className="bg-gray-50">
-              <th className="border border-gray-300 px-2 py-1 text-left">Vendor</th>
-              <th className="border border-gray-300 px-2 py-1 text-right">Base</th>
-              <th className="border border-gray-300 px-2 py-1 text-right">GST</th>
-              <th className="border border-gray-300 px-2 py-1 text-right">Freight</th>
-              <th className="border border-gray-300 px-2 py-1 text-right">Other</th>
-              <th className="border border-gray-300 px-2 py-1 text-right">Total</th>
+              <th className="text-left px-2 py-1 border-b border-gray-100">Item</th>
+              <th className="text-right px-2 py-1 border-b border-gray-100">Qty</th>
+              <th className="text-right px-2 py-1 border-b border-gray-100">Unit</th>
+              <th className="text-right px-2 py-1 border-b border-gray-100">Amt</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
-              const isSel = Boolean(selectedVid) && r.vendorId === selectedVid;
+            {(items.length ? items : Object.keys(itemCosting).map((k) => ({ item_name: k } as NfaApiItemRow))).map((it, idx) => {
+              const name = String(it.item_name ?? '').trim() || `Item ${idx + 1}`;
+              const cost = itemCosting[name];
+              const qty = numOr0((it as any)?.quantity ?? cost?.quanity ?? cost?.quantity);
+              const uom = String((it as any)?.UoM ?? '').trim();
+              const unit = numOr0(cost?.per_unit_costing);
+              const amt = numOr0(cost?.final_costing) || (unit ? unit * qty : 0);
+
               return (
-                <tr key={r.vendorId} className={isSel ? 'bg-green-50' : undefined}>
-                  <td className="border border-gray-300 px-2 py-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={isSel ? 'font-semibold text-green-800' : 'text-gray-900'}>{r.vendorName}</span>
-                      {isSel ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-600 text-white">Selected</span> : null}
-                    </div>
-                  </td>
-                  <td className="border border-gray-300 px-2 py-1 text-right">{formatInr(r.base)}</td>
-                  <td className="border border-gray-300 px-2 py-1 text-right">{formatInr(r.gst)}</td>
-                  <td className="border border-gray-300 px-2 py-1 text-right">{formatInr(r.freight)}</td>
-                  <td className="border border-gray-300 px-2 py-1 text-right">{formatInr(r.other)}</td>
-                  <td className="border border-gray-300 px-2 py-1 text-right font-semibold">{formatInr(r.total)}</td>
+                <tr key={`${name}-${idx}`}>
+                  <td className="px-2 py-1 border-b border-gray-50 text-gray-700 truncate max-w-[220px]">{name}</td>
+                  <td className="px-2 py-1 border-b border-gray-50 text-right text-gray-700">{qty || 0}{uom ? ` ${uom}` : ''}</td>
+                  <td className="px-2 py-1 border-b border-gray-50 text-right text-gray-700">{unit ? formatInr(unit) : '—'}</td>
+                  <td className="px-2 py-1 border-b border-gray-50 text-right text-gray-700">{formatInr(amt || 0)}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      </div>
 
-        <div className="p-2 text-[11px] text-gray-500 border-t border-gray-300">
-          Note: This is a printable preview generated in-app. Use Download/Print to save as PDF.
-        </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[10px] text-gray-600">
+        <div>Base: <span className="font-semibold text-gray-800">{formatInr(base)}</span></div>
+        <div>GST: <span className="font-semibold text-gray-800">{formatInr(gst)}</span></div>
+        <div>Freight: <span className="font-semibold text-gray-800">{formatInr(freight)}</span></div>
+        <div>Other: <span className="font-semibold text-gray-800">{formatInr(other)}</span></div>
       </div>
     </div>
   );
@@ -582,32 +316,41 @@ const AdminOpsIndent = () => {
   // per-indent flag to show director signature when explicitly attached
   const [directorsAttachedMap, setDirectorsAttachedMap] = useState<Record<string, boolean>>({});
 
-  const [comparatives, setComparatives] = useState<Record<string, Comparative>>({});
-  const [nfaNotes, setNfaNotes] = useState<FinanceNfaNoteState>({});
+  const [nfas, setNfas] = useState<NfaApiRow[]>([]);
+  const [nfaApprovalsMap, setNfaApprovalsMap] = useState<Record<string, boolean>>({});
 
-  const [activeSection, setActiveSection] = useState<'indents' | 'nfa'>('indents');
-
-  const [previewHoComp, setPreviewHoComp] = useState<Comparative | null>(null);
+  const [activeSection, setActiveSection] = useState<'indents' | 'nfa'>('nfa');
 
   // Load attachments config on mount
   useEffect(() => {
-    seedDummyComparativesIfEmpty();
     setAttachments(readSignatureDiary());
     setDirectorsAttachedMap(readDirectorsAttachedMap());
-    setComparatives(readComparatives());
-    setNfaNotes(readFinanceNotes());
   }, []);
 
+  // Load NFA list from backend
   useEffect(() => {
-    writeFinanceNotes(nfaNotes);
-  }, [nfaNotes]);
-
-  const updateNfaNote = (indentKey: string, note: string) => {
-    setNfaNotes((p) => ({
-      ...p,
-      [indentKey]: { note, updatedAt: new Date().toISOString() },
-    }));
-  };
+    const loadNfas = async () => {
+      try {
+        const BASE_URL = getBaseUrl().replace(/\/$/, '');
+        if (!BASE_URL) throw new Error('Missing API base URL');
+        const res = await fetch(`${BASE_URL}/purchase_flow/get_NFA`);
+        const text = await res.text().catch(() => '');
+        if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+        let json: any = null;
+        try {
+          json = text ? JSON.parse(text) : [];
+        } catch {
+          throw new Error('Invalid JSON received from get_NFA');
+        }
+        const list = Array.isArray(json) ? json : (Array.isArray(json?.nfa) ? json.nfa : []);
+        setNfas(list as NfaApiRow[]);
+      } catch (err: any) {
+        console.error('Load NFA error:', err);
+        toast.error(`Failed to load NFA: ${String(err?.message ?? err ?? '').trim() || 'unknown error'}`);
+      }
+    };
+    loadNfas();
+  }, []);
 
   const handleConfigClose = () => {
     setConfigOpen(false);
@@ -756,6 +499,20 @@ const AdminOpsIndent = () => {
     );
   }, [indents, search]);
 
+  const filteredNfas = useMemo(() => {
+    const q = search.toLowerCase();
+    if (!q) return nfas;
+    return nfas.filter((nfa) => {
+      const pr = String(nfa.pr_number ?? '').toLowerCase();
+      const approved = String(
+        nfa.approved_vendor_id ?? (nfa as any)?.approved_vendor?.vendor_id ?? '',
+      ).toLowerCase();
+      const vendors = (Array.isArray(nfa.quoters) ? nfa.quoters : []).map((x) => String(x.vendor_id ?? '').toLowerCase()).join(' ');
+      const items = (Array.isArray(nfa.item_row) ? nfa.item_row : []).map((x) => String(x.item_name ?? '').toLowerCase()).join(' ');
+      return pr.includes(q) || approved.includes(q) || vendors.includes(q) || items.includes(q);
+    });
+  }, [nfas, search]);
+
   const markAttached = (id: string) => {
     setAttachedMap((prev) => ({ ...prev, [id]: true }));
     toast.success('Attachment added');
@@ -801,6 +558,33 @@ const AdminOpsIndent = () => {
       return JSON.parse(text);
     } catch {
       return { success: true } as any;
+    }
+  };
+
+  // API helper: POST to approve NFA endpoint
+  const approveNfaApi = async (payload: { comparison_id: string }) => {
+    const BASE_URL = getBaseUrl().replace(/\/$/, '');
+    const res = await fetch(`${BASE_URL}/purchase_flow/approve_NFA`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const text = await res.text().catch(() => '');
+    if (!res.ok) throw new Error(text || 'approve_NFA failed');
+    if (!text) return { success: true } as any;
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Some backends accidentally return Python-style booleans (True/False/None).
+      const normalized = text
+        .replace(/\bTrue\b/g, 'true')
+        .replace(/\bFalse\b/g, 'false')
+        .replace(/\bNone\b/g, 'null');
+      try {
+        return JSON.parse(normalized);
+      } catch {
+        throw new Error('Invalid JSON received from approve_NFA');
+      }
     }
   };
 
@@ -890,12 +674,45 @@ const AdminOpsIndent = () => {
     }
   };
 
+  const attachNfaApproval = async ({ prNo, comparisonId }: { prNo: string; comparisonId: string }) => {
+    if (!prNo) { toast.error('Missing PR number'); return; }
+    if (!comparisonId) { toast.error('Missing comparison id'); return; }
+    const id = prNo; // use PR as stable key for loading state
+
+    setAttachingApprovalMap((s) => ({ ...s, [id]: true }));
+    try {
+      const json = await approveNfaApi({ comparison_id: comparisonId });
+      if (!json || json.success !== true) {
+        throw new Error('NFA approval failed');
+      }
+
+      setNfas((prev) =>
+        prev.map((x) => {
+          const xPr = String((x as any)?.pr_number ?? '').trim();
+          const xCmp = String((x as any)?.comparison_id ?? (x as any)?.comparision_id ?? '').trim();
+          if ((xPr && xPr === prNo) || (xCmp && xCmp === comparisonId)) {
+            return { ...x, NFA_status: 'approved', nfa_status: 'approved' };
+          }
+          return x;
+        }),
+      );
+
+      setNfaApprovalsMap((s) => ({ ...s, [prNo]: true }));
+      toast.success('NFA approved and forwarded successfully');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'NFA approval failed');
+    } finally {
+      setAttachingApprovalMap((s) => ({ ...s, [id]: false }));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Finance Indent Approval</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Review indents, attach documents, and forward</p>
+          <h1 className="text-2xl font-bold text-gray-900">Finance NFA Approval</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Review the finalized quotation and approve & forward</p>
         </div>
         <Button variant="outline" onClick={() => setConfigOpen(true)} className="gap-2">
           <Settings className="w-4 h-4" />
@@ -1013,122 +830,80 @@ const AdminOpsIndent = () => {
         <div className="bg-white rounded-lg border border-gray-100 shadow-sm">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">NFA Notes</h2>
-              <p className="text-xs text-gray-500">HO selected quote + Finance Admin Ops note (stored locally)</p>
+              <h2 className="text-sm font-semibold text-gray-900">NFA (Note For Approval)</h2>
+              <p className="text-xs text-gray-500">For information only (corporate procedure). Your task: approve & forward the finalized quotation.</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-[minmax(220px,3fr)_minmax(220px,3fr)_minmax(280px,4fr)] gap-2 px-4 py-3 text-xs font-semibold text-gray-500 border-b border-gray-100">
+          <div className="grid grid-cols-[minmax(220px,3fr)_minmax(320px,5fr)_minmax(220px,3fr)] gap-2 px-4 py-3 text-xs font-semibold text-gray-500 border-b border-gray-100">
             <div>PR No / Project</div>
-            <div>HO Forwarded Note</div>
-            <div>Finance Admin Ops Note</div>
+            <div>Finalized Quotation (HO Selected)</div>
+            <div className="text-right">Approval</div>
           </div>
 
           <div className="divide-y divide-gray-100">
-            {filtered.map((it) => {
-              const comp = (comparatives || {})[it.id];
-              const hoTotal = comp ? calcHoSelectedTotal(comp) : null;
-              const hoVendor = comp?.vendors?.find((v) => v.id === comp.hoSelectedVendorId)?.name;
-              const noteState = nfaNotes[it.id];
+            {filteredNfas.map((nfa, idx) => {
+              const prNo = String(nfa.pr_number ?? '').trim();
+              const indent = prNo ? indents.find((x) => String(x.prNo ?? '').trim() === prNo || String(x.id ?? '').trim() === prNo) : undefined;
+              const comparisonId = String((nfa as any)?.comparison_id ?? (nfa as any)?.comparision_id ?? '').trim();
+              const hasNfaStatusField = (nfa as any)?.NFA_status != null || (nfa as any)?.nfa_status != null;
+              const statusRaw = String((nfa as any)?.NFA_status ?? (nfa as any)?.nfa_status ?? '').trim();
+              const statusLower = statusRaw.toLowerCase();
+
+              // NFA button state should follow NFA_status (not the Indent's director signature,
+              // which can be present even while NFA is still pending).
+              const approvedByStatus = Boolean(hasNfaStatusField && statusRaw && statusLower !== 'pending');
+              const approvedLocally = Boolean(prNo && nfaApprovalsMap[prNo]);
+              const alreadySigned = approvedByStatus || approvedLocally;
+
+              // Enable Approve when NFA_status is 'pending'. If backend doesn't send NFA_status (older payload), allow approval.
+              const canApprove = Boolean(prNo) && Boolean(comparisonId) && (!hasNfaStatusField || statusLower === 'pending');
+              const loadingKey = prNo;
 
               return (
                 <div
-                  key={`nfa-${it.id}`}
-                  className="grid grid-cols-[minmax(220px,3fr)_minmax(220px,3fr)_minmax(280px,4fr)] gap-2 px-4 py-3 hover:bg-gray-50 cursor-pointer"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    if (comp) setPreviewHoComp(comp);
-                    else toast.error('No HO comparative forwarded for this PR yet');
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      if (comp) setPreviewHoComp(comp);
-                      else toast.error('No HO comparative forwarded for this PR yet');
-                    }
-                  }}
+                  key={`nfa-${prNo || idx}`}
+                  className="grid grid-cols-[minmax(220px,3fr)_minmax(320px,5fr)_minmax(220px,3fr)] gap-2 px-4 py-3 hover:bg-gray-50"
                 >
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-gray-800 truncate">{it.prNo || 'PR (Draft)'}</div>
-                    <div className="text-xs text-gray-500 truncate">{it.project}</div>
+                    <div className="text-sm font-semibold text-gray-800 truncate">{prNo || 'PR (Draft)'}</div>
+                    <div className="text-xs text-gray-500 truncate">{indent?.project || '—'}</div>
                   </div>
 
                   <div className="text-xs text-gray-600">
-                    {comp?.hoSelectedVendorId ? (
-                      <div>
-                        Best quote selected: <span className="font-semibold text-gray-800">{hoVendor || comp.hoSelectedVendorId}</span>
-                        {typeof hoTotal === 'number' ? (
-                          <>
-                            {' '}
-                            · Total: <span className="font-semibold text-gray-800">{formatInr(hoTotal)}</span>
-                          </>
-                        ) : null}
-                        {comp.hoForwardedAt ? (
-                          <>
-                            {' '}
-                            · Forwarded: <span className="text-gray-700">{new Date(comp.hoForwardedAt).toISOString().slice(0, 10)}</span>
-                          </>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <span className="text-gray-500">No HO comparative forwarded for this PR yet.</span>
-                    )}
-                    <div className="mt-1 text-[10px] text-gray-400">Click row to view HO selected quote (PDF)</div>
+                    {prNo ? <FinalizedVendorQuotationCompact nfa={nfa} approved={alreadySigned} /> : <span className="text-gray-500">Missing PR number.</span>}
                   </div>
 
-                  <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                    <textarea
-                      className="w-full min-h-[44px] resize-y rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
-                      placeholder="Add note… (stored locally)"
-                      value={noteState?.note ?? ''}
-                      onChange={(e) => updateNfaNote(it.id, e.target.value)}
-                    />
-                    {noteState?.updatedAt ? (
-                      <div className="mt-1 text-[10px] text-gray-400">
-                        Updated: {new Date(noteState.updatedAt).toLocaleString()}
-                      </div>
-                    ) : null}
+                  <div className="flex items-start justify-end gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      className="bg-gray-900 hover:bg-gray-800 text-white"
+                      disabled={alreadySigned || !canApprove || Boolean(attachingApprovalMap[loadingKey])}
+                      onClick={() => {
+                        if (!prNo) {
+                          toast.error('Missing PR number');
+                          return;
+                        }
+                        if (!comparisonId) {
+                          toast.error('Missing comparison id');
+                          return;
+                        }
+                        void attachNfaApproval({ prNo, comparisonId });
+                      }}
+                    >
+                      {alreadySigned ? 'Approved' : attachingApprovalMap[loadingKey] ? 'Approving…' : 'Approve & Forward'}
+                    </Button>
                   </div>
                 </div>
               );
             })}
 
-            {filtered.length === 0 && (
-              <div className="px-4 py-6 text-sm text-gray-500 text-center">No indents found.</div>
+            {filteredNfas.length === 0 && (
+              <div className="px-4 py-6 text-sm text-gray-500 text-center">No NFA found.</div>
             )}
           </div>
         </div>
       )}
-
-      {/* HO Comparative PDF Preview */}
-      <Dialog open={Boolean(previewHoComp)} onOpenChange={(v) => { if (!v) setPreviewHoComp(null); }}>
-        <DialogContent className="max-w-[1200px] w-[1200px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>HO Selected Quote (Preview)</DialogTitle>
-          </DialogHeader>
-
-          {previewHoComp ? <HOPreview comp={previewHoComp} /> : null}
-
-          <DialogFooter>
-            <div className="flex justify-end gap-2 w-full">
-              <Button variant="outline" onClick={() => setPreviewHoComp(null)}>Close</Button>
-              <Button
-                className="bg-gray-900 hover:bg-gray-800 text-white"
-                onClick={() => {
-                  try {
-                    window.print();
-                  } catch {
-                    // ignore
-                  }
-                }}
-              >
-                Download / Print
-              </Button>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={Boolean(previewIndent)} onOpenChange={(v) => { if (!v) setPreviewIndent(null); }}>
         <DialogContent className="max-w-[1200px] w-[1200px] max-h-[90vh] overflow-y-auto">
