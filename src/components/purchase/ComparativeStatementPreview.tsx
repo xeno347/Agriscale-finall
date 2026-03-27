@@ -55,6 +55,9 @@ export type ComparativeModel = {
   // HO approval
   tcApprovedVendorId?: string;
   tcApprovedAt?: string;
+
+  // HO local-only UI state
+  hoLocked?: boolean;
 };
 
 const formatInr = (value: number) => {

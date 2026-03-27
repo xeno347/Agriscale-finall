@@ -437,7 +437,6 @@ export function MakePurchaseOrderPopup({
   inlineSimulatePrint = true,
 }: Props) {
   const printRef = useRef<HTMLDivElement>(null);
-  const inlinePreviewRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState<1 | 2 | 3>(1);
   const [p1, setP1] = useState<Page1State>(() => defaultPage1());
   const [p2, setP2] = useState<Page2State>(() => defaultPage2());
@@ -1093,35 +1092,6 @@ export function MakePurchaseOrderPopup({
     }
   };
 
-  useEffect(() => {
-    if (!open) return;
-    if (variant !== 'inline') return;
-
-    const container = inlinePreviewRef.current;
-    const source = printRef.current;
-    if (!container || !source) return;
-
-    container.innerHTML = '';
-
-    const currentPage = page;
-    const pageNums: Array<1 | 2 | 3> = [1, 2, 3];
-
-    for (const p of pageNums) {
-      flushSync(() => setPage(p));
-
-      const pageRoot = printRef.current?.firstElementChild as HTMLElement | null;
-      if (!pageRoot) continue;
-
-      const clone = pageRoot.cloneNode(true) as HTMLElement;
-      const wrap = document.createElement('div');
-      wrap.className = 'fc-po-preview-page';
-      wrap.appendChild(clone);
-      container.appendChild(wrap);
-    }
-
-    flushSync(() => setPage(currentPage));
-  }, [open, variant, p1, p2, p3, resolvedVendorId, clustersLoading, clusters.length, authorizedSealAttachedAt]);
-
   if (!open) return null;
   if (!comparative) return null;
 
@@ -1159,8 +1129,8 @@ export function MakePurchaseOrderPopup({
     }));
   };
 
-  const pageContent =
-    page === 1 ? (
+  const renderPageContent = (p: 1 | 2 | 3) =>
+    p === 1 ? (
       <div className="max-w-4xl mx-auto">
 
         {/* ── LETTERHEAD ── */}
@@ -1531,7 +1501,7 @@ export function MakePurchaseOrderPopup({
         </div>
 
       </div>
-    ) : page === 2 ? (
+    ) : p === 2 ? (
       <div className="max-w-4xl mx-auto">
         {/* ── LETTERHEAD (same as Page 1) ── */}
         <div className="border-b-2 border-gray-800 pb-3 mb-0">
@@ -1689,6 +1659,136 @@ export function MakePurchaseOrderPopup({
                   />
                 </td>
               </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">5)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Delivery Timelines</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.deliveryTimelines}
+                    onChange={(e) => setP2Field('deliveryTimelines', e.target.value)}
+                    className="w-full min-h-[86px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400"
+                    placeholder="Enter delivery timelines..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">6)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Documents</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.documents}
+                    onChange={(e) => setP2Field('documents', e.target.value)}
+                    className="w-full min-h-[92px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400"
+                    placeholder="Enter documents / approvals requirements..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">7)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Payment Terms</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.paymentAutoEnabled ? paymentAutoText : p2.paymentTerms}
+                    onChange={(e) => setP2Field('paymentTerms', e.target.value as any)}
+                    className="w-full min-h-[120px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400"
+                    placeholder="Enter payment terms..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">8)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Installation Support</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.installationSupport}
+                    onChange={(e) => setP2Field('installationSupport', e.target.value)}
+                    className="w-full min-h-[52px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400"
+                    placeholder="Enter installation / support terms..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">9)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Inspection</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.inspection}
+                    onChange={(e) => setP2Field('inspection', e.target.value)}
+                    className="w-full min-h-[60px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400"
+                    placeholder="Enter inspection terms..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">10)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Warranty</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.warranty}
+                    onChange={(e) => setP2Field('warranty', e.target.value)}
+                    className="w-full min-h-[66px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400"
+                    placeholder="Enter warranty / guarantee terms..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">11)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">LD / Penalty</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.ldAutoEnabled ? ldAutoText : p2.ldPenalty}
+                    onChange={(e) => setP2Field('ldPenalty', e.target.value as any)}
+                    className="w-full min-h-[86px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400"
+                    placeholder="Enter LD / penalty terms..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">12)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Remarks</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.remarks}
+                    onChange={(e) => setP2Field('remarks', e.target.value)}
+                    className="w-full min-h-[66px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 placeholder:text-gray-400"
+                    placeholder="Enter remarks..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">13)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Site &amp; Billing Address</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.siteBillingAddress}
+                    onChange={(e) => setP2Field('siteBillingAddress', e.target.value)}
+                    className="w-full min-h-[180px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 whitespace-pre-wrap placeholder:text-gray-400"
+                    placeholder="Enter site & billing address..."
+                  />
+                </td>
+              </tr>
+
+              <tr className="bg-white">
+                <td className="px-3 py-1.5 text-center border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">14)</td>
+                <td className="px-3 py-1.5 border-r border-t border-gray-300 font-semibold bg-gray-100 text-gray-600">Documents Required</td>
+                <td className="px-3 py-1.5 border-t border-gray-300">
+                  <textarea
+                    value={p2.documentsRequired}
+                    onChange={(e) => setP2Field('documentsRequired', e.target.value)}
+                    className="w-full min-h-[92px] text-[11px] text-gray-900 outline-none resize-none leading-5 bg-transparent border-none p-0 whitespace-pre-wrap placeholder:text-gray-400"
+                    placeholder="Enter documents required..."
+                  />
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -1754,6 +1854,8 @@ export function MakePurchaseOrderPopup({
       </div>
     );
 
+  const pageContent = renderPageContent(page);
+
   if (variant === 'inline') {
     return (
       <div className={inlineSimulatePrint ? 'fc-po-inline-preview' : undefined}>
@@ -1768,13 +1870,10 @@ export function MakePurchaseOrderPopup({
           </style>
         ) : null}
 
-        <div ref={inlinePreviewRef} className="pointer-events-none" />
-
-        {/* Offscreen source DOM used for building the 3-page preview via cloning */}
-        <div className="absolute -left-[100000px] top-0 w-[1200px]" aria-hidden="true">
-          <div className="px-8 py-8 bg-white text-black" ref={printRef}>
-            {pageContent}
-          </div>
+        <div className="pointer-events-none">
+          <div className="fc-po-preview-page">{renderPageContent(1)}</div>
+          <div className="fc-po-preview-page">{renderPageContent(2)}</div>
+          <div className="fc-po-preview-page">{renderPageContent(3)}</div>
         </div>
       </div>
     );

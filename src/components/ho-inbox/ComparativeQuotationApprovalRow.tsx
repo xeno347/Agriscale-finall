@@ -1,13 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, ClipboardList, FileText, ShoppingCart } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronDown, ClipboardList, FileText, Lock, SendHorizonal, ShoppingCart, Unlock, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   ComparativeStatementPreview,
@@ -21,6 +30,8 @@ type Props = {
   item: ComparativeModel;
   onOpen: (indentId: string) => void;
   onUpdate: (indentId: string, patch: Partial<ComparativeModel>) => void;
+  defaultOpen?: boolean;
+  defaultTab?: 'indent' | 'comparative' | 'po';
 };
 
 type ApiIndentPerson = {
@@ -65,6 +76,53 @@ type ApiIndent = {
   indented_by?: unknown;
   forwarded_by?: unknown;
   approved_by?: unknown;
+};
+
+const PO_NEXT_PROCESS_OPTIONS = [
+  { id: 'po_acceptance_wo_acceptance', label: 'PO acceptance / WO Acceptance (WO: Work order)' },
+  { id: 'delivery_timeline_work_completion', label: 'Delivery timeline (PO) / Work completion timeline (WO)' },
+  { id: 'proforma_invoice', label: 'Proforma invoice' },
+  { id: 'progress_inspection_report', label: 'Progress (WO) / Inspection report (PO)' },
+  { id: 'grn_completion_certificate', label: 'GRN (PO) / Completion certificate (WO)' },
+  { id: 'prr', label: 'PRR (payment requisition receipt)' },
+  { id: 'invoice', label: 'Invoice' },
+  { id: 'e_way_bill', label: 'E way bill' },
+  { id: 'warranty_guarantee_card', label: 'Warranty / Guarantee card' },
+] as const;
+
+type PoNextProcessId = (typeof PO_NEXT_PROCESS_OPTIONS)[number]['id'];
+
+const PO_DOC_BY_STEP: Record<PoNextProcessId, string> = {
+  po_acceptance_wo_acceptance: 'po acceptance',
+  delivery_timeline_work_completion: 'delivery timeline',
+  proforma_invoice: 'proforma invoice',
+  progress_inspection_report: 'inspection report',
+  grn_completion_certificate: 'grn',
+  prr: 'prr',
+  invoice: 'invoice',
+  e_way_bill: 'e way bill',
+  warranty_guarantee_card: 'warranty / guarantee card',
+};
+
+const buildPurchaseFlowStage = (series: PoNextProcessId[]) => {
+  const stage: Record<
+    string,
+    {
+      document: string;
+      status: 'empty';
+      doc_link: string;
+    }
+  > = {};
+
+  series.forEach((id, idx) => {
+    stage[`step_${idx + 1}`] = {
+      document: PO_DOC_BY_STEP[id] || String(id).replace(/_/g, ' '),
+      status: 'empty',
+      doc_link: '',
+    };
+  });
+
+  return stage;
 };
 
 const safeTrim = (v: unknown) => String(v ?? '').trim();
@@ -140,13 +198,29 @@ function InlineTracker({
   );
 }
 
-export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
-  const [open, setOpen] = useState(false);
+export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, defaultTab }: Props) {
+  const [open, setOpen] = useState(Boolean(defaultOpen));
   const [approving, setApproving] = useState(false);
   const [makePoOpen, setMakePoOpen] = useState(false);
+  const [poForwardDialogOpen, setPoForwardDialogOpen] = useState(false);
+  const [poForwarding, setPoForwarding] = useState(false);
   const didCheckPoRef = useRef<string>('');
 
-  const [activeTab, setActiveTab] = useState<'indent' | 'comparative' | 'po'>('comparative');
+  const [poNextProcessSeries, setPoNextProcessSeries] = useState<PoNextProcessId[]>(() => {
+    const existing = (item as any)?.poNextProcessSeries;
+    if (Array.isArray(existing) && existing.length) return existing as PoNextProcessId[];
+    return PO_NEXT_PROCESS_OPTIONS.map((x) => x.id) as PoNextProcessId[];
+  });
+
+  const [activeTab, setActiveTab] = useState<'indent' | 'comparative' | 'po'>(() => defaultTab ?? 'comparative');
+
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
+
+  useEffect(() => {
+    if (defaultTab) setActiveTab(defaultTab);
+  }, [defaultTab]);
 
   const [indentLoading, setIndentLoading] = useState(false);
   const [indentError, setIndentError] = useState<string | null>(null);
@@ -169,6 +243,8 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
   const poCreatedAt = String((item as any)?.poCreatedAt ?? '').trim();
   const poNo = String((item as any)?.poNo ?? (item as any)?.order_number ?? '').trim();
   const poStatus = String((item as any)?.poStatus ?? '').trim().toLowerCase();
+
+  const hoLocked = Boolean((item as any)?.hoLocked);
 
   const tcDone = tcStatusLower === 'approved' || Boolean(approvedVendorId);
   const nfaDone = nfaStatusLower === 'approved';
@@ -455,7 +531,10 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
   const forwardPo = () => {
     if (!poDone) return;
     if (poForwarded) return toast.message('PO already forwarded');
-    toast.message('Forward PO is not wired yet');
+    const existing = (item as any)?.poNextProcessSeries;
+    if (Array.isArray(existing) && existing.length) setPoNextProcessSeries(existing as PoNextProcessId[]);
+    else setPoNextProcessSeries(PO_NEXT_PROCESS_OPTIONS.map((x) => x.id) as PoNextProcessId[]);
+    setPoForwardDialogOpen(true);
   };
 
   const trackerSteps = [
@@ -478,6 +557,272 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
 
   return (
     <>
+      <Dialog open={poForwardDialogOpen} onOpenChange={setPoForwardDialogOpen}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden gap-0">
+
+          {/* ── Header ─────────────────────────────────────────── */}
+          <div className="px-6 pt-6 pb-4 border-b border-border bg-muted/30">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
+                <SendHorizonal className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <DialogTitle className="text-base font-bold tracking-tight">Forward Purchase Order</DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                  Define the document workflow that must be completed after this PO is forwarded. Arrange the steps in the required sequence.
+                </DialogDescription>
+              </div>
+            </div>
+
+            {/* PO meta strip */}
+            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-[11px]">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-muted-foreground uppercase tracking-widest">PR No.</span>
+                <span className="font-semibold text-foreground">{item.indentId}</span>
+              </div>
+              {poNo && (
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-muted-foreground uppercase tracking-widest">PO No.</span>
+                  <span className="font-semibold text-foreground">{poNo}</span>
+                </div>
+              )}
+              {(item as any).hoSelectedVendorId && (
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-muted-foreground uppercase tracking-widest">Vendor</span>
+                  <span className="font-semibold text-foreground">{String((item as any).hoSelectedVendorId)}</span>
+                </div>
+              )}
+              <div className="ml-auto flex items-center gap-1.5">
+                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold border ${
+                  poNextProcessSeries.length > 0
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                }`}>
+                  {poNextProcessSeries.length > 0 ? <Check className="h-3 w-3" /> : null}
+                  {poNextProcessSeries.length} step{poNextProcessSeries.length !== 1 ? 's' : ''} selected
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Body ───────────────────────────────────────────── */}
+          <div className="grid grid-cols-1 md:grid-cols-[2fr_3fr] divide-y md:divide-y-0 md:divide-x divide-border max-h-[60vh] overflow-hidden">
+
+            {/* Left – available checklist */}
+            <div className="flex flex-col">
+              <div className="px-5 py-3 border-b border-border bg-muted/20">
+                <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Available Processes</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">Check to add to the workflow.</div>
+              </div>
+              <div className="overflow-y-auto px-3 py-3 space-y-1.5">
+                {PO_NEXT_PROCESS_OPTIONS.map((opt, optIdx) => {
+                  const checked = poNextProcessSeries.includes(opt.id);
+                  const stepPos = poNextProcessSeries.indexOf(opt.id);
+                  return (
+                    <label
+                      key={opt.id}
+                      className={`group flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                        checked
+                          ? 'bg-background border-foreground/20 shadow-sm'
+                          : 'bg-transparent border-transparent hover:bg-muted/40 hover:border-border'
+                      }`}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(v) => {
+                          const add = Boolean(v);
+                          setPoNextProcessSeries((prev) => {
+                            if (add && !prev.includes(opt.id)) return [...prev, opt.id];
+                            if (!add) return prev.filter((x) => x !== opt.id);
+                            return prev;
+                          });
+                        }}
+                        className="shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-[12px] leading-4 font-medium ${
+                          checked ? 'text-foreground' : 'text-muted-foreground'
+                        }`}>{opt.label}</div>
+                      </div>
+                      {checked ? (
+                        <div className="shrink-0 h-5 w-5 rounded-full bg-foreground text-background text-[10px] font-bold flex items-center justify-center tabular-nums">
+                          {stepPos + 1}
+                        </div>
+                      ) : (
+                        <div className="shrink-0 h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 text-[10px] text-muted-foreground/40 flex items-center justify-center">
+                          {optIdx + 1}
+                        </div>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right – ordered workflow */}
+            <div className="flex flex-col">
+              <div className="px-5 py-3 border-b border-border bg-muted/20">
+                <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Document Workflow</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">The steps in sequence as they must be completed.</div>
+              </div>
+              <div className="overflow-y-auto px-4 py-4">
+                {poNextProcessSeries.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
+                    <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                      <ClipboardList className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <div className="text-sm font-medium text-muted-foreground">No steps added yet</div>
+                    <div className="text-xs text-muted-foreground/70">Select processes from the left panel to build the workflow.</div>
+                  </div>
+                ) : (
+                  <ol className="relative space-y-0">
+                    {poNextProcessSeries.map((id, idx) => {
+                      const opt = PO_NEXT_PROCESS_OPTIONS.find((x) => x.id === id);
+                      const isFirst = idx === 0;
+                      const isLast = idx === poNextProcessSeries.length - 1;
+                      return (
+                        <li key={id} className="flex gap-3">
+                          {/* Connector column */}
+                          <div className="flex flex-col items-center shrink-0 w-7">
+                            <div className={`h-7 w-7 rounded-full border-2 flex items-center justify-center shrink-0 z-10 ${
+                              'bg-foreground border-foreground text-background'
+                            } text-[11px] font-bold tabular-nums`}>
+                              {idx + 1}
+                            </div>
+                            {!isLast && (
+                              <div className="w-px flex-1 bg-border mt-1 mb-1 min-h-[20px]" />
+                            )}
+                          </div>
+
+                          {/* Card */}
+                          <div className={`flex-1 min-w-0 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 mb-2 shadow-sm`}>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[12px] font-semibold text-foreground leading-4">{opt?.label || id}</div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                disabled={isFirst}
+                                onClick={() =>
+                                  setPoNextProcessSeries((prev) => {
+                                    if (idx <= 0) return prev;
+                                    const next = [...prev];
+                                    const tmp = next[idx - 1]; next[idx - 1] = next[idx]; next[idx] = tmp;
+                                    return next;
+                                  })
+                                }
+                                className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                title="Move up"
+                              >
+                                <ArrowUp className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isLast}
+                                onClick={() =>
+                                  setPoNextProcessSeries((prev) => {
+                                    if (idx >= prev.length - 1) return prev;
+                                    const next = [...prev];
+                                    const tmp = next[idx + 1]; next[idx + 1] = next[idx]; next[idx] = tmp;
+                                    return next;
+                                  })
+                                }
+                                className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                title="Move down"
+                              >
+                                <ArrowDown className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPoNextProcessSeries((prev) => prev.filter((x) => x !== id))}
+                                className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                title="Remove step"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Footer ─────────────────────────────────────────── */}
+          <div className="px-6 py-4 border-t border-border bg-muted/20 flex items-center justify-between gap-4">
+            <div className="text-[11px] text-muted-foreground leading-4">
+              Forwarding will initiate the procurement workflow and notify the relevant team.
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button type="button" variant="outline" size="sm" onClick={() => setPoForwardDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={poNextProcessSeries.length === 0 || poForwarding}
+                className="gap-1.5"
+                onClick={async () => {
+                  const orderNumber = safeTrim(poNo);
+                  const prNumber = safeTrim(item?.indentId);
+                  const comparisonId = safeTrim((item as any)?.comparisonId ?? (item as any)?.comparison_id ?? (item as any)?.comparision_id);
+                  if (!orderNumber) return toast.error('Missing PO number');
+                  if (!prNumber) return toast.error('Missing PR number');
+                  if (!comparisonId) return toast.error('Missing comparison id');
+
+                  const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
+                  if (!baseUrl) return toast.error('Missing base URL');
+
+                  setPoForwarding(true);
+                  try {
+                    const res = await fetch(`${baseUrl}/purchase_flow/forward_purchase_order`, {
+                      method: 'POST',
+                      headers: {
+                        Accept: 'application/json',
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        order_number: orderNumber,
+                        pr_number: prNumber,
+                        comparison_id: comparisonId,
+                        purchase_flow_stage: buildPurchaseFlowStage(poNextProcessSeries),
+                      }),
+                    });
+
+                    if (!res.ok) {
+                      const errText = await res.text().catch(() => '');
+                      throw new Error(errText || `HTTP ${res.status}`);
+                    }
+
+                    const json: any = await res.json().catch(() => null);
+                    const success = Boolean(
+                      json &&
+                      (json.success === true || String(json.success).toLowerCase() === 'true')
+                    );
+                    if (!success) throw new Error('Forward failed');
+
+                    onUpdate(item.indentId, { poStatus: 'forwarded', poNextProcessSeries: poNextProcessSeries } as any);
+                    setPoForwardDialogOpen(false);
+                    toast.success('PO forwarded — procurement workflow initiated');
+                  } catch (e: any) {
+                    const msg = safeTrim(e?.message ?? e);
+                    toast.error(`Failed to forward PO${msg ? `: ${msg}` : ''}`);
+                  } finally {
+                    setPoForwarding(false);
+                  }
+                }}
+              >
+                <SendHorizonal className="h-3.5 w-3.5" />
+                Forward PO
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <MakePurchaseOrderPopup
         open={makePoOpen}
         comparative={item}
@@ -495,10 +840,18 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
         {/* ── Always-visible row ─────────────────────────────────── */}
         <CollapsibleTrigger asChild>
           <div
-            className="group flex cursor-pointer items-center gap-4 overflow-hidden px-4 py-3 transition-colors hover:bg-muted/30"
+            className="group relative flex cursor-pointer items-center gap-4 overflow-hidden px-4 py-3 transition-colors hover:bg-muted/30"
             role="button"
             tabIndex={0}
           >
+            {poForwarded ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
+                <div className="border-4 border-green-800/30 text-green-800/30 rounded-lg px-10 py-4 font-extrabold text-5xl tracking-[0.25em] select-none">
+                  FORWARDED
+                </div>
+              </div>
+            ) : null}
+
             {/* Icon */}
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
               <FileText className="h-4 w-4 text-muted-foreground" />
@@ -519,15 +872,35 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
               <InlineTracker steps={trackerSteps} />
             </div>
 
-            {/* PO actions */}
+            {/* Toolbox (lock + PO actions + collapse) */}
             <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/20 p-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => {
+                    const next = !hoLocked;
+                    onUpdate(item.indentId, { hoLocked: next } as any);
+                    toast.message(next ? 'Locked (editing disabled)' : 'Unlocked (editing enabled)');
+                  }}
+                  aria-label={hoLocked ? 'Unlock row' : 'Lock row'}
+                  title={hoLocked ? 'Unlock to enable editing' : 'Lock to disable editing'}
+                >
+                  {hoLocked ? (
+                    <Lock className="h-4 w-4 text-destructive" aria-hidden="true" />
+                  ) : (
+                    <Unlock className="h-4 w-4 text-muted-foreground opacity-50" aria-hidden="true" />
+                  )}
+                </Button>
+
                 <Button
                   type="button"
                   size="sm"
                   variant={poDone ? 'outline' : 'default'}
                   onClick={openMakePo}
-                  disabled={poDone}
+                  disabled={poDone || hoLocked}
                 >
                   Make PO
                 </Button>
@@ -536,7 +909,7 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
                   size="sm"
                   variant="outline"
                   onClick={openEditPo}
-                  disabled={!poDone}
+                  disabled={!poDone || hoLocked}
                 >
                   Edit PO
                 </Button>
@@ -549,12 +922,22 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
                 >
                   Forward PO
                 </Button>
-              </div>
-            </div>
 
-            {/* Chevron */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setOpen((v) => !v)}
+                  aria-label={open ? 'Collapse' : 'Expand'}
+                  title={open ? 'Collapse' : 'Expand'}
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`}
+                    aria-hidden="true"
+                  />
+                </Button>
+              </div>
             </div>
           </div>
         </CollapsibleTrigger>
@@ -655,36 +1038,15 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate }: Props) {
                     <div className="text-sm font-semibold text-foreground">Purchase Order</div>
                     <div className="text-xs text-muted-foreground">
                       {poDone
-                        ? 'Purchase order details.'
+                        ? 'Purchase order document.'
                         : 'No purchase order created yet.'}
                     </div>
                   </div>
 
                   {poDone ? (
                     <>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">PO Created On</div>
-                          <div className="text-sm text-foreground">{fmt(poCreatedAt) || poCreatedAt}</div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Vendor</div>
-                          <div className="text-sm text-foreground">
-                            {String((item as any)?.tcApprovedVendorId || item.hoSelectedVendorId || '—')}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">PO Number</div>
-                          <div className="text-sm text-foreground">{poNo || '—'}</div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Status</div>
-                          <div className="text-sm text-foreground">{poStatus ? poStatus[0].toUpperCase() + poStatus.slice(1) : 'Created'}</div>
-                        </div>
-                      </div>
-
                       {/* Inline PO preview (same layout as Make PO popup, rendered in-place) */}
-                      <div className="mt-4">
+                      <div className="h-[600px] overflow-y-auto">
                         <MakePurchaseOrderPopup
                           open={open && activeTab === 'po'}
                           comparative={item}

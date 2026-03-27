@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { ComparativeQuotationApprovalRow } from '@/components/ho-inbox/ComparativeQuotationApprovalRow';
 import { type ComparativeModel } from '@/components/purchase/ComparativeStatementPreview';
@@ -48,9 +48,11 @@ type HoOverrides = Record<
     hoForwardedAt?: string;
     tcApprovedVendorId?: string;
     tcApprovedAt?: string;
+    hoLocked?: boolean;
     poCreatedAt?: string;
     poNo?: string;
     poStatus?: string;
+    poNextProcessSeries?: string[];
   }
 >;
 
@@ -207,8 +209,16 @@ const mapTcToModel = (x: ApiTcComparative): ComparativeModel | null => {
 
 export default function HOInbox() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [all, setAll] = useState<Record<string, ComparativeModel>>({});
   const [loading, setLoading] = useState(false);
+
+  const openIndentId = safeTrim(searchParams.get('open'));
+  const desiredTab = (() => {
+    const t = safeTrim(searchParams.get('tab')).toLowerCase();
+    if (t === 'indent' || t === 'comparative' || t === 'po') return t as 'indent' | 'comparative' | 'po';
+    return undefined;
+  })();
 
   useEffect(() => {
     let cancelled = false;
@@ -304,9 +314,11 @@ export default function HOInbox() {
         hoForwardedAt: merged.hoForwardedAt,
         tcApprovedVendorId: merged.tcApprovedVendorId,
         tcApprovedAt: merged.tcApprovedAt,
+        hoLocked: (merged as any)?.hoLocked,
         poCreatedAt: (merged as any)?.poCreatedAt,
         poNo: (merged as any)?.poNo,
         poStatus: (merged as any)?.poStatus,
+        poNextProcessSeries: (merged as any)?.poNextProcessSeries,
       };
       writeHoOverrides(overrides);
       return { ...prev, [indentId]: merged };
@@ -336,12 +348,15 @@ export default function HOInbox() {
           <div className="divide-y divide-border">
             {inboxRows.map((r) => {
               if (r.kind === 'comparative') {
+                const isTarget = Boolean(openIndentId) && r.item.indentId === openIndentId;
                 return (
                   <ComparativeQuotationApprovalRow
                     key={r.key}
                     item={r.item}
                     onOpen={(indentId) => navigate(`/ho/${indentId}`)}
                     onUpdate={updateComparative}
+                    defaultOpen={isTarget}
+                    defaultTab={isTarget ? desiredTab : undefined}
                   />
                 );
               }
