@@ -40,6 +40,7 @@ import QuotationComparative from "./pages/QuotationComparative";
 import HOInbox from "@/pages/HOInbox";
 import HO from "@/pages/HO";
 import PurchaseFlow from "@/pages/PurchaseFlow";
+import GRNModule from "@/pages/GRNModule";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +59,7 @@ const App = () => (
           <Route path="/tasks-beta" element={<AppLayout><TasksBeta /></AppLayout>} />
           <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
           <Route path="/land-acquisition" element={<AppLayout><LandAcquisition /></AppLayout>} />
+          <Route path="/grn" element={<AppLayout><GRNModule /></AppLayout>} />
           
           {/* Operations */}
           <Route path="/cultivation-calendar" element={<AppLayout><CultivationCalendar /></AppLayout>} />

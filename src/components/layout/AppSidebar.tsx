@@ -24,6 +24,7 @@ import {
   ClipboardCheck,
   Activity,
   CreditCard,
+  ClipboardList,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -271,6 +272,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavItem to="/vendor-directory" icon={FileText} label="Vendor Directory" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/ho" icon={FileText} label="HO Module" isSidebarCollapsed={isCollapsed} />
           <NavItem to="/purchase-flow" icon={FileText} label="Purchase Flow" isSidebarCollapsed={isCollapsed} />
+          <NavItem to="/grn" icon={ClipboardList} label="GRN Module" isSidebarCollapsed={isCollapsed} />
           {/* Added notificationStatus="warning" to Logistics */}
           <NavItem 
             to="/logistics" 
