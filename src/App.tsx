@@ -40,6 +40,15 @@ import QuotationComparative from "./pages/QuotationComparative";
 import HOInbox from "@/pages/HOInbox";
 import HO from "@/pages/HO";
 import PurchaseFlow from "@/pages/PurchaseFlow";
+import ProjectConfig from "@/pages/ProjectConfig";
+import DirectorCapex from "./pages/DirectorCapex";
+import DirectorOpex from "./pages/DirectorOpex";
+import DirectorAmortization from "./pages/DirectorAmortization";
+import DirectorCashFlow from "./pages/DirectorCashFlow";
+import DirectorCostMonitoring from "./pages/DirectorCostMonitoring";
+import DirectorEmisInvestments from "./pages/DirectorEmisInvestments";
+import DirectorAssetsLiabilities from "./pages/DirectorAssetsLiabilities";
+import HRMS from "./pages/HRMS";
 
 const queryClient = new QueryClient();
 
@@ -99,6 +108,8 @@ const App = () => (
           <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
           <Route path="/fleet-chart" element={<AppLayout><FleetChart /></AppLayout>} />
           <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />
+                    {/* Human Resources */}
+                    <Route path="/hrms/*" element={<AppLayout><HRMS /></AppLayout>} />
           
           {/* Blocks */}
           <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />
@@ -145,6 +156,23 @@ const App = () => (
               </AppLayout>
             }
           />
+          <Route
+            path="/project-config"
+            element={
+              <AppLayout>
+                <ProjectConfig />
+              </AppLayout>
+            }
+          />
+
+          {/* Director */}
+          <Route path="/director/capex" element={<AppLayout><DirectorCapex /></AppLayout>} />
+          <Route path="/director/opex" element={<AppLayout><DirectorOpex /></AppLayout>} />
+          <Route path="/director/amortization" element={<AppLayout><DirectorAmortization /></AppLayout>} />
+          <Route path="/director/cash-flow" element={<AppLayout><DirectorCashFlow /></AppLayout>} />
+          <Route path="/director/cost-monitoring" element={<AppLayout><DirectorCostMonitoring /></AppLayout>} />
+          <Route path="/director/emis-investments" element={<AppLayout><DirectorEmisInvestments /></AppLayout>} />
+          <Route path="/director/assets-liabilities" element={<AppLayout><DirectorAssetsLiabilities /></AppLayout>} />
 
           <Route path="*" element={<NotFound />} />
         </Routes>

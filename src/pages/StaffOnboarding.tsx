@@ -6,6 +6,7 @@ import {
   Image as ImageIcon,
   IdCard,
   Landmark,
+  IndianRupee,
   Hash,
   KeyRound
 } from 'lucide-react';
@@ -53,6 +54,13 @@ const StaffOnboarding = () => {
   const [formStep, setFormStep] = useState<1 | 2>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [credentialsDialogStaffId, setCredentialsDialogStaffId] = useState<string | null>(null);
+  // Payroll config state
+  const [payrollConfigs, setPayrollConfigs] = useState<Record<string, { baseSalary: number; deductions: number; additions: number }>>({});
+  const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
+  const [payrollModalStaffId, setPayrollModalStaffId] = useState<string | null>(null);
+  const [pBaseSalary, setPBaseSalary] = useState<number | ''>('');
+  const [pDeductions, setPDeductions] = useState<number | ''>('');
+  const [pAdditions, setPAdditions] = useState<number | ''>('');
 
   const resetForm = () => {
     setFormStep(1);
@@ -253,6 +261,7 @@ const StaffOnboarding = () => {
               <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Type</th>
               <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Contact</th>
               <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Status</th>
+              <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Payroll Config</th>
               <th className="px-6 py-4 text-center font-semibold text-muted-foreground">Credentials</th>
             </tr>
           </thead>
@@ -308,19 +317,51 @@ const StaffOnboarding = () => {
                         Active
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-center">
-                      <CredentialsDialog
-                        farmerId={staff.staff_id}
-                        credentials={staff.credentials}
-                        open={credentialsDialogStaffId === staff.staff_id}
-                        onOpenChange={(nextOpen) => setCredentialsDialogStaffId(nextOpen ? staff.staff_id : null)}
-                        onSaved={(next) =>
-                          setStaffList(prev => prev.map(s => (s.staff_id === staff.staff_id ? { ...s, credentials: next } : s)))
-                        }
-                        entity="staff"
-                        role={staff.staff_information?.staff_designation ?? ''}
-                      />
-                    </td>
+                        <td className="px-6 py-4">
+                          {payrollConfigs[staff.staff_id] ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  const cfg = payrollConfigs[staff.staff_id];
+                                  setPBaseSalary(cfg.baseSalary);
+                                  setPDeductions(cfg.deductions);
+                                  setPAdditions(cfg.additions);
+                                  setPayrollModalStaffId(staff.staff_id);
+                                  setIsPayrollModalOpen(true);
+                                }}
+                                className="px-3 py-1 text-sm bg-white border border-border rounded-md hover:bg-gray-50"
+                              >
+                                View Payroll Config
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setPBaseSalary('');
+                                setPDeductions('');
+                                setPAdditions('');
+                                setPayrollModalStaffId(staff.staff_id);
+                                setIsPayrollModalOpen(true);
+                              }}
+                              className="px-3 py-1 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+                            >
+                              Create Payroll Config
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <CredentialsDialog
+                            farmerId={staff.staff_id}
+                            credentials={staff.credentials}
+                            open={credentialsDialogStaffId === staff.staff_id}
+                            onOpenChange={(nextOpen) => setCredentialsDialogStaffId(nextOpen ? staff.staff_id : null)}
+                            onSaved={(next) =>
+                              setStaffList(prev => prev.map(s => (s.staff_id === staff.staff_id ? { ...s, credentials: next } : s)))
+                            }
+                            entity="staff"
+                            role={staff.staff_information?.staff_designation ?? ''}
+                          />
+                        </td>
                   </tr>
                 );
               })
@@ -625,6 +666,69 @@ const StaffOnboarding = () => {
               )}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* --- PAYROLL CONFIG MODAL --- */}
+      {isPayrollModalOpen && payrollModalStaffId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-background w-full max-w-md rounded-xl shadow-2xl border border-border overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-white sticky top-0 z-10">
+              <div>
+                <h3 className="font-bold text-lg text-foreground">Payroll Configuration</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Configure salary for this employee</p>
+              </div>
+              <button onClick={() => setIsPayrollModalOpen(false)} className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-muted transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-foreground">Base Salary (₹)</label>
+                <input
+                  type="number"
+                  value={pBaseSalary as any}
+                  onChange={(e) => setPBaseSalary(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground">Deductions (₹)</label>
+                <input
+                  type="number"
+                  value={pDeductions as any}
+                  onChange={(e) => setPDeductions(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground">Additions (₹)</label>
+                <input
+                  type="number"
+                  value={pAdditions as any}
+                  onChange={(e) => setPAdditions(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background"
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-border bg-gray-50 flex justify-end gap-3">
+              <button onClick={() => setIsPayrollModalOpen(false)} className="px-4 py-2 text-sm font-medium bg-white border border-gray-300 rounded-lg">Cancel</button>
+              <button
+                onClick={() => {
+                  if (!payrollModalStaffId) return;
+                  const bs = Number(pBaseSalary) || 0;
+                  const ded = Number(pDeductions) || 0;
+                  const add = Number(pAdditions) || 0;
+                  setPayrollConfigs(prev => ({ ...prev, [payrollModalStaffId]: { baseSalary: bs, deductions: ded, additions: add } }));
+                  setIsPayrollModalOpen(false);
+                  toast.success('Payroll config saved');
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </div>
       )}
