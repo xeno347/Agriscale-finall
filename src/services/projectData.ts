@@ -149,7 +149,7 @@ export const formatInr = (value: number) =>
 
 export const readProjectJson = async (fileUrl: string): Promise<ProjectFileData> => {
   const baseUrl = getBaseUrl().replace(/\/$/, "");
-  const response = await fetch(`${baseUrl}/admin_project/read_project_json/`, {
+  const response = await fetch(`${baseUrl}/admin_project/read_project_json`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ file_url: fileUrl }),
@@ -201,7 +201,7 @@ export const fetchProjectOpexList = async (projectId: string): Promise<ProjectOp
 
 export const readJsonFromUrl = async <T = unknown>(fileUrl: string): Promise<T> => {
   const baseUrl = getBaseUrl().replace(/\/$/, "");
-  const response = await fetch(`${baseUrl}/admin_project/read_project_json/`, {
+  const response = await fetch(`${baseUrl}/admin_project/read_project_json`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ file_url: fileUrl }),
