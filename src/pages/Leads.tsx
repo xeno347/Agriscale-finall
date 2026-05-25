@@ -3,7 +3,6 @@ import { Plus, Search, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Lead } from '@/types/farm';
-import { leadsApi } from '@/services/mockData';
 import getBaseUrl from '@/lib/config';
 import LeadsTable from '@/components/leads/LeadsTable';
 import AddLeadModal, { AddLeadFormData } from '@/components/leads/AddLeadModal';
@@ -89,91 +88,16 @@ const Leads = () => {
 
   const handleAddLead = async (data: AddLeadFormData) => {
     try {
-      const base = getBaseUrl();
-
-      // Determine land_coordinates logic
-      // If any land mapping or location exists, always send a nested list of coordinate pairs
-      // i.e. [[lat, lng], [lat, lng], ...]. This includes single-point mappings.
-      let land_coordinates = null;
-      if (Array.isArray(data.landCoordinates) && data.landCoordinates.length > 0) {
-        land_coordinates = data.landCoordinates.map(coord => [coord.lat, coord.lng]);
-      } else if ((data as any).landLocation) {
-        const loc = (data as any).landLocation;
-        land_coordinates = [[loc.lat, loc.lng]];
-      } else {
-        land_coordinates = null;
-      }
-
-      // Transform data to match backend schema exactly
-      const payload = {
-        full_name: data.fullName,
-        phone_number: data.phoneNumber,
-        alternate_phone_number: data.alternatePhone || null,
-        lead_source: data.leadSource,
-        farming_option: data.farmingOption || '', // Required string field
-        village: data.village,
-        // send `tehsil` to backend; fallback to `taluka` if older UI supplies it
-        tehsil: (data as any).tehsil || (data as any).taluka || null,
-        district: data.district,
-        state: data.state,
-        estimated_land_area: parseFloat(String(data.estimatedLandArea || 0)), // Ensure float type
-        water_available: Boolean(data.waterAvailable), // Ensure boolean
-        note: data.notes || null,
-        land_coordinates,
-      };
-      console.log('Submitting lead payload:', payload);
-
-      const resp = await fetch(`${base.replace(/\/$/, '')}/farmer_managment/lead_contacted`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
-
-      const result = await resp.json();
-
-      if (result.success) {
-        // Create local lead object for UI
-        const newLead: Lead = {
-          ...(data as any),
-          id: Date.now().toString(),
-          status: 'contacted',
-        };
-        setLeads(prev => [newLead, ...prev]);
-        toast({
-          title: 'Success',
-          description: 'Lead added successfully',
-        });
-        // Refresh the leads list from server to ensure latest data
-        await loadLeads();
-      } else {
-        throw new Error('Server returned success: false');
-      }
+      // Lead creation is now handled inside AddLeadModal workflow:
+      // 1) upload images, 2) upload video, 3) call lead_contacted.
+      // Here we only refresh list after successful modal submission.
+      await loadLeads();
     } catch (error) {
-      // fallback to mock API if network fails
-      try {
-        const newLead = await leadsApi.create({
-          ...data,
-          status: 'contacted',
-          isFlagged: false,
-          stopPayments: false,
-          stopInputs: false,
-        });
-        setLeads(prev => [newLead, ...prev]);
-        toast({
-          title: 'Success (offline)',
-          description: 'Lead saved locally',
-        });
-          // Attempt to refresh leads (may fail if offline)
-          await loadLeads();
-      } catch (err) {
-        toast({
-          title: 'Error',
-          description: 'Failed to add lead',
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Error',
+        description: `Lead saved but refresh failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: 'destructive',
+      });
     }
   };
 

@@ -9,6 +9,7 @@ import Login from "./pages/Login";
 import Index from "./pages/Index";
 import Leads from "./pages/Leads";
 import Farmers from "./pages/Farmers";
+import FarmerProfile from "./pages/FarmerProfile";
 import HarvestPlanning from "./pages/HarvestPlanning";
 import NotFound from "./pages/NotFound";
 import Inventory from "./pages/Inventory";
@@ -66,6 +67,7 @@ const App = () => (
           <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
           <Route path="/tasks-beta" element={<AppLayout><TasksBeta /></AppLayout>} />
           <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
+          <Route path="/farmers/:farmer_id" element={<AppLayout><FarmerProfile /></AppLayout>} />
           <Route path="/land-acquisition" element={<AppLayout><LandAcquisition /></AppLayout>} />
           
           {/* Operations */}

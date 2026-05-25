@@ -6,9 +6,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, ArrowRight, ArrowLeft, MapPin, Check, Info, Navigation } from 'lucide-react';
+import { Loader2, ArrowRight, ArrowLeft, MapPin, Check, Info, Navigation, ImagePlus, Video, X } from 'lucide-react';
 import { MapContainer, TileLayer, FeatureGroup, Marker } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
+import getBaseUrl from '@/lib/config';
+import { useToast } from '@/hooks/use-toast';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 
@@ -33,16 +35,25 @@ export interface AddLeadFormData {
   notes?: string;
   landLocation?: { lat: number; lng: number } | null;
   landCoordinates?: { lat: number; lng: number }[];
+  landImages?: File[];
+  landVideo?: File | null;
 }
 
 const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState<'info' | 'location' | 'mapping'>('info');
+  const [step, setStep] = useState<'info' | 'location' | 'media' | 'mapping'>('info');
   const [skipMapping, setSkipMapping] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 22.5726, lng: 78.9629 });
   const [landLocation, setLandLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [landImages, setLandImages] = useState<(File | null)[]>([null, null, null]);
+  const [landImagePreviews, setLandImagePreviews] = useState<(string | null)[]>([null, null, null]);
+  const [landVideo, setLandVideo] = useState<File | null>(null);
+  const [landVideoPreview, setLandVideoPreview] = useState<string | null>(null);
   const featureGroupRef = useRef(null);
+  const imageInputRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
+  const { toast } = useToast();
 
   const [formData, setFormData] = useState<AddLeadFormData>({
     fullName: '',
@@ -87,6 +98,10 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
       setStep('info');
       setSkipMapping(false);
       setLandLocation(null);
+      setLandImages([null, null, null]);
+      setLandImagePreviews([null, null, null]);
+      setLandVideo(null);
+      setLandVideoPreview(null);
       setFormData({
         fullName: '',
         phoneNumber: '',
@@ -106,10 +121,19 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   }, [open]);
 
   useEffect(() => {
-    if ((step === 'location' || step === 'mapping') && !landLocation) {
+    if ((step === 'location' || step === 'media' || step === 'mapping') && !landLocation) {
       getUserLocation();
     }
   }, [step]);
+
+  useEffect(() => {
+    return () => {
+      landImagePreviews.forEach((preview) => {
+        if (preview) URL.revokeObjectURL(preview);
+      });
+      if (landVideoPreview) URL.revokeObjectURL(landVideoPreview);
+    };
+  }, [landImagePreviews, landVideoPreview]);
 
   const handleCanvasClick = () => {
     // No longer needed with leaflet
@@ -144,8 +168,65 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
 
   const handleLocationNext = () => {
     if (landLocation) {
+      setStep('media');
+    }
+  };
+
+  const handleMediaNext = () => {
+    const selectedImageCount = landImages.filter(Boolean).length;
+    if (selectedImageCount === 3 && landVideo) {
       setStep('mapping');
     }
+  };
+
+  const handleImagePick = (index: number, file?: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+
+    setLandImages((prev) => {
+      const next = [...prev];
+      next[index] = file;
+      return next;
+    });
+
+    setLandImagePreviews((prev) => {
+      const next = [...prev];
+      if (next[index]) URL.revokeObjectURL(next[index] as string);
+      next[index] = URL.createObjectURL(file);
+      return next;
+    });
+  };
+
+  const clearImagePick = (index: number) => {
+    setLandImages((prev) => {
+      const next = [...prev];
+      next[index] = null;
+      return next;
+    });
+    setLandImagePreviews((prev) => {
+      const next = [...prev];
+      if (next[index]) URL.revokeObjectURL(next[index] as string);
+      next[index] = null;
+      return next;
+    });
+  };
+
+  const handleVideoPick = (file?: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('video/')) return;
+    setLandVideo(file);
+    setLandVideoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+  };
+
+  const clearVideoPick = () => {
+    setLandVideo(null);
+    setLandVideoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
   };
 
   const handleSubmit = async () => {
@@ -155,13 +236,104 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
       if (!skipMapping && featureGroupRef.current) {
         coordinates = extractCoordinates();
       }
+
+      const selectedImages = landImages.filter((f): f is File => !!f);
+      if (selectedImages.length !== 3) {
+        throw new Error('Please upload exactly 3 land images');
+      }
+      if (!landVideo) {
+        throw new Error('Please upload 1 land video');
+      }
+
+      const base = getBaseUrl().replace(/\/$/, '');
+
+      // Step 1: Upload land images
+      const imagesFormData = new FormData();
+      selectedImages.forEach((file) => {
+        imagesFormData.append('land_images', file, file.name);
+      });
+
+      const imagesResp = await fetch(`${base}/farmer_managment/upload_land_images`, {
+        method: 'POST',
+        body: imagesFormData,
+      });
+      if (!imagesResp.ok) throw new Error(`Failed to upload land images (${imagesResp.status})`);
+      const imagesResult = await imagesResp.json();
+      if (!imagesResult?.success || !Array.isArray(imagesResult?.images)) {
+        throw new Error('Image upload API returned invalid response');
+      }
+      const imageUrls: string[] = imagesResult.images
+        .map((img: any) => img?.url)
+        .filter((url: any) => typeof url === 'string' && url.length > 0);
+      if (imageUrls.length === 0) throw new Error('Image upload succeeded but URLs missing');
+
+      // Step 2: Upload land video
+      const videoFormData = new FormData();
+      videoFormData.append('land_video', landVideo, landVideo.name);
+
+      const videoResp = await fetch(`${base}/farmer_managment/upload_land_video`, {
+        method: 'POST',
+        body: videoFormData,
+      });
+      if (!videoResp.ok) throw new Error(`Failed to upload land video (${videoResp.status})`);
+      const videoResult = await videoResp.json();
+      const videoUrl: string | undefined = videoResult?.video?.url;
+      if (!videoResult?.success || !videoUrl) {
+        throw new Error('Video upload API returned invalid response');
+      }
+
+      // Step 3: Create lead with uploaded media URLs
+      let landCoordinatesPayload: number[][] = [];
+      if (coordinates.length > 0) {
+        landCoordinatesPayload = coordinates.map((coord) => [coord.lat, coord.lng]);
+      } else if (landLocation) {
+        landCoordinatesPayload = [[landLocation.lat, landLocation.lng]];
+      }
+
+      const payload = {
+        full_name: formData.fullName,
+        phone_number: formData.phoneNumber,
+        alternate_phone_number: formData.alternatePhone || '',
+        lead_source: formData.leadSource,
+        farming_option: formData.farmingOption || '',
+        village: formData.village,
+        tehsil: formData.tehsil || '',
+        district: formData.district,
+        state: formData.state,
+        estimated_land_area: Number(formData.estimatedLandArea || 0),
+        water_available: Boolean(formData.waterAvailable),
+        note: formData.notes || '',
+        land_coordinates: landCoordinatesPayload,
+        land_images: imageUrls,
+        land_video: videoUrl,
+      };
+
+      const leadResp = await fetch(`${base}/farmer_managment/lead_contacted`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!leadResp.ok) throw new Error(`Failed to save lead (${leadResp.status})`);
+      const leadResult = await leadResp.json();
+      if (!leadResult?.success) throw new Error('Lead save failed');
+
       const submitData: AddLeadFormData = {
         ...formData,
         landCoordinates: coordinates,
         landLocation: landLocation || undefined,
+        landImages: selectedImages,
+        landVideo,
       };
       await onSubmit(submitData);
+      toast({ title: 'Success', description: 'Lead added successfully', variant: 'success' });
       onClose();
+    } catch (error) {
+      console.error('Add lead workflow failed:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to add lead',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -228,6 +400,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
           <DialogTitle className="text-xl font-display flex items-center gap-2">
             {step === 'info' && <>Add New Lead</>}
             {step === 'location' && <><MapPin className="w-5 h-5 text-primary" />Provide Land Location - {formData.fullName}</>}
+            {step === 'media' && <><ImagePlus className="w-5 h-5 text-primary" />Add Land Images & Video - {formData.fullName}</>}
             {step === 'mapping' && <><MapPin className="w-5 h-5 text-primary" />Land Mapping (Optional) - {formData.fullName}</>}
           </DialogTitle>
         </DialogHeader>
@@ -244,8 +417,13 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
             Land Location
           </div>
           <ArrowRight className="w-4 h-4 text-muted-foreground" />
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${step === 'mapping' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${step === 'media' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
             <span className="w-5 h-5 rounded-full bg-background/20 flex items-center justify-center text-xs font-bold">3</span>
+            Land Media
+          </div>
+          <ArrowRight className="w-4 h-4 text-muted-foreground" />
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${step === 'mapping' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+            <span className="w-5 h-5 rounded-full bg-background/20 flex items-center justify-center text-xs font-bold">4</span>
             Land Mapping (Optional)
           </div>
         </div>
@@ -479,6 +657,110 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   disabled={!landLocation}
                   className="gap-2"
                 >
+                  Next: Add Land Images & Video
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Land Media */}
+        {step === 'media' && (
+          <div className="space-y-5 pt-4">
+            <div className="flex items-start gap-3 p-3 bg-info/10 rounded-lg border border-info/20">
+              <Info className="w-5 h-5 text-info mt-0.5 shrink-0" />
+              <p className="text-sm text-muted-foreground">
+                Upload exactly 3 land images and 1 land video. Click any box to choose a file. This helps us verify the site quickly.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[0, 1, 2].map((index) => (
+                <div key={index} className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Image {index + 1} *</Label>
+                  <input
+                    ref={(el) => { imageInputRefs.current[index] = el; }}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleImagePick(index, e.target.files?.[0] || null)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => imageInputRefs.current[index]?.click()}
+                    className="relative w-full h-36 rounded-lg border-2 border-dashed border-border hover:border-primary/60 bg-muted/20 hover:bg-muted/30 transition flex items-center justify-center overflow-hidden"
+                  >
+                    {landImagePreviews[index] ? (
+                      <img src={landImagePreviews[index] as string} alt={`Land image ${index + 1}`} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <ImagePlus className="w-6 h-6" />
+                        <span className="text-xs">Click to upload image</span>
+                      </div>
+                    )}
+                  </button>
+                  {landImages[index] && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="truncate text-muted-foreground">{landImages[index]?.name}</span>
+                      <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-red-600" onClick={() => clearImagePick(index)}>
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Land Video *</Label>
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={(e) => handleVideoPick(e.target.files?.[0] || null)}
+              />
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                className="relative w-full h-40 rounded-lg border-2 border-dashed border-border hover:border-primary/60 bg-muted/20 hover:bg-muted/30 transition flex items-center justify-center overflow-hidden"
+              >
+                {landVideoPreview ? (
+                  <video src={landVideoPreview} className="h-full w-full object-cover" controls />
+                ) : (
+                  <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                    <Video className="w-7 h-7" />
+                    <span className="text-sm font-medium">Click to upload land video</span>
+                    <span className="text-xs">One video required</span>
+                  </div>
+                )}
+              </button>
+              {landVideo && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="truncate text-muted-foreground">{landVideo.name}</span>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-red-600" onClick={clearVideoPick}>
+                    <X className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between gap-3 pt-4 border-t">
+              <Button type="button" variant="outline" onClick={() => setStep('location')} className="gap-2">
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </Button>
+              <div className="flex gap-3">
+                <Button type="button" variant="outline" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleMediaNext}
+                  disabled={landImages.filter(Boolean).length !== 3 || !landVideo}
+                  className="gap-2"
+                >
                   Next: Land Mapping (Optional)
                   <ArrowRight className="w-4 h-4" />
                 </Button>
@@ -487,7 +769,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
           </div>
         )}
 
-        {/* Step 3: Land Mapping (Optional) */}
+        {/* Step 4: Land Mapping (Optional) */}
         {step === 'mapping' && (
           <div className="space-y-4">
             {!skipMapping ? (
@@ -537,7 +819,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
               </div>
             )}
             <div className="flex justify-between gap-3 pt-4 border-t">
-              <Button type="button" variant="outline" onClick={() => setStep('location')} className="gap-2">
+              <Button type="button" variant="outline" onClick={() => setStep('media')} className="gap-2">
                 <ArrowLeft className="w-4 h-4" />
                 Back
               </Button>
