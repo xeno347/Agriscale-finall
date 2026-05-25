@@ -16,9 +16,13 @@ import { useToast } from '@/hooks/use-toast';
 
 interface LandRow {
   id: number;
+  farmId?: string;
   village: string;
   farmerId: string;
+  farmerName?: string;
   fetchedDetails: string | null;
+  priority?: number;
+  isNew?: boolean;
 }
 
 interface AvailableFarm {
@@ -59,6 +63,29 @@ interface Zone {
     field_manager_id?: string;
     contact?: string;
   } | null;
+}
+
+interface ZoneLand {
+  created_at?: string;
+  area?: number;
+  harvest_log?: unknown;
+  priority?: number;
+  block_id?: string;
+  land_data?: {
+    land_coordinates?: unknown[];
+    farming_option?: string;
+    state?: string;
+    village?: string;
+    land_media?: {
+      images?: string[];
+      video?: string;
+    };
+    district?: string;
+  };
+  farmer_id?: string;
+  payment_log?: unknown;
+  farm_id?: string;
+  crop_type?: string;
 }
 
 interface Cluster {
@@ -159,8 +186,15 @@ const Blocks = () => {
   const [loadingZonesForCluster, setLoadingZonesForCluster] = useState(false);
   const [farmsInBlock, setFarmsInBlock] = useState<any[]>([]);
   const [loadingFarmsInBlock, setLoadingFarmsInBlock] = useState(false);
-  const [blocksInZoneView, setBlocksInZoneView] = useState<any[]>([]);
+  const [blockAreaById, setBlockAreaById] = useState<Record<string, number>>({});
+  const [zoneAreaById, setZoneAreaById] = useState<Record<string, number>>({});
+  const [zoneLandCountById, setZoneLandCountById] = useState<Record<string, number>>({});
+  const [blocksInZoneView, setBlocksInZoneView] = useState<Record<string, ZoneLand[]>>({});
   const [loadingBlocksInZoneView, setLoadingBlocksInZoneView] = useState(false);
+  const [isAddingBlockLands, setIsAddingBlockLands] = useState(false);
+  const [blockLandEditorRows, setBlockLandEditorRows] = useState<LandRow[]>([]);
+  const [blockLandOriginalRows, setBlockLandOriginalRows] = useState<LandRow[]>([]);
+  const [deletedBlockFarmerIds, setDeletedBlockFarmerIds] = useState<string[]>([]);
 
   // Zone -> Field Manager (local UI state for now)
   const [zoneFieldManagers, setZoneFieldManagers] = useState<Record<string, FieldManager | null>>({});
@@ -367,6 +401,113 @@ const Blocks = () => {
     });
   };
 
+  const openAddLandEditor = async () => {
+    setIsAddingBlockLands(true);
+    setDeletedBlockFarmerIds([]);
+
+    try {
+      const base = getBaseUrl();
+      const resp = await fetch(`${base.replace(/\/$/, '')}/farmer_managment/farm_for_block`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (resp.ok) {
+        const result = await resp.json();
+        const transformed: AvailableFarm[] = (result.farmers || []).map((item: any) => {
+          const fd = item.farmer_data || {};
+          return {
+            id: item.farmer_id,
+            fullName: fd.full_name || 'Unknown',
+            phoneNumber: fd.phone_number || 'N/A',
+            village: fd.village || 'N/A',
+            district: fd.district || 'N/A',
+            state: fd.state || 'N/A',
+            landMapping: fd.estimated_land_area != null
+              ? { totalArea: fd.estimated_land_area, coordinates: fd.land_coordinates || [] }
+              : undefined,
+            agreements: item.agreement_data || [],
+            createdAt: item.created_at ? new Date(item.created_at) : new Date(),
+          } as any;
+        });
+        setAvailableFarms(transformed);
+      } else {
+        setAvailableFarms([]);
+      }
+    } catch (error) {
+      console.error('Failed to load available farms for block editor:', error);
+      setAvailableFarms([]);
+      toast({ title: 'Error', description: 'Failed to load farms for adding lands', variant: 'destructive' });
+    }
+
+    const currentRows = farmsInBlock.length > 0
+      ? farmsInBlock.map((farm: any, index: number) => ({
+          id: farm.farm_id ?? Date.now() + index,
+          farmId: farm.farm_id ? String(farm.farm_id) : undefined,
+          village: farm?.land_data?.village || '',
+          farmerId: farm?.farmer_id ? String(farm.farmer_id) : '',
+          farmerName: farm?.farmer_name?.farmer_name || farm?.farmer_name || farm?.farmer_id || '',
+          fetchedDetails: farm?.area != null ? `${farm.area} Acres in ${farm?.land_data?.village || ''}` : null,
+          priority: farm?.priority ?? index,
+          isNew: false,
+        }))
+      : [{ id: Date.now(), village: '', farmerId: '', farmerName: '', fetchedDetails: null, priority: 0, isNew: true }];
+
+    setBlockLandEditorRows(currentRows);
+    setBlockLandOriginalRows(currentRows.map((row) => ({ ...row, isNew: false })));
+  };
+
+  const removeBlockEditorRow = (row: LandRow) => {
+    if (!row.isNew && row.farmerId) {
+      setDeletedBlockFarmerIds((prev) => (prev.includes(row.farmerId) ? prev : [...prev, row.farmerId]));
+    }
+    removeLandRow(row.id, blockLandEditorRows, setBlockLandEditorRows);
+  };
+
+  const buildBlockUpdatePayload = () => {
+    const currentRowKeys = new Set(
+      blockLandEditorRows
+        .filter((row) => !!row.farmerId)
+        .map((row) => row.farmerId)
+    );
+
+    const mergedRows = [
+      ...blockLandEditorRows.filter((row) => !!row.farmerId),
+      ...blockLandOriginalRows.filter((row) => {
+        return !!row.farmerId && (
+          deletedBlockFarmerIds.includes(row.farmerId) || !currentRowKeys.has(row.farmerId)
+        );
+      }).map((row) => ({
+        ...row,
+        priority: -1,
+      })),
+    ];
+
+    const farmerList = mergedRows.map((row, index) => {
+      const areaFromDetails = row.fetchedDetails
+        ? parseFloat(row.fetchedDetails.match(/^(\d+(?:\.\d+)?) Acres/)?.[1] || '0')
+        : 0;
+
+      return {
+        priority: row.priority ?? index,
+        farm_id: row.farmerId,
+        village: row.village,
+        area: areaFromDetails || Number((availableFarms.find((farm) => String(farm.id) === row.farmerId)?.landMapping?.totalArea) ?? 0) || 0,
+      };
+    });
+
+    const totalArea = farmerList.reduce((sum, row) => sum + (row.area || 0), 0);
+
+    return {
+      block_id: assigningBlock?.block_id || viewBlock?.block_id || '',
+      block_data: {
+        block_name: assigningBlock?.block_name || viewBlock?.block_name || '',
+        farmer: farmerList,
+        total_area: totalArea,
+      },
+    };
+  };
+
   const confirmAssignSupervisor = async () => {
     if (!assigningBlock || !selectedSupervisorId) return;
     const selected = supervisors.find((s) => s.supervisor_id === selectedSupervisorId) || null;
@@ -443,6 +584,37 @@ const Blocks = () => {
       const list: Block[] = Array.isArray(result?.blocks) ? result.blocks : [];
       setBlocks(list);
 
+      const areaEntries = await Promise.all(
+        list.map(async (block) => {
+          try {
+            const farmsResp = await fetch(
+              `${base.replace(/\/$/, '')}/farmer_managment/get_all_farms_in_a_block/${block.block_id}`,
+              {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+              }
+            );
+
+            if (!farmsResp.ok) {
+              return [String(block.block_id), Number(block.total_area ?? 0)] as const;
+            }
+
+            const farmsResult = await farmsResp.json();
+            const farms = Array.isArray(farmsResult?.farms) ? farmsResult.farms : [];
+            const totalArea = farms.reduce((sum: number, farm: any) => {
+              const areaValue = Number(farm?.area ?? 0);
+              return sum + (Number.isFinite(areaValue) ? areaValue : 0);
+            }, 0);
+
+            return [String(block.block_id), totalArea] as const;
+          } catch {
+            return [String(block.block_id), Number(block.total_area ?? 0)] as const;
+          }
+        })
+      );
+
+      setBlockAreaById(Object.fromEntries(areaEntries));
+
       // If backend already returns supervisor_details, reflect it in the UI.
       setBlockSupervisors((prev) => {
         const next: Record<string, Supervisor | null> = { ...prev };
@@ -483,6 +655,41 @@ const Blocks = () => {
       const result = await resp.json();
       const list: Zone[] = Array.isArray(result?.zones) ? result.zones : [];
       setZones(list);
+
+      const areaEntries = await Promise.all(
+        list.map(async (zone) => {
+          try {
+            const landsResp = await fetch(
+              `${base.replace(/\/$/, '')}/farmer_managment/get_lands_in_zone/${zone.zone_id}`,
+              {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+              }
+            );
+
+            if (!landsResp.ok) {
+              return [String(zone.zone_id), Number(zone.total_area ?? 0)] as const;
+            }
+
+            const landsResult = await landsResp.json();
+            const groupedLands = landsResult?.lands && typeof landsResult.lands === 'object' ? landsResult.lands : {};
+            const allLands = Object.values(groupedLands).flat() as any[];
+            const totalArea = allLands.reduce((sum: number, land: any) => {
+              const areaValue = Number(land?.area ?? 0);
+              return sum + (Number.isFinite(areaValue) ? areaValue : 0);
+            }, 0);
+            const totalCount = allLands.length;
+
+            setZoneLandCountById((prev) => ({ ...prev, [String(zone.zone_id)]: totalCount }));
+            return [String(zone.zone_id), totalArea] as const;
+          } catch {
+            setZoneLandCountById((prev) => ({ ...prev, [String(zone.zone_id)]: 0 }));
+            return [String(zone.zone_id), Number(zone.total_area ?? 0)] as const;
+          }
+        })
+      );
+
+      setZoneAreaById(Object.fromEntries(areaEntries));
 
       // If backend already returns field_manager, reflect it in the UI.
       setZoneFieldManagers((prev) => {
@@ -530,7 +737,7 @@ const Blocks = () => {
   const addLandRow = (landRows: LandRow[], setLandRows: Dispatch<SetStateAction<LandRow[]>>) => {
     setLandRows([
       ...landRows,
-      { id: Date.now(), village: '', farmerId: '', fetchedDetails: null }
+      { id: Date.now(), village: '', farmerId: '', farmerName: '', fetchedDetails: null, priority: landRows.length, isNew: true }
     ]);
   };
 
@@ -561,15 +768,33 @@ const Blocks = () => {
             const area = selectedFarmer.landMapping?.totalArea || '0';
             updatedRow.fetchedDetails = `${area} Acres in ${selectedFarmer.village}`;
             updatedRow.village = selectedFarmer.village || '';
+            updatedRow.farmerName = selectedFarmer.fullName;
           } else {
             updatedRow.fetchedDetails = null;
             updatedRow.village = '';
+            updatedRow.farmerName = '';
           }
+        }
+        if (field === 'priority') {
+          updatedRow.priority = Number(value);
         }
         return updatedRow;
       }
       return row;
     }));
+  };
+
+  const moveEditorRow = (id: number, direction: 'up' | 'down') => {
+    setBlockLandEditorRows((prev) => {
+      const index = prev.findIndex((row) => row.id === id);
+      if (index < 0) return prev;
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, moved);
+      return next.map((row, rowIndex) => ({ ...row, priority: rowIndex }));
+    });
   };
 
   const createGenericHandler = (entityType: EntityType, landRows: LandRow[], entityName: string, endpoint: string, resetCallback: () => void) => {
@@ -628,6 +853,28 @@ const Blocks = () => {
           payload = {
             cluster_name: entityName,
             zone_list
+          };
+        } else if (entityType === 'block') {
+          payload = {
+            block_name: entityName,
+            farmer: landRows
+              .filter((row) => !!row.farmerId)
+              .map((row, idx) => {
+                const areaFromDetails = row.fetchedDetails
+                  ? parseFloat(row.fetchedDetails.match(/^(\d+(?:\.\d+)?) Acres/)?.[1] || '0')
+                  : 0;
+
+                return {
+                  priority: row.priority ?? idx,
+                  farm_id: row.farmerId,
+                  village: row.village,
+                  area:
+                    areaFromDetails ||
+                    Number((availableFarms.find((farm) => String(farm.id) === row.farmerId)?.landMapping?.totalArea) ?? 0) ||
+                    0,
+                };
+              }),
+            total_area: total,
           };
         } else {
           payload = {
@@ -707,6 +954,33 @@ const Blocks = () => {
     setBlockLandRows([{ id: 1, village: '', farmerId: '', fetchedDetails: null }]);
   });
 
+  const getZoneViewTotalArea = () => {
+    return Object.values(blocksInZoneView).reduce((sum, lands) => {
+      return sum + lands.reduce((landSum, land) => {
+        const areaValue = Number(land?.area ?? 0);
+        return landSum + (Number.isFinite(areaValue) ? areaValue : 0);
+      }, 0);
+    }, 0);
+  };
+
+  const dashboardTotals = {
+    clusters: clusters.length,
+    zones: zones.length,
+    blocks: blocks.length,
+    lands: Object.values(zoneLandCountById).reduce((sum, count) => sum + (Number.isFinite(Number(count)) ? Number(count) : 0), 0),
+    area: Object.values(zoneAreaById).reduce((sum, area) => sum + (Number.isFinite(Number(area)) ? Number(area) : 0), 0),
+  };
+
+  const getEntityCardArea = (entityType: EntityType, entity: any) => {
+    if (entityType === 'zone') {
+      return zoneAreaById[String(entity.zone_id)] ?? entity.total_area ?? 0;
+    }
+    if (entityType === 'block') {
+      return blockAreaById[String(entity.block_id)] ?? entity.total_area ?? 0;
+    }
+    return entity.total_area ?? 0;
+  };
+
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
@@ -716,19 +990,81 @@ const Blocks = () => {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-6">
+        {[
+          { label: 'Total Clusters', value: dashboardTotals.clusters, tone: 'from-sky-500 to-blue-600' },
+          { label: 'Total Zones', value: dashboardTotals.zones, tone: 'from-emerald-500 to-green-600' },
+          { label: 'Total Blocks', value: dashboardTotals.blocks, tone: 'from-amber-500 to-orange-600' },
+          { label: 'Total Lands', value: dashboardTotals.lands, tone: 'from-violet-500 to-fuchsia-600' },
+          { label: 'Total Area', value: `${dashboardTotals.area} acres`, tone: 'from-lime-500 to-emerald-600' },
+        ].map((kpi) => (
+          <div key={kpi.label} className="rounded-2xl border border-white/60 bg-white/80 p-4 shadow-[0_10px_30px_rgba(16,185,129,0.08)] backdrop-blur-sm">
+            <div className={`h-1.5 w-16 rounded-full bg-gradient-to-r ${kpi.tone} mb-3`} />
+            <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{kpi.label}</div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{kpi.value}</div>
+          </div>
+        ))}
+      </div>
+
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as EntityType)} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mb-8 items-center">
-          <TabsTrigger value="cluster" className="flex items-center justify-center gap-2 text-base py-2 px-3 rounded-md hover:bg-muted/5">
-            <Grid3x3 className="w-5 h-5" />
-            Clusters
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.24em] text-muted-foreground">Hierarchy View</h2>
+            <p className="text-sm text-muted-foreground">Switch between clusters, zones, and blocks</p>
+          </div>
+        </div>
+
+        <TabsList className="mb-8 grid h-auto w-full grid-cols-1 gap-4 bg-transparent p-0 sm:grid-cols-2 lg:grid-cols-3">
+          <TabsTrigger
+            value="cluster"
+            className="group relative flex h-auto min-h-20 w-full min-w-0 flex-col items-start justify-between whitespace-normal rounded-3xl border border-border bg-white px-4 py-3 text-left text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-0.5 hover:border-green-200 hover:shadow-[0_14px_28px_rgba(16,185,129,0.12)] data-[state=active]:border-green-500 data-[state=active]:bg-gradient-to-br data-[state=active]:from-green-600 data-[state=active]:to-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-[0_18px_36px_rgba(16,185,129,0.24)]"
+          >
+            <div className="flex w-full items-center justify-between">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-green-50 text-green-700 transition-colors group-data-[state=active]:bg-white/15 group-data-[state=active]:text-white">
+                <Grid3x3 className="w-4 h-4" />
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-green-700/70 group-data-[state=active]:text-white/80">
+                01
+              </span>
+            </div>
+            <div className="min-w-0">
+              <div className="text-base font-semibold leading-tight">Clusters</div>
+              <div className="line-clamp-2 break-words text-xs leading-tight text-slate-500 group-data-[state=active]:text-white/80">Group farms into clusters</div>
+            </div>
           </TabsTrigger>
-          <TabsTrigger value="zone" className="flex items-center justify-center gap-2 text-base py-2 px-3 rounded-md hover:bg-muted/5">
-            <Building className="w-5 h-5" />
-            Zones
+          <TabsTrigger
+            value="zone"
+            className="group relative flex h-auto min-h-20 w-full min-w-0 flex-col items-start justify-between whitespace-normal rounded-3xl border border-border bg-white px-4 py-3 text-left text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-0.5 hover:border-green-200 hover:shadow-[0_14px_28px_rgba(16,185,129,0.12)] data-[state=active]:border-green-500 data-[state=active]:bg-gradient-to-br data-[state=active]:from-green-600 data-[state=active]:to-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-[0_18px_36px_rgba(16,185,129,0.24)]"
+          >
+            <div className="flex w-full items-center justify-between">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-green-50 text-green-700 transition-colors group-data-[state=active]:bg-white/15 group-data-[state=active]:text-white">
+                <Building className="w-4 h-4" />
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-green-700/70 group-data-[state=active]:text-white/80">
+                02
+              </span>
+            </div>
+            <div className="min-w-0">
+              <div className="text-base font-semibold leading-tight">Zones</div>
+              <div className="line-clamp-2 break-words text-xs leading-tight text-slate-500 group-data-[state=active]:text-white/80">Organize blocks inside zones</div>
+            </div>
           </TabsTrigger>
-          <TabsTrigger value="block" className="flex items-center justify-center gap-2 text-base py-2 px-3 rounded-md hover:bg-muted/5">
-            <Map className="w-5 h-5" />
-            Blocks
+          <TabsTrigger
+            value="block"
+            className="group relative flex h-auto min-h-20 w-full min-w-0 flex-col items-start justify-between whitespace-normal rounded-3xl border border-border bg-white px-4 py-3 text-left text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-0.5 hover:border-green-200 hover:shadow-[0_14px_28px_rgba(16,185,129,0.12)] data-[state=active]:border-green-500 data-[state=active]:bg-gradient-to-br data-[state=active]:from-green-600 data-[state=active]:to-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-[0_18px_36px_rgba(16,185,129,0.24)]"
+          >
+            <div className="flex w-full items-center justify-between">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-green-50 text-green-700 transition-colors group-data-[state=active]:bg-white/15 group-data-[state=active]:text-white">
+                <Map className="w-4 h-4" />
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-green-700/70 group-data-[state=active]:text-white/80">
+                03
+              </span>
+            </div>
+            <div className="min-w-0">
+              <div className="text-base font-semibold leading-tight">Blocks</div>
+              <div className="line-clamp-2 break-words text-xs leading-tight text-slate-500 group-data-[state=active]:text-white/80">Manage farms inside blocks</div>
+            </div>
           </TabsTrigger>
         </TabsList>
 
@@ -808,49 +1144,29 @@ const Blocks = () => {
       createEndpoint: string;
     }
   ) {
-    const getEntityStats = () => {
-      if (entityType === 'cluster') {
-        return [
-          { label: 'Total Clusters', value: entities.length, icon: Grid3x3, color: 'text-blue-600' },
-          { label: 'Pending Approval', value: '0', icon: Clock, color: 'text-orange-500' },
-          { label: 'Active Clusters', value: entities.length, icon: CheckCircle, color: 'text-green-600' },
-          { label: 'Total Area', value: `${entities.reduce((acc, e) => acc + (e.total_area || 0), 0)} acres`, icon: null, color: 'text-purple-600' },
-        ];
-      } else if (entityType === 'zone') {
-        return [
-          { label: 'Total Zones', value: entities.length, icon: Building, color: 'text-blue-600' },
-          { label: 'Pending Approval', value: '0', icon: Clock, color: 'text-orange-500' },
-          { label: 'Active Zones', value: entities.length, icon: CheckCircle, color: 'text-green-600' },
-          { label: 'Total Area', value: `${entities.reduce((acc, e) => acc + (e.total_area || 0), 0)} acres`, icon: null, color: 'text-purple-600' },
-        ];
-      } else {
-        return [
-          { label: 'Total Blocks', value: entities.length, icon: Map, color: 'text-blue-600' },
-          { label: 'Pending Approval', value: '0', icon: Clock, color: 'text-orange-500' },
-          { label: 'Active Blocks', value: entities.length, icon: CheckCircle, color: 'text-green-600' },
-          { label: 'Total Area', value: `${entities.reduce((acc, e) => acc + (e.total_area || 0), 0)} acres`, icon: null, color: 'text-purple-600' },
-        ];
+    const getViewTotalArea = () => {
+      if (entityType === 'zone') {
+        return getZoneViewTotalArea();
       }
+
+      if (entityType !== 'block') {
+        return config.viewEntity?.total_area ?? 0;
+      }
+
+      return farmsInBlock.reduce((sum, farm: any) => {
+        const areaValue = Number(farm?.area ?? 0);
+        return sum + (Number.isFinite(areaValue) ? areaValue : 0);
+      }, 0);
     };
 
     return (
       <>
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-8">
-          {getEntityStats().map(stat => (
-            <div key={stat.label} className="bg-card rounded-xl p-5 shadow-card border border-border">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">{stat.label}</p>
-                {stat.icon && <stat.icon className={`w-4 h-4 ${stat.color}`} />}
-              </div>
-              <p className={`text-2xl font-bold mt-1 ${stat.color}`}>{stat.value}</p>
-            </div>
-          ))}
-        </div>
-
         {/* Header & Action */}
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-semibold">{config.entityLabel} Management</h2>
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">{config.entityLabel} Management</h2>
+            <p className="text-sm text-muted-foreground">Create, review, and organize your hierarchy</p>
+          </div>
 
           <Dialog
             open={config.isModalOpen}
@@ -866,25 +1182,22 @@ const Blocks = () => {
                   .then(async resp => {
                     if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
                     const result = await resp.json();
-                    const transformed: AvailableFarm[] = (result.farmers || []).map((item: any) => {
-                      const fd = item.farmer_data || {};
+                    const transformed: AvailableFarm[] = (result.not_assigned_farms || []).map((item: any) => {
                       const kyc = item.kyc_data || null;
                       return {
-                        id: item.farmer_id,
-                        fullName: fd.full_name || 'Unknown',
-                        phoneNumber: fd.phone_number || 'N/A',
-                        alternatePhone: fd.alternate_phone_number ?? null,
-                        village: fd.village || 'N/A',
-                        taluka: fd.taluka ?? null,
-                        district: fd.district || 'N/A',
-                        state: fd.state || 'N/A',
+                        id: item.farm_id,
+                        fullName: item.farmer_name || 'Unknown',
+                        phoneNumber: item.farmer_contact || 'N/A',
+                        village: item.village || 'N/A',
+                        district: item.district || 'N/A',
+                        state: item.state || 'N/A',
                         profileImageUrl: undefined,
                         kyc: kyc ? { verified: true } : undefined,
-                        landMapping: fd.estimated_land_area != null
-                          ? { totalArea: fd.estimated_land_area, coordinates: fd.land_coordinates || [] }
+                        landMapping: item.area != null
+                          ? { totalArea: item.area, coordinates: [] }
                           : undefined,
-                        agreements: item.agreement_data || [],
-                        createdAt: item.created_at ? new Date(item.created_at) : new Date(),
+                        agreements: [],
+                        createdAt: new Date(),
                       } as any;
                     });
                     setAvailableFarms(transformed);
@@ -1249,6 +1562,25 @@ const Blocks = () => {
                           toast({ title: 'Error', description: 'Failed to load farms for this block', variant: 'destructive' });
                         })
                         .finally(() => setLoadingFarmsInBlock(false));
+                    } else if (entityType === 'zone') {
+                      setBlocksInZoneView({});
+                      setLoadingBlocksInZoneView(true);
+                      const base = getBaseUrl();
+                      fetch(`${base.replace(/\/$/, '')}/farmer_managment/get_lands_in_zone/${entity.zone_id}`, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json' },
+                      })
+                        .then(async (resp) => {
+                          if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
+                          const data = await resp.json();
+                          setBlocksInZoneView((data?.lands && typeof data.lands === 'object') ? data.lands : {});
+                        })
+                        .catch((err) => {
+                          console.error('Failed to load lands in zone:', err);
+                          setBlocksInZoneView({});
+                          toast({ title: 'Error', description: 'Failed to load lands for this zone', variant: 'destructive' });
+                        })
+                        .finally(() => setLoadingBlocksInZoneView(false));
                     } else {
                       setFarmsInBlock([]);
                     }
@@ -1269,7 +1601,7 @@ const Blocks = () => {
                     <div className="flex items-center gap-3 mt-2">
                       <span className="text-base font-medium text-green-800">Total Area</span>
                       <span className="text-2xl font-extrabold text-green-900 drop-shadow-sm">
-                        {entity.total_area ?? 0} <span className="text-base font-semibold">acres</span>
+                            {getEntityCardArea(entityType, entity)} <span className="text-base font-semibold">acres</span>
                       </span>
                     </div>
                   </div>
@@ -1565,7 +1897,10 @@ const Blocks = () => {
         {/* View Entity Modal */}
         <Dialog open={config.isViewModalOpen} onOpenChange={(open) => {
           config.setIsViewModalOpen(open);
-          if (!open) setFarmsInBlock([]);
+          if (!open) {
+            setFarmsInBlock([]);
+            setBlocksInZoneView({});
+          }
         }}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -1582,35 +1917,237 @@ const Blocks = () => {
                   <div className="mb-1">
                     <div className="bg-muted/50 border border-border rounded-lg px-6 py-3 flex flex-col items-center min-w-[120px]">
                       <span className="text-xs text-muted-foreground mb-1">Total Area</span>
-                      <span className="text-xl font-bold">{config.viewEntity.total_area ?? 0} acres</span>
+                      <span className="text-xl font-bold">{getViewTotalArea()} acres</span>
                     </div>
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Farms in {config.entityLabel}</label>
+                  <label className="text-sm font-medium">
+                    {entityType === 'zone' ? 'Lands in Zone grouped by Block' : `Farms in ${config.entityLabel}`}
+                  </label>
                   <div className="bg-muted/20 border rounded-lg p-4 min-h-[60px]">
-                    {entityType === 'block' ? (
-                      loadingFarmsInBlock ? (
-                        <div className="text-sm text-muted-foreground italic">Loading farms...</div>
-                      ) : farmsInBlock.length === 0 ? (
-                        <div className="text-sm text-muted-foreground italic">No farms found for this block.</div>
+                    {entityType === 'zone' ? (
+                      loadingBlocksInZoneView ? (
+                        <div className="text-sm text-muted-foreground italic">Loading lands...</div>
+                      ) : Object.keys(blocksInZoneView).length === 0 ? (
+                        <div className="text-sm text-muted-foreground italic">No lands found for this zone.</div>
                       ) : (
-                        <div className="grid grid-cols-1 gap-3">
-                          {farmsInBlock.map((f: any) => (
-                            <div key={f.farm_id} className="p-3 border rounded-md bg-white/60 flex items-center justify-between">
-                              <div>
-                                <div className="font-semibold text-sm">Farm ID: {f.farm_id}</div>
-                                <div className="text-xs text-muted-foreground">Farmer ID: {f.farmer_id}</div>
-                                <div className="text-xs mt-1">Area: {f.area ?? f.area === 0 ? `${f.area} acres` : 'N/A'}</div>
-                                <div className="text-xs">Village: {f.land_data?.village || f.land_data?.village || 'N/A'}</div>
-                              </div>
-                              <div className="text-right text-xs text-muted-foreground">
-                                <div>Priority: {f.priority ?? '-'}</div>
-                                <div className="mt-2">Created: {f.created_at ? new Date(f.created_at).toLocaleDateString() : '-'}</div>
-                              </div>
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between gap-3 mb-2">
+                            <div className="text-sm text-muted-foreground">
+                              {Object.values(blocksInZoneView).reduce((count, lands) => count + lands.length, 0)} lands across {Object.keys(blocksInZoneView).length} blocks.
                             </div>
-                          ))}
+                            <div className="text-sm font-semibold text-green-800 bg-green-50 px-3 py-1 rounded-full border border-green-100">
+                              Total Land Area: {getZoneViewTotalArea()} acres
+                            </div>
+                          </div>
+
+                          {Object.entries(blocksInZoneView).map(([blockId, lands]) => {
+                            const blockName = blocks.find((block) => block.block_id === blockId)?.block_name || blockId;
+
+                            return (
+                              <div key={blockId} className="border rounded-lg bg-white overflow-hidden">
+                                <div className="flex items-center justify-between px-4 py-3 bg-muted/40 border-b">
+                                  <div>
+                                    <div className="text-sm font-semibold text-foreground">Block: {blockName}</div>
+                                    <div className="text-xs text-muted-foreground">{lands.length} land{lands.length === 1 ? '' : 's'}</div>
+                                  </div>
+                                  <div className="text-sm font-semibold text-green-800">
+                                    {lands.reduce((sum, land) => sum + Number(land?.area ?? 0), 0)} acres
+                                  </div>
+                                </div>
+
+                                <div className="divide-y">
+                                  {lands.map((land, index) => (
+                                    <div key={land.farm_id || `${blockId}-${index}`} className="px-4 py-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                                      <div>
+                                        <div className="text-xs text-muted-foreground uppercase tracking-wide">Farm</div>
+                                        <div className="text-sm font-semibold text-foreground break-all">{land.farm_id || 'N/A'}</div>
+                                        <div className="text-xs text-muted-foreground break-all">Farmer: {land.farmer_id || 'N/A'}</div>
+                                      </div>
+                                      <div>
+                                        <div className="text-xs text-muted-foreground uppercase tracking-wide">Land Details</div>
+                                        <div className="text-sm text-foreground">{land.land_data?.village || 'N/A'}</div>
+                                        <div className="text-xs text-muted-foreground">{land.land_data?.district || 'N/A'}, {land.land_data?.state || 'N/A'}</div>
+                                      </div>
+                                      <div className="md:text-right">
+                                        <div className="text-xs text-muted-foreground uppercase tracking-wide">Area</div>
+                                        <div className="text-sm font-semibold text-foreground">{Number(land.area ?? 0)} acres</div>
+                                        <div className="text-xs text-muted-foreground">Priority: {land.priority ?? '-'}</div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )
+                    ) : entityType === 'block' ? (
+                      isAddingBlockLands ? (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold">Add Land</div>
+                              <div className="text-xs text-muted-foreground">Select a new farm and set its priority.</div>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-2"
+                              onClick={() =>
+                                addLandRow(blockLandEditorRows, setBlockLandEditorRows)
+                              }
+                            >
+                              <Plus className="w-4 h-4" /> Add Row
+                            </Button>
+                          </div>
+
+                          <div className="border rounded-lg overflow-hidden bg-white">
+                            <div className="grid grid-cols-12 gap-3 p-3 bg-muted/50 border-b text-xs font-medium text-muted-foreground">
+                              <div className="col-span-1 text-center">#</div>
+                              <div className="col-span-1 text-center">Priority</div>
+                              <div className="col-span-4">Farmer Name</div>
+                              <div className="col-span-4">Details</div>
+                              <div className="col-span-1 text-center">Move</div>
+                              <div className="col-span-1 text-center">Del</div>
+                            </div>
+
+                            <div className="divide-y">
+                              {blockLandEditorRows.map((row, index) => (
+                                <div key={row.id} className="grid grid-cols-12 gap-3 p-3 items-center">
+                                  <div className="col-span-1 text-center text-sm text-muted-foreground">{index + 1}</div>
+                                  <div className="col-span-1">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      value={row.priority ?? index}
+                                      onChange={(e) => handleLandChange(row.id, 'priority', e.target.value, blockLandEditorRows, setBlockLandEditorRows)}
+                                      className="h-9"
+                                    />
+                                  </div>
+                                  <div className="col-span-4">
+                                    {row.isNew ? (
+                                      <select
+                                        className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                        value={row.farmerId}
+                                        onChange={(e) => handleLandChange(row.id, 'farmerId', e.target.value, blockLandEditorRows, setBlockLandEditorRows)}
+                                      >
+                                        <option value="">Select Farmer</option>
+                                        {availableFarms
+                                          .filter((farm) => !blockLandEditorRows.some((existingRow) => existingRow.farmerId === String(farm.id) && existingRow.id !== row.id))
+                                          .map((farm) => (
+                                            <option key={farm.id} value={farm.id}>{farm.fullName}</option>
+                                          ))}
+                                      </select>
+                                    ) : (
+                                      <Input
+                                        value={row.farmerName || ''}
+                                        readOnly
+                                        className="h-9 bg-muted/30"
+                                        placeholder="Farmer name"
+                                      />
+                                    )}
+                                  </div>
+                                  <div className="col-span-4 text-xs text-muted-foreground">
+                                    {row.fetchedDetails || 'Select a farmer'}
+                                  </div>
+                                  <div className="col-span-1 flex justify-center">
+                                    <div className="flex flex-col">
+                                      <Button variant="ghost" size="icon" className="h-7 w-7" disabled={index === 0} onClick={() => moveEditorRow(row.id, 'up')}>
+                                        <ArrowUp className="w-4 h-4" />
+                                      </Button>
+                                      <Button variant="ghost" size="icon" className="h-7 w-7" disabled={index === blockLandEditorRows.length - 1} onClick={() => moveEditorRow(row.id, 'down')}>
+                                        <ArrowDown className="w-4 h-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="col-span-1 flex justify-center">
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => removeBlockEditorRow(row)}>
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-3">
+                            <Button variant="outline" onClick={() => setIsAddingBlockLands(false)}>
+                              Back
+                            </Button>
+                            <Button className="bg-green-700 hover:bg-green-800" onClick={async () => {
+                              try {
+                                const base = getBaseUrl();
+                                const payload = buildBlockUpdatePayload();
+                                const resp = await fetch(`${base.replace(/\/$/, '')}/farmer_managment/update_block`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify(payload),
+                                });
+
+                                if (!resp.ok) {
+                                  throw new Error(`Server responded ${resp.status}`);
+                                }
+
+                                toast({ title: 'Success', description: 'Block updated successfully.' });
+                                setIsAddingBlockLands(false);
+                                setFarmsInBlock((prev) => {
+                                  const removedIds = new Set(
+                                    blockLandOriginalRows
+                                      .filter((row) => row.farmerId && !blockLandEditorRows.some((current) => current.farmerId === row.farmerId))
+                                      .map((row) => row.farmerId)
+                                  );
+                                  return prev.filter((farm) => !removedIds.has(String(farm.farmer_id)));
+                                });
+                                loadBlocks();
+                              } catch (error) {
+                                console.error('Failed to update block:', error);
+                                toast({ title: 'Error', description: 'Failed to update block', variant: 'destructive' });
+                              }
+                            }}>
+                              Save
+                            </Button>
+                          </div>
+                        </div>
+                      ) : loadingFarmsInBlock ? (
+                        <div className="text-sm text-muted-foreground italic">Loading farms...</div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-3 mb-2">
+                            <div className="text-sm text-muted-foreground">
+                              {farmsInBlock.length === 0 ? 'No farms found for this block.' : `${farmsInBlock.length} farms in this block.`}
+                            </div>
+                            <Button
+                              size="sm"
+                              className="gap-2 bg-green-700 hover:bg-green-800"
+                              onClick={openAddLandEditor}
+                            >
+                              <Plus className="w-4 h-4" /> Add Land
+                            </Button>
+                          </div>
+
+                          {farmsInBlock.length === 0 ? (
+                            <div className="text-sm text-muted-foreground italic">No farms found for this block.</div>
+                          ) : (
+                            <div className="grid grid-cols-1 gap-3">
+                              {farmsInBlock.map((f: any) => (
+                                <div key={f.farm_id} className="p-3 border rounded-md bg-white/60 flex items-center justify-between">
+                                  <div>
+                                    <div className="font-semibold text-sm">Farm ID: {f.farm_id}</div>
+                                    <div className="text-xs text-muted-foreground">Farmer ID: {f.farmer_id}</div>
+                                    <div className="text-xs mt-1">Area: {f.area ?? f.area === 0 ? `${f.area} acres` : 'N/A'}</div>
+                                    <div className="text-xs">Village: {f.land_data?.village || f.land_data?.village || 'N/A'}</div>
+                                  </div>
+                                  <div className="text-right text-xs text-muted-foreground">
+                                    <div>Priority: {f.priority ?? '-'}</div>
+                                    <div className="mt-2">Created: {f.created_at ? new Date(f.created_at).toLocaleDateString() : '-'}</div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )
                     ) : (

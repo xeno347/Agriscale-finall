@@ -92,10 +92,17 @@ export interface PlannerActivity {
 export interface MasterPlanner {
 	id: string;
 	name: string;
+	cropType?: 'Paddy' | 'Ragi' | 'Napier';
 	activities: PlannerActivity[];
 	createdAt: Date;
 	updatedAt: Date;
 }
+
+const CROP_TYPE_API_MAP: Record<'Paddy' | 'Ragi' | 'Napier', 'paddy' | 'ragi' | 'napier'> = {
+	Paddy: 'paddy',
+	Ragi: 'ragi',
+	Napier: 'napier',
+};
 
 // ============================================================
 // CONSTANTS - ACTIVITIES LIST
@@ -196,9 +203,15 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 	const existingPlanner = id ? planners.find((p) => p.id === id) : null;
 
 	const [plannerName, setPlannerName] = useState(existingPlanner?.name || '');
+	const [cropType, setCropType] = useState<'Paddy' | 'Ragi' | 'Napier' | ''>(existingPlanner?.cropType || '');
 	const [activities, setActivities] = useState<PlannerActivity[]>(
 		existingPlanner?.activities || []
 	);
+
+	const applySuggestedPlannerName = () => {
+		if (!cropType) return;
+		setPlannerName(`${cropType} Cultivation Master Plan`);
+	};
 
 	const addActivity = () => {
 		const newActivity: PlannerActivity = {
@@ -229,6 +242,10 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 			toast.error('Please enter a planner name');
 			return;
 		}
+		if (!cropType) {
+			toast.error('Please select a crop type');
+			return;
+		}
 		if (activities.length === 0) {
 			toast.error('Please add at least one activity');
 			return;
@@ -237,6 +254,7 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 		// Prepare API payload
 		const payload = {
 			plan_name: plannerName,
+			crop_type: CROP_TYPE_API_MAP[cropType],
 			plan_list: activities.map((a, idx) => ({
 				index: idx + 1,
 				activity: getActivity(a.activityId)?.name || a.activityId,
@@ -268,6 +286,7 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 		const planner: MasterPlanner = {
 			id: existingPlanner?.id || `planner-${Date.now()}`,
 			name: plannerName,
+			cropType,
 			activities,
 			createdAt: existingPlanner?.createdAt || new Date(),
 			updatedAt: new Date(),
@@ -302,14 +321,66 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 						</CardTitle>
 					</CardHeader>
 					<CardContent className="space-y-6">
-						<div className="space-y-2">
-							<label className="text-sm font-medium text-foreground">Planner Name</label>
-							<Input
-								placeholder="e.g., Tomato Cultivation Plan"
-								value={plannerName}
-								onChange={(e) => setPlannerName(e.target.value)}
-								className="max-w-md"
-							/>
+						<div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50/60 via-white to-lime-50/40 p-4 md:p-5">
+							<div className="mb-3 flex items-center justify-between gap-3">
+								<p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Planner Basics</p>
+								{cropType && (
+									<Button type="button" variant="outline" size="sm" className="h-8 border-emerald-200 text-emerald-700" onClick={applySuggestedPlannerName}>
+										Use Smart Name
+									</Button>
+								)}
+							</div>
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<div className="space-y-2">
+									<label className="text-sm font-medium text-foreground flex items-center gap-2">
+										<Calendar className="h-4 w-4 text-emerald-700" />
+										Planner Name
+									</label>
+									<Input
+										placeholder="e.g., Kharif Paddy Plan - East Block"
+										value={plannerName}
+										onChange={(e) => setPlannerName(e.target.value)}
+									/>
+									<p className="text-xs text-muted-foreground">
+										{plannerName.trim() ? `${plannerName.trim().length} characters` : 'Give this planner a clear, season-ready name'}
+									</p>
+								</div>
+								<div className="space-y-2">
+									<label className="text-sm font-medium text-foreground flex items-center gap-2">
+										<Sprout className="h-4 w-4 text-emerald-700" />
+										Crop Type
+									</label>
+									<Select value={cropType || 'none'} onValueChange={(value) => setCropType(value === 'none' ? '' : value as 'Paddy' | 'Ragi' | 'Napier')}>
+										<SelectTrigger>
+											<SelectValue placeholder="Select crop type" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="none">Select crop type</SelectItem>
+											<SelectItem value="Paddy">
+												<div className="flex items-center gap-2">
+													<Droplets className="h-4 w-4 text-sky-600" />
+													<span>Paddy</span>
+												</div>
+											</SelectItem>
+											<SelectItem value="Ragi">
+												<div className="flex items-center gap-2">
+													<Flower2 className="h-4 w-4 text-amber-600" />
+													<span>Ragi</span>
+												</div>
+											</SelectItem>
+											<SelectItem value="Napier">
+												<div className="flex items-center gap-2">
+													<Layers className="h-4 w-4 text-lime-700" />
+													<span>Napier</span>
+												</div>
+											</SelectItem>
+										</SelectContent>
+									</Select>
+									<p className="text-xs text-muted-foreground">
+										{cropType ? `Selected crop: ${cropType}` : 'Choose crop to tailor this master planner'}
+									</p>
+								</div>
+							</div>
 						</div>
 
 						<div className="space-y-4">

@@ -1144,6 +1144,23 @@ const Farmers = () => {
                       <div className="mt-0.5 inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-gray-500 ring-1 ring-gray-200">
                         FRM-{farmer.id.slice(0, 3).toUpperCase()}
                       </div>
+                      {farmer.farmingOption && (
+                        <div
+                          className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${
+                            farmer.farmingOption.toLowerCase() === 'lease farming'
+                              ? 'bg-emerald-50 text-emerald-700 ring-emerald-100'
+                              : farmer.farmingOption.toLowerCase() === 'contract farming'
+                                ? 'bg-blue-50 text-blue-700 ring-blue-100'
+                                : 'bg-gray-50 text-gray-700 ring-gray-200'
+                          }`}
+                        >
+                          {farmer.farmingOption.toLowerCase() === 'lease farming'
+                            ? 'Lease Farming'
+                            : farmer.farmingOption.toLowerCase() === 'contract farming'
+                              ? 'Contract Farming'
+                              : farmer.farmingOption}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
