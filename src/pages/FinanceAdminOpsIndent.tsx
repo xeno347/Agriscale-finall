@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { getBaseUrl } from '@/lib/config';
+import { buildMrfSignatureEntry, getMrfSignatureEntry, readMrfSignatureCache, saveMrfSignatureEntry, extractStatusFromEntry } from '@/lib/mrfSignatureCache';
 import {
   readAdminOpsIndentConfig,
   writeAdminOpsIndentConfig,
@@ -153,6 +154,31 @@ const formatDateYmd = (iso?: string) => {
   } catch {
     return '';
   }
+};
+
+const parseMrfSignatureStamp = (value?: string) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return { signerName: '', signerRole: '', signedAt: '', status: '' };
+
+  const match = raw.match(/^\[(.*?)\|(.*?)\|(.*?)\|(.*?)\|(.*?)\]$/);
+  if (!match) {
+    const status = raw.toLowerCase() === 'rejected' ? 'reject' : raw.toLowerCase();
+    return { signerName: '', signerRole: '', signedAt: '', status };
+  }
+
+  const [, signerName, signerRole, timeText, dateText, statusText] = match;
+  const status = statusText.trim().toLowerCase() === 'rejected' ? 'reject' : statusText.trim().toLowerCase();
+  return {
+    signerName: signerName.trim(),
+    signerRole: signerRole.trim(),
+    signedAt: `${dateText.trim()} ${timeText.trim()}`,
+    status,
+  };
+};
+
+const formatCurrency = (value: unknown) => {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? amount.toLocaleString() : '0';
 };
 
 const FinalizedVendorQuotationCompact = ({
@@ -319,7 +345,12 @@ const AdminOpsIndent = () => {
   const [nfas, setNfas] = useState<NfaApiRow[]>([]);
   const [nfaApprovalsMap, setNfaApprovalsMap] = useState<Record<string, boolean>>({});
 
-  const [activeSection, setActiveSection] = useState<'indents' | 'nfa'>('nfa');
+  const [activeSection, setActiveSection] = useState<'indents' | 'nfa' | 'mrf'>('nfa');
+
+  // MRF state
+  const [mrfRecords, setMrfRecords] = useState<any[]>([]);
+  const [isLoadingMrfs, setIsLoadingMrfs] = useState(false);
+  const [savingMrfFor, setSavingMrfFor] = useState<string | null>(null);
 
   // Load attachments config on mount
   useEffect(() => {
@@ -351,6 +382,61 @@ const AdminOpsIndent = () => {
     };
     loadNfas();
   }, []);
+
+  // Load MRFs from HRMS
+  useEffect(() => {
+    const loadMrfs = async () => {
+      try {
+        const BASE_URL = getBaseUrl().replace(/\/$/, '');
+        setIsLoadingMrfs(true);
+        const res = await fetch(`${BASE_URL}/HRMS/get_MRF_for_director`);
+        const text = await res.text().catch(() => '');
+        if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+        const json = text ? JSON.parse(text) : {};
+        const list = Array.isArray(json?.MRFs_for_director) ? json.MRFs_for_director : [];
+        setMrfRecords(list.map((r: any, idx: number) => ({ ...r, _idx: idx })));
+      } catch (err: any) {
+        console.warn('Failed to load MRFs', err);
+      } finally {
+        setIsLoadingMrfs(false);
+      }
+    };
+    void loadMrfs();
+  }, []);
+
+  const updateMrfApproval = async (mrfNo: string, action: 'approved' | 'rejected') => {
+    try {
+      const BASE_URL = getBaseUrl().replace(/\/$/, '');
+      // determine approver name from local profile
+      const p = readUserProfile();
+      const approverName = (p.name || '').trim();
+      if (!approverName) { toast.error('Approver name missing in profile'); return; }
+      setSavingMrfFor(mrfNo);
+      const res = await fetch(`${BASE_URL}/HRMS/admin_ops_approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ MRF_no: mrfNo, approver_role: 'Admin Ops', approver_name: approverName, approval_status: action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || data?.error || 'Approval failed');
+
+      const signedAt = new Date().toISOString();
+      const entry = buildMrfSignatureEntry({ signerName: approverName, signerRole: 'Admin Ops', approvalStatus: action, signedAt });
+      saveMrfSignatureEntry(readMrfSignatureCache(), mrfNo, 'admin_ops', entry);
+
+      setMrfRecords((prev) => prev.map((r) => (String(r.MRF_no || '') === String(mrfNo) ? ({
+        ...r,
+        admin_ops_approval_status: entry.stamp,
+        admin_ops_approver_name: approverName,
+        admin_ops_approval_time: signedAt,
+      }) : r)));
+      toast.success(`MRF ${action}`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update MRF approval');
+    } finally {
+      setSavingMrfFor(null);
+    }
+  };
 
   const handleConfigClose = () => {
     setConfigOpen(false);
@@ -707,6 +793,321 @@ const AdminOpsIndent = () => {
     }
   };
 
+  // Render sections (Indents / MRF / NFA) via a local variable to avoid nested ternary JSX parsing issues
+  let sectionContent: JSX.Element | null = null;
+  if (activeSection === 'indents') {
+    sectionContent = (
+      <div className="bg-white rounded-lg border border-gray-100 shadow-sm">
+        <div className="grid grid-cols-[minmax(220px,3fr)_minmax(140px,2fr)_minmax(180px,3fr)_minmax(130px,2fr)_80px_140px] gap-2 px-4 py-3 text-xs font-semibold text-gray-500 border-b border-gray-100">
+          <div>PR No / Project</div>
+          <div>Department</div>
+          <div>Indented By</div>
+          <div>Date</div>
+          <div className="text-center">Items</div>
+          <div className="text-right">Status</div>
+        </div>
+
+        <div className="space-y-3">
+          {filtered.map((it) => {
+            const attached = Boolean(attachedMap[it.id]);
+            const alreadySigned = Boolean(it.directorsApprovalSignature) || Boolean(indentApprovalsMap[it.id]);
+            void attached;
+
+            return (
+              <div
+                key={it.id}
+                className="bg-white p-4 rounded-lg border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:border-gray-200"
+                onClick={() => setPreviewIndent(it)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') setPreviewIndent(it);
+                }}
+              >
+                <div>
+                  <div className="flex items-baseline gap-3">
+                    <h3 className="font-semibold text-gray-800">{it.prNo || 'PR (Draft)'}</h3>
+                    <span className="text-xs text-gray-400">{it.project}</span>
+                  </div>
+                  <p className="text-sm text-gray-500">
+                    Items: {(it.items ?? []).length} · Total: {formatInr(totalValue(it.items ?? []))} · Indented by {it.indentedBy || '—'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p
+                      className={`text-sm font-semibold ${
+                        it.status === 'pending'
+                          ? 'text-yellow-600'
+                          : it.status === 'forwarded'
+                            ? 'text-blue-600'
+                            : 'text-gray-600'
+                      }`}
+                    >
+                      {it.status.toUpperCase()}
+                    </p>
+                    <p className="text-xs text-gray-400">{it.date}</p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void attachIndentApproval({ id: it.id, prNo: it.prNo });
+                      }}
+                      disabled={alreadySigned || Boolean(attachingApprovalMap[it.id])}
+                    >
+                      <Paperclip className="w-4 h-4" />
+                      {alreadySigned ? 'Approved' : attachingApprovalMap[it.id] ? 'Attaching…' : 'Attach Sign'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  } else if (activeSection === 'mrf') {
+    sectionContent = (
+      <div className="bg-white rounded-lg border border-gray-100 shadow-sm">
+        <div className="grid grid-cols-[minmax(220px,3fr)_minmax(200px,2fr)_minmax(120px,1fr)_120px] gap-2 px-4 py-3 text-xs font-semibold text-gray-500 border-b border-gray-100">
+          <div>MRF No / Department</div>
+          <div>Approval Flow</div>
+          <div>Created</div>
+          <div className="text-right">Actions</div>
+        </div>
+
+        <div className="space-y-3 p-3">
+          {isLoadingMrfs ? (
+            <div className="text-sm text-gray-500">Loading MRFs…</div>
+          ) : mrfRecords.length === 0 ? (
+            <div className="text-sm text-gray-500">No MRFs found.</div>
+          ) : (
+            mrfRecords.map((r) => {
+              const mrfNo = String(r.MRF_no ?? '') || '';
+              const dept = String(r.request_details?.department ?? '') || '—';
+              const subDepartment = String(r.request_details?.sub_department ?? '') || '—';
+              const contactType = String(r.request_details?.contact_type ?? '') || '—';
+              const reasonOfVacancy = String(r.request_details?.reason_of_vacancy ?? '') || '—';
+              const impact = String(r.request_details?.impact ?? '') || '—';
+              const billingDetails = Array.isArray(r.billing_details) ? r.billing_details : [];
+              const created = r.created_at ?? r.createdAt ?? '';
+              const adminEntry = getMrfSignatureEntry(readMrfSignatureCache(), mrfNo, 'admin_ops');
+              const directorEntry = getMrfSignatureEntry(readMrfSignatureCache(), mrfNo, 'director');
+              const adminStamp = adminEntry?.stamp || String(r.admin_ops_approval_status ?? r.adminOpsApprovalStatus ?? '').trim();
+              const adminStatus = extractStatusFromEntry(adminEntry ?? adminStamp) ?? 'pending';
+              const adminStampParts = parseMrfSignatureStamp(adminStamp);
+              const directorStatus = extractStatusFromEntry(directorEntry ?? (r.director_approval_status ?? r.directorApprovalStatus)) ?? 'pending';
+              const isOpen = openRowId === mrfNo;
+              const simpleAdmin = adminStatus === 'approved' ? 'Approved' : adminStatus === 'reject' ? 'Reject' : 'Pending';
+              const canAct = adminStatus === 'pending' && savingMrfFor !== mrfNo;
+              return (
+                <div key={mrfNo || Math.random()} className="rounded-lg border border-gray-100 bg-white shadow-sm overflow-hidden">
+                  <button
+                    type="button"
+                    className="w-full flex items-center justify-between gap-3 px-3 py-3 text-left hover:bg-gray-50"
+                    onClick={() => setOpenRowId((prev) => (prev === mrfNo ? '' : mrfNo))}
+                  >
+                    <div className="min-w-0">
+                      <div className="font-semibold text-gray-800 truncate">{mrfNo || 'MRF (Unknown)'}</div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {dept} · {subDepartment} · {contactType}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${adminStatus === 'approved' ? 'bg-green-50 text-green-700 border border-green-200' : adminStatus === 'reject' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                        Admin Ops: {simpleAdmin}
+                      </span>
+                      <span className="inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-50">
+                        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                      </span>
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="border-t border-gray-100 px-3 py-3 space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div className="rounded-md bg-gray-50 border border-gray-100 p-3">
+                          <div className="text-xs font-semibold text-gray-500 mb-1">Request Details</div>
+                          <div className="text-gray-700">Department: {dept}</div>
+                          <div className="text-gray-700">Sub department: {subDepartment}</div>
+                          <div className="text-gray-700">Contact type: {contactType}</div>
+                          <div className="text-gray-700">Reason of vacancy: {reasonOfVacancy}</div>
+                          <div className="text-gray-700">Impact: {impact}</div>
+                        </div>
+
+                        <div className="rounded-md bg-gray-50 border border-gray-100 p-3">
+                          <div className="text-xs font-semibold text-gray-500 mb-1">Billing Details</div>
+                          <div className="overflow-x-auto rounded border border-gray-200 bg-white">
+                            <table className="w-full text-sm border-collapse">
+                              <thead className="bg-gray-100">
+                                <tr>
+                                  <th className="text-left px-2 py-1.5 border-b border-gray-200">Designation</th>
+                                  <th className="text-right px-2 py-1.5 border-b border-gray-200">Qty</th>
+                                  <th className="text-right px-2 py-1.5 border-b border-gray-200">CTC</th>
+                                  <th className="text-right px-2 py-1.5 border-b border-gray-200">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {billingDetails.length > 0 ? billingDetails.map((bill: any, idx: number) => {
+                                  const qty = Number(bill?.quantity || 0);
+                                  const ctc = Number(bill?.CTC || 0);
+                                  const total = qty * ctc;
+                                  return (
+                                    <tr key={`${mrfNo}-bill-${idx}`}>
+                                      <td className="px-2 py-1.5 border-b border-gray-100">{bill?.Designation || '-'}</td>
+                                      <td className="px-2 py-1.5 border-b border-gray-100 text-right">{qty}</td>
+                                      <td className="px-2 py-1.5 border-b border-gray-100 text-right">{formatCurrency(ctc)}</td>
+                                      <td className="px-2 py-1.5 border-b border-gray-100 text-right font-semibold">{formatCurrency(total)}</td>
+                                    </tr>
+                                  );
+                                }) : (
+                                  <tr>
+                                    <td className="px-2 py-2 text-gray-500" colSpan={4}>No billing details found.</td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="mt-2 text-right text-sm font-bold text-gray-900">Total Budget: {formatCurrency(r.total_budget ?? 0)}</div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div className="rounded-md bg-gray-50 border border-gray-100 p-3">
+                          <div className="text-xs font-semibold text-gray-500 mb-1">Approval Stamps</div>
+                          <div className="text-gray-700 break-all"><span className="font-semibold">Admin Ops:</span> {adminStamp || 'pending'}</div>
+                          <div className="text-gray-700 break-all"><span className="font-semibold">Director:</span> {String(r.director_approval_status ?? r.directorApprovalStatus ?? 'pending')}</div>
+                          <div className="text-xs text-gray-500 mt-2">Created: {created ? new Date(created).toLocaleString() : '—'}</div>
+                          <div className="text-xs text-gray-500">Signed by: {adminStampParts.signerName || r.admin_ops_approver_name || '—'}</div>
+                          <div className="text-xs text-gray-500">Signed at: {adminStampParts.signedAt || '—'}</div>
+                        </div>
+
+                        <div className="rounded-md bg-gray-50 border border-gray-100 p-3">
+                          <div className="text-xs font-semibold text-gray-500 mb-1">Signature Preview</div>
+                          <div className="text-sm text-gray-700 break-all">{adminStamp || 'pending'}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!canAct}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            void updateMrfApproval(mrfNo, 'rejected');
+                          }}
+                        >
+                          Reject
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="bg-green-600 text-white"
+                          disabled={!canAct}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            void updateMrfApproval(mrfNo, 'approved');
+                          }}
+                        >
+                          Approve
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  } else {
+    sectionContent = (
+      <div className="bg-white rounded-lg border border-gray-100 shadow-sm">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">NFA (Note For Approval)</h2>
+            <p className="text-xs text-gray-500">For information only (corporate procedure). Your task: approve & forward the finalized quotation.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-[minmax(220px,3fr)_minmax(320px,5fr)_minmax(220px,3fr)] gap-2 px-4 py-3 text-xs font-semibold text-gray-500 border-b border-gray-100">
+          <div>PR No / Project</div>
+          <div>Finalized Quotation (HO Selected)</div>
+          <div className="text-right">Approval</div>
+        </div>
+
+        <div className="divide-y divide-gray-100">
+          {filteredNfas.map((nfa, idx) => {
+            const prNo = String(nfa.pr_number ?? '').trim();
+            const indent = prNo ? indents.find((x) => String(x.prNo ?? '').trim() === prNo || String(x.id ?? '').trim() === prNo) : undefined;
+            const comparisonId = String((nfa as any)?.comparison_id ?? (nfa as any)?.comparision_id ?? '').trim();
+            const hasNfaStatusField = (nfa as any)?.NFA_status != null || (nfa as any)?.nfa_status != null;
+            const statusRaw = String((nfa as any)?.NFA_status ?? (nfa as any)?.nfa_status ?? '').trim();
+            const statusLower = statusRaw.toLowerCase();
+
+            const approvedByStatus = Boolean(hasNfaStatusField && statusRaw && statusLower !== 'pending');
+            const approvedLocally = Boolean(prNo && nfaApprovalsMap[prNo]);
+            const alreadySigned = approvedByStatus || approvedLocally;
+
+            const canApprove = Boolean(prNo) && Boolean(comparisonId) && (!hasNfaStatusField || statusLower === 'pending');
+            const loadingKey = prNo;
+
+            return (
+              <div
+                key={`nfa-${prNo || idx}`}
+                className="grid grid-cols-[minmax(220px,3fr)_minmax(320px,5fr)_minmax(220px,3fr)] gap-2 px-4 py-3 hover:bg-gray-50"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-gray-800 truncate">{prNo || 'PR (Draft)'}</div>
+                  <div className="text-xs text-gray-500 truncate">{indent?.project || '—'}</div>
+                </div>
+
+                <div className="text-xs text-gray-600">
+                  {prNo ? <FinalizedVendorQuotationCompact nfa={nfa} approved={alreadySigned} /> : <span className="text-gray-500">Missing PR number.</span>}
+                </div>
+
+                <div className="flex items-start justify-end gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    className="bg-gray-900 hover:bg-gray-800 text-white"
+                    disabled={alreadySigned || !canApprove || Boolean(attachingApprovalMap[loadingKey])}
+                    onClick={() => {
+                      if (!prNo) {
+                        toast.error('Missing PR number');
+                        return;
+                      }
+                      if (!comparisonId) {
+                        toast.error('Missing comparison id');
+                        return;
+                      }
+                      void attachNfaApproval({ prNo, comparisonId });
+                    }}
+                  >
+                    {alreadySigned ? 'Approved' : attachingApprovalMap[loadingKey] ? 'Approving…' : 'Approve & Forward'}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+
+          {filteredNfas.length === 0 && (
+            <div className="px-4 py-6 text-sm text-gray-500 text-center">No NFA found.</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="flex items-start justify-between mb-5">
@@ -747,163 +1148,17 @@ const AdminOpsIndent = () => {
           >
             NFA Notes
           </button>
+          <button
+            type="button"
+            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${activeSection === 'mrf' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+            onClick={() => setActiveSection('mrf')}
+          >
+            MRF ({mrfRecords.length})
+          </button>
         </div>
       </div>
 
-      {activeSection === 'indents' ? (
-        <div className="bg-white rounded-lg border border-gray-100 shadow-sm">
-          {/* header row */}
-          <div className="grid grid-cols-[minmax(220px,3fr)_minmax(140px,2fr)_minmax(180px,3fr)_minmax(130px,2fr)_80px_140px] gap-2 px-4 py-3 text-xs font-semibold text-gray-500 border-b border-gray-100">
-            <div>PR No / Project</div>
-            <div>Department</div>
-            <div>Indented By</div>
-            <div>Date</div>
-            <div className="text-center">Items</div>
-            <div className="text-right">Status</div>
-          </div>
-
-          <div className="space-y-3">
-            {filtered.map((it) => {
-              const attached = Boolean(attachedMap[it.id]);
-              const alreadySigned = Boolean(it.directorsApprovalSignature) || Boolean(indentApprovalsMap[it.id]);
-              void attached;
-
-              return (
-                <div
-                  key={it.id}
-                  className="bg-white p-4 rounded-lg border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:border-gray-200"
-                  onClick={() => setPreviewIndent(it)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') setPreviewIndent(it);
-                  }}
-                >
-                  <div>
-                    <div className="flex items-baseline gap-3">
-                      <h3 className="font-semibold text-gray-800">{it.prNo || 'PR (Draft)'}</h3>
-                      <span className="text-xs text-gray-400">{it.project}</span>
-                    </div>
-                    <p className="text-sm text-gray-500">
-                      Items: {(it.items ?? []).length} · Total: {formatInr(totalValue(it.items ?? []))} · Indented by {it.indentedBy || '—'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <p
-                        className={`text-sm font-semibold ${
-                          it.status === 'pending'
-                            ? 'text-yellow-600'
-                            : it.status === 'forwarded'
-                              ? 'text-blue-600'
-                              : 'text-gray-600'
-                        }`}
-                      >
-                        {it.status.toUpperCase()}
-                      </p>
-                      <p className="text-xs text-gray-400">{it.date}</p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          void attachIndentApproval({ id: it.id, prNo: it.prNo });
-                        }}
-                        disabled={alreadySigned || Boolean(attachingApprovalMap[it.id])}
-                      >
-                        <Paperclip className="w-4 h-4" />
-                        {alreadySigned ? 'Approved' : attachingApprovalMap[it.id] ? 'Attaching…' : 'Attach Sign'}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg border border-gray-100 shadow-sm">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">NFA (Note For Approval)</h2>
-              <p className="text-xs text-gray-500">For information only (corporate procedure). Your task: approve & forward the finalized quotation.</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-[minmax(220px,3fr)_minmax(320px,5fr)_minmax(220px,3fr)] gap-2 px-4 py-3 text-xs font-semibold text-gray-500 border-b border-gray-100">
-            <div>PR No / Project</div>
-            <div>Finalized Quotation (HO Selected)</div>
-            <div className="text-right">Approval</div>
-          </div>
-
-          <div className="divide-y divide-gray-100">
-            {filteredNfas.map((nfa, idx) => {
-              const prNo = String(nfa.pr_number ?? '').trim();
-              const indent = prNo ? indents.find((x) => String(x.prNo ?? '').trim() === prNo || String(x.id ?? '').trim() === prNo) : undefined;
-              const comparisonId = String((nfa as any)?.comparison_id ?? (nfa as any)?.comparision_id ?? '').trim();
-              const hasNfaStatusField = (nfa as any)?.NFA_status != null || (nfa as any)?.nfa_status != null;
-              const statusRaw = String((nfa as any)?.NFA_status ?? (nfa as any)?.nfa_status ?? '').trim();
-              const statusLower = statusRaw.toLowerCase();
-
-              // NFA button state should follow NFA_status (not the Indent's director signature,
-              // which can be present even while NFA is still pending).
-              const approvedByStatus = Boolean(hasNfaStatusField && statusRaw && statusLower !== 'pending');
-              const approvedLocally = Boolean(prNo && nfaApprovalsMap[prNo]);
-              const alreadySigned = approvedByStatus || approvedLocally;
-
-              // Enable Approve when NFA_status is 'pending'. If backend doesn't send NFA_status (older payload), allow approval.
-              const canApprove = Boolean(prNo) && Boolean(comparisonId) && (!hasNfaStatusField || statusLower === 'pending');
-              const loadingKey = prNo;
-
-              return (
-                <div
-                  key={`nfa-${prNo || idx}`}
-                  className="grid grid-cols-[minmax(220px,3fr)_minmax(320px,5fr)_minmax(220px,3fr)] gap-2 px-4 py-3 hover:bg-gray-50"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-gray-800 truncate">{prNo || 'PR (Draft)'}</div>
-                    <div className="text-xs text-gray-500 truncate">{indent?.project || '—'}</div>
-                  </div>
-
-                  <div className="text-xs text-gray-600">
-                    {prNo ? <FinalizedVendorQuotationCompact nfa={nfa} approved={alreadySigned} /> : <span className="text-gray-500">Missing PR number.</span>}
-                  </div>
-
-                  <div className="flex items-start justify-end gap-2 pt-1">
-                    <Button
-                      size="sm"
-                      className="bg-gray-900 hover:bg-gray-800 text-white"
-                      disabled={alreadySigned || !canApprove || Boolean(attachingApprovalMap[loadingKey])}
-                      onClick={() => {
-                        if (!prNo) {
-                          toast.error('Missing PR number');
-                          return;
-                        }
-                        if (!comparisonId) {
-                          toast.error('Missing comparison id');
-                          return;
-                        }
-                        void attachNfaApproval({ prNo, comparisonId });
-                      }}
-                    >
-                      {alreadySigned ? 'Approved' : attachingApprovalMap[loadingKey] ? 'Approving…' : 'Approve & Forward'}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-
-            {filteredNfas.length === 0 && (
-              <div className="px-4 py-6 text-sm text-gray-500 text-center">No NFA found.</div>
-            )}
-          </div>
-        </div>
-      )}
+      {sectionContent}
 
       <Dialog open={Boolean(previewIndent)} onOpenChange={(v) => { if (!v) setPreviewIndent(null); }}>
         <DialogContent className="max-w-[1200px] w-[1200px] max-h-[90vh] overflow-y-auto">

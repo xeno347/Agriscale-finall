@@ -78,8 +78,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area'; // New component
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import getBaseUrl from '@/lib/config';
+import ResourceAllocationPanel from '@/components/cultivation/ResourceAllocationPanel';
 
 type LivePlanStepStatus = 'idle' | 'loading' | 'success' | 'error';
+type CardSaveStatus = 'pending' | 'assigning' | 'saving' | 'done' | 'error';
 
 type RentalServiceOption = {
   id: string;
@@ -408,8 +410,11 @@ const MonthCalendar: React.FC<{
   highlightCounts?: { [date: string]: number };
   highlightColors?: { [date: string]: string };
   highlightCardColors?: { [date: string]: string[] };
+  hoverDetailsByDate?: {
+    [date: string]: Array<{ cardLabel: string; acres: number; activities: string[] }>;
+  };
   blockedDates?: { [date: string]: boolean };
-}> = ({ month, selectedDate, onDateClick, isSelectionMode, highlighted, highlightCounts, highlightColors, highlightCardColors, blockedDates }) => {
+}> = ({ month, selectedDate, onDateClick, isSelectionMode, highlighted, highlightCounts, highlightColors, highlightCardColors, hoverDetailsByDate, blockedDates }) => {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
@@ -417,7 +422,7 @@ const MonthCalendar: React.FC<{
   const emptySlots = Array(startDayOfWeek).fill(null);
   const weekDays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-visible">
       <CardHeader className="py-2 px-3 bg-muted/50">
         <CardTitle className="text-sm font-medium text-center">
           {format(month, 'MMMM yyyy')}
@@ -444,71 +449,54 @@ const MonthCalendar: React.FC<{
             const today = isToday(day);
             const highlight = highlighted && highlighted[format(day, 'yyyy-MM-dd')];
             const highlightCount = highlightCounts ? highlightCounts[format(day, 'yyyy-MM-dd')] || 0 : 0;
-            const highlightColor = highlightColors ? highlightColors[format(day, 'yyyy-MM-dd')] : undefined;
             const dateCardColors = highlightCardColors ? (highlightCardColors[format(day, 'yyyy-MM-dd')] || []) : [];
             const cardCount = dateCardColors.length;
+            const hoverDetails = hoverDetailsByDate ? (hoverDetailsByDate[format(day, 'yyyy-MM-dd')] || []) : [];
             const isBlocked = blockedDates && blockedDates[format(day, 'yyyy-MM-dd')];
-            const overlapClass = highlightCount > 5
-              ? 'bg-red-200 border border-red-600 text-red-900'
-              : highlightCount > 2
-              ? 'bg-orange-100 border border-orange-500 text-orange-800'
-              : highlightCount > 1
-              ? 'bg-green-400 border border-green-700 text-green-950'
-              : highlight
-              ? 'bg-green-100 border border-green-500'
-              : '';
             return (
               <button
                 key={day.toISOString()}
                 onClick={() => (!isSelectionMode || !isBlocked) && onDateClick && onDateClick(day)}
                 disabled={isSelectionMode && isBlocked}
-                className={`aspect-square p-0.5 rounded text-[10px] relative transition-all
+                className={`group aspect-square p-0.5 rounded text-[10px] relative transition-all
+                  border border-slate-200
                   ${(isSelectionMode || highlight) ? 'cursor-pointer hover:bg-primary/10' : 'cursor-default'}
                   ${isSelected ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-offset-1' : ''}
                   ${today && !isSelected ? 'bg-accent font-bold' : ''}
                   ${isPast && !isSelected ? 'text-muted-foreground/50' : ''}
-                  ${overlapClass}
                   ${isBlocked ? 'bg-red-100 border border-red-500 text-red-700' : ''}
                 `}
-                style={!isSelected && !isBlocked && highlightColor ? { backgroundColor: highlightColor, borderColor: '#7c3aed' } : undefined}
+                style={undefined}
               >
+                <span className="block">{format(day, 'd')}</span>
                 {!isSelected && !isBlocked && cardCount > 0 && (
-                  <span className="absolute inset-0 p-[2px] pointer-events-none">
-                    {cardCount === 1 && (
-                      <span className="block h-full w-full rounded" style={{ backgroundColor: dateCardColors[0] }} />
-                    )}
-                    {cardCount === 2 && (
-                      <span className="grid h-full w-full grid-cols-2 gap-[2px]">
-                        <span className="rounded" style={{ backgroundColor: dateCardColors[0] }} />
-                        <span className="rounded" style={{ backgroundColor: dateCardColors[1] }} />
-                      </span>
-                    )}
-                    {cardCount === 3 && (
-                      <span className="grid h-full w-full grid-cols-2 grid-rows-2 gap-[2px]">
-                        <span className="rounded" style={{ backgroundColor: dateCardColors[0] }} />
-                        <span className="rounded" style={{ backgroundColor: dateCardColors[1] }} />
-                        <span className="rounded" style={{ backgroundColor: dateCardColors[2] }} />
-                        <span />
-                      </span>
-                    )}
+                  <span className="absolute left-1/2 -translate-x-1/2 bottom-[3px] flex items-center gap-[3px] pointer-events-none">
+                    {dateCardColors.slice(0, 3).map((clr, idx) => (
+                      <span
+                        key={`${format(day, 'yyyy-MM-dd')}-${idx}`}
+                        className="h-[10px] w-[15px] rounded-[3px] border border-slate-500 saturate-[2.3] contrast-[1.35] brightness-[0.85]"
+                        style={{ backgroundColor: clr }}
+                      />
+                    ))}
                     {cardCount > 3 && (
-                      <span className="grid h-full w-full grid-cols-2 grid-rows-2 gap-[2px]">
-                        <span className="rounded" style={{ backgroundColor: dateCardColors[0] }} />
-                        <span className="rounded" style={{ backgroundColor: dateCardColors[1] }} />
-                        <span className="rounded" style={{ backgroundColor: dateCardColors[2] }} />
-                        <span className="rounded bg-white/85 border border-slate-300 text-[8px] font-bold text-slate-700 flex items-center justify-center">
-                          +{cardCount - 3}
-                        </span>
+                      <span className="h-[10px] min-w-[15px] px-[3px] rounded-[3px] border border-slate-300 bg-slate-200 text-[8px] leading-[10px] text-slate-700 font-bold">
+                        +{cardCount - 3}
                       </span>
                     )}
                   </span>
                 )}
-                <span className="block">{format(day, 'd')}</span>
-                {highlight && (
-                  <span className="block text-[8px] text-green-700 font-semibold truncate">{highlight}</span>
-                )}
                 {isBlocked && (
                   <span className="block text-[8px] text-red-700 font-semibold truncate">Blocked</span>
+                )}
+                {hoverDetails.length > 0 && (
+                  <span className="hidden group-hover:block absolute z-50 left-1/2 -translate-x-1/2 top-full mt-1 w-56 rounded-md border border-slate-300 bg-white p-2 text-left shadow-lg">
+                    {hoverDetails.map((d, idx) => (
+                      <span key={`${format(day, 'yyyy-MM-dd')}-h-${idx}`} className="block mb-1 last:mb-0">
+                        <span className="block text-[10px] font-semibold text-slate-800">{d.cardLabel} ({d.acres.toFixed(2)} ac)</span>
+                        <span className="block text-[9px] text-slate-600 truncate">{d.activities.join(', ')}</span>
+                      </span>
+                    ))}
+                  </span>
                 )}
               </button>
             );
@@ -542,13 +530,22 @@ const CreateCultivationPlan: React.FC = () => {
   const [highlightCounts, setHighlightCounts] = useState<{ [date: string]: number }>({});
   const [highlightColors, setHighlightColors] = useState<{ [date: string]: string }>({});
   const [highlightCardColors, setHighlightCardColors] = useState<{ [date: string]: string[] }>({});
+  const [hoverDetailsByDate, setHoverDetailsByDate] = useState<{
+    [date: string]: Array<{ cardLabel: string; acres: number; activities: string[] }>;
+  }>({});
   const [mappedByCard, setMappedByCard] = useState<Record<string, any[]>>({});
+  const [mappedByCardRaw, setMappedByCardRaw] = useState<Record<string, any[]>>({});
   const [activeMappingCard, setActiveMappingCard] = useState<{ blockId: string; cardId: string } | null>(null);
   const [mappingCardLoading, setMappingCardLoading] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
   const [blockedDates, setBlockedDates] = useState<{ [date: string]: boolean }>({});
   const [showBlockedDates, setShowBlockedDates] = useState(true);
 
+  const [livePlanUiRunning, setLivePlanUiRunning] = useState(false);
+  const [livePlanUiCardIndex, setLivePlanUiCardIndex] = useState<number>(-1);
+  const [livePlanUiStage, setLivePlanUiStage] = useState<'idle' | 'assigning' | 'saving' | 'done'>('idle');
+  const [livePlanUiDescription, setLivePlanUiDescription] = useState<string>('Ready to start saving plan.');
+  const [livePlanUiSavedAcres, setLivePlanUiSavedAcres] = useState<number>(0);
   const [livePlanProgressOpen, setLivePlanProgressOpen] = useState(false);
   const [livePlanStep, setLivePlanStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [savePlanStatus, setSavePlanStatus] = useState<LivePlanStepStatus>('idle');
@@ -556,6 +553,24 @@ const CreateCultivationPlan: React.FC = () => {
   const [assignContractFarmersStatus, setAssignContractFarmersStatus] = useState<LivePlanStepStatus>('idle');
   const [adjustRentalServicesStatus, setAdjustRentalServicesStatus] = useState<LivePlanStepStatus>('idle');
   const [livePlanError, setLivePlanError] = useState<string | null>(null);
+  const [resourcePanelOpen, setResourcePanelOpen] = useState(false);
+  const [saveFlowCards, setSaveFlowCards] = useState<Array<{
+    id: string;
+    label: string;
+    acres: number;
+    status: CardSaveStatus;
+    blockName: string;
+    blockTotalArea: number;
+    cropType: string;
+    masterName: string;
+    color: string;
+    farmIds: string[];
+    planId: string;
+    dateMapping: any[];
+  }>>([]);
+  const [saveFlowDescription, setSaveFlowDescription] = useState<string>('Preparing save flow...');
+  const [saveFlowTotalAcres, setSaveFlowTotalAcres] = useState<number>(0);
+  const [saveFlowSavedAcres, setSaveFlowSavedAcres] = useState<number>(0);
 
   // --- State for mapped data (no popup) ---
   const [rawMappedData, setRawMappedData] = useState<any[]>([]);
@@ -964,124 +979,84 @@ const CreateCultivationPlan: React.FC = () => {
   };
 
   const handleSaveLivePlan = async () => {
-    if (!farmId || !masterPlanId) {
-      toast.error('Please select a block and master plan first.');
+    const cards = selectedFarmIds
+      .flatMap((blockId) => {
+        const block = apiBlocks.find((b) => b.block_id === blockId);
+        return (blockPlannerCards[blockId] || []).map((card, idx) => {
+          const acres = (blockLandsById[blockId] || [])
+            .filter((land) => card.selectedFarmTags.includes(land.id))
+            .reduce((sum, land) => sum + Number(land.area || 0), 0);
+          return {
+            id: card.id,
+            label: `${block?.block_name || blockId} - Card ${idx + 1}`,
+            acres: Number(acres.toFixed(2)),
+            status: 'pending' as CardSaveStatus,
+            blockName: block?.block_name || blockId,
+            blockTotalArea: Number(block?.total_area || 0),
+            cropType: String(card.cropType || '-').toUpperCase(),
+            masterName: apiMasterPlans.find((p) => p.id === card.plannerId)?.name || '-',
+            color: card.color || '#f8fafc',
+            farmIds: [...card.selectedFarmTags],
+            planId: String(card.plannerId || ''),
+            dateMapping: Array.isArray(mappedByCardRaw[card.id]) ? mappedByCardRaw[card.id] : (Array.isArray(mappedByCard[card.id]) ? mappedByCard[card.id] : []),
+          };
+        });
+      })
+      .filter((c) => c.acres > 0 && c.planId && c.farmIds.length > 0 && c.dateMapping.length > 0);
+
+    if (cards.length === 0) {
+      toast.error('No mapped cards found to save. Please map cards first.');
       return;
     }
-    if (!selectedRentalServiceIds.length) {
-      toast.error('Please select at least one rental service.');
-      return;
+
+    const total = Number(cards.reduce((sum, c) => sum + c.acres, 0).toFixed(2));
+    setSaveFlowCards(cards);
+    setSaveFlowTotalAcres(total);
+    setSaveFlowSavedAcres(0);
+    setSaveFlowDescription('Preparing planner save queue...');
+    setLivePlanProgressOpen(true);
+    setSavingPlan(true);
+    setLivePlanError(null);
+
+    let saved = 0;
+    const base = BASE_URL.replace(/\/$/, '');
+
+    for (const card of cards) {
+      try {
+        setSaveFlowCards((prev) => prev.map((c) => (c.id === card.id ? { ...c, status: 'saving' } : c)));
+        setSaveFlowDescription(`Saving plan for ${card.acres} acres`);
+
+        const payload = {
+          farm_id: card.farmIds,
+          date_mapping: card.dateMapping,
+          plan_id: card.planId,
+        };
+
+        const saveResp = await fetch(`${base}/admin_cultivation/save_plan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!saveResp.ok) throw new Error(`Save plan failed for ${card.label}`);
+        const saveBody = await saveResp.json();
+        if (!(saveBody && saveBody.status === 'success')) {
+          throw new Error(`Save plan returned non-success for ${card.label}`);
+        }
+
+        saved += card.acres;
+        setSaveFlowSavedAcres(Number(saved.toFixed(2)));
+        setSaveFlowCards((prev) => prev.map((c) => (c.id === card.id ? { ...c, status: 'done' } : c)));
+      } catch (error) {
+        setSaveFlowCards((prev) => prev.map((c) => (c.id === card.id ? { ...c, status: 'error' } : c)));
+        setLivePlanError(error instanceof Error ? error.message : 'Failed during card save flow');
+        setSavingPlan(false);
+        toast.error(error instanceof Error ? error.message : 'Failed during card save flow');
+        return;
+      }
     }
-    if (!rawMappedData.length) {
-      toast.error('Generate the plan mapping before saving.');
-      return;
-    }
 
-    let currentStep: 1 | 2 | 3 | 4 | 5 = 1;
-
-    try {
-      setSavingPlan(true);
-      setLivePlanError(null);
-      setLivePlanStep(1);
-      setSavePlanStatus('idle');
-      setAssignFarmsStatus('idle');
-      setAssignContractFarmersStatus('idle');
-      setAdjustRentalServicesStatus('idle');
-      setLivePlanProgressOpen(true);
-
-      const base = BASE_URL.replace(/\/$/, '');
-      const payload = {
-        plan_id: masterPlanId,
-        block_id: farmId,
-        date_mapping: rawMappedData,
-      };
-
-      // Step 1: Plan made and ready (no work needed)
-      currentStep = 2;
-      setLivePlanStep(2);
-      setSavePlanStatus('loading');
-
-      const resp = await fetch(`${base}/admin_cultivation/save_plan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) throw new Error('Failed to save plan');
-      const data = await resp.json();
-      if (!(data && data.status === 'success')) {
-        throw new Error('Save plan did not return success');
-      }
-      setSavePlanStatus('success');
-
-      // Step 3: Assigning farms (same payload)
-      currentStep = 3;
-      setLivePlanStep(3);
-      setAssignFarmsStatus('loading');
-      const resp2 = await fetch(`${base}/admin_cultivation/feild_assignment_updater`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp2.ok) throw new Error('Failed to assign farms');
-      const data2 = await resp2.json();
-      if (!(data2 && data2.status === 'success')) {
-        throw new Error('Field assignment did not return success');
-      }
-      setAssignFarmsStatus('success');
-
-      // Step 4: Assigning contract farmers (same payload)
-      currentStep = 4;
-      setLivePlanStep(4);
-      setAssignContractFarmersStatus('loading');
-      const resp3 = await fetch(`${base}/admin_cultivation/update_contractor_farmer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp3.ok) throw new Error('Failed to assign contract farmers');
-      const data3 = await resp3.json();
-      if (!(data3 && data3.status === 'success')) {
-        throw new Error('Assign contract farmers did not return success');
-      }
-      setAssignContractFarmersStatus('success');
-
-      // Step 5: Adjusting rental services
-      currentStep = 5;
-      setLivePlanStep(5);
-      setAdjustRentalServicesStatus('loading');
-
-      const rentalSetPayload = {
-        rental_set_id: selectedRentalServiceIds,
-        block_id: farmId,
-        master_plan_id: masterPlanId,
-      };
-
-      const resp4 = await fetch(`${base}/admin_cultivation/update_rental_set`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rentalSetPayload),
-      });
-      if (!resp4.ok) throw new Error('Failed to adjust rental services');
-      const data4 = await resp4.json();
-      if (!(data4 && data4.status === 'success')) {
-        throw new Error('Adjust rental services did not return success');
-      }
-      setAdjustRentalServicesStatus('success');
-
-      toast.success('Plan published successfully!');
-    } catch (err) {
-      console.error('Failed to save plan:', err);
-      const message = err instanceof Error ? err.message : 'Something went wrong';
-      setLivePlanError(message);
-      // Mark the active step as failed (best-effort)
-      if (currentStep === 2) setSavePlanStatus('error');
-      if (currentStep === 3) setAssignFarmsStatus('error');
-      if (currentStep === 4) setAssignContractFarmersStatus('error');
-      if (currentStep === 5) setAdjustRentalServicesStatus('error');
-      toast.error(message);
-    } finally {
-      setSavingPlan(false);
-    }
+    setSaveFlowDescription('All card plans saved successfully.');
+    setSavingPlan(false);
   };
 
   const handleNavigateBack = () => {
@@ -1138,6 +1113,9 @@ const CreateCultivationPlan: React.FC = () => {
     const counts: { [date: string]: number } = {};
     const colors: { [date: string]: string } = {};
     const cardColorsByDate: { [date: string]: Record<string, string> } = {};
+    const hoverByDate: {
+      [date: string]: Record<string, { cardLabel: string; acres: number; activities: Set<string> }>;
+    } = {};
     mappedEntries.forEach((item: any) => {
       if (!item || !item.date || !item.activity) return;
       const dates = Array.isArray(item.date) ? item.date : [item.date];
@@ -1150,6 +1128,16 @@ const CreateCultivationPlan: React.FC = () => {
         if (item.card_id && item.card_color) {
           cardColorsByDate[d][String(item.card_id)] = String(item.card_color);
         }
+        if (!hoverByDate[d]) hoverByDate[d] = {};
+        const key = String(item.card_id || 'unknown');
+        if (!hoverByDate[d][key]) {
+          hoverByDate[d][key] = {
+            cardLabel: String(item.card_label || `Card ${key}`),
+            acres: Number(item.selected_area || 0),
+            activities: new Set<string>(),
+          };
+        }
+        hoverByDate[d][key].activities.add(String(item.activity));
       });
     });
     setHighlighted(highlights);
@@ -1158,6 +1146,18 @@ const CreateCultivationPlan: React.FC = () => {
     setHighlightCardColors(
       Object.fromEntries(
         Object.entries(cardColorsByDate).map(([date, byCard]) => [date, Object.values(byCard)])
+      )
+    );
+    setHoverDetailsByDate(
+      Object.fromEntries(
+        Object.entries(hoverByDate).map(([date, byCard]) => [
+          date,
+          Object.values(byCard).map((entry) => ({
+            cardLabel: entry.cardLabel,
+            acres: entry.acres,
+            activities: Array.from(entry.activities),
+          })),
+        ])
       )
     );
   };
@@ -1206,19 +1206,21 @@ const CreateCultivationPlan: React.FC = () => {
       if (!mapResp.ok) throw new Error('Failed to fetch date mapping');
       const mapData = await mapResp.json();
 
-      const enriched = Array.isArray(mapData?.date_mapping)
-        ? mapData.date_mapping.map((item: any) => ({
-            ...item,
-            card_id: card.id,
-            card_color: card.color,
-            block_id: blockId,
-            crop_type: card.cropType,
-            work_quantity: workQtyByActivity.get(String(item?.activity || '').trim().toLowerCase()) ?? 0,
-          }))
-        : [];
+      const rawList = Array.isArray(mapData?.date_mapping) ? mapData.date_mapping : [];
+      const enriched = rawList.map((item: any) => ({
+        ...item,
+        card_id: card.id,
+        card_label: `${apiBlocks.find((b) => b.block_id === blockId)?.block_name || blockId} - ${String(card.cropType || '').toUpperCase() || 'CARD'}`,
+        card_color: card.color,
+        selected_area: Number(totalArea.toFixed(2)),
+        block_id: blockId,
+        crop_type: card.cropType,
+        work_quantity: workQtyByActivity.get(String(item?.activity || '').trim().toLowerCase()) ?? 0,
+      }));
 
       const nextMapped = { ...mappedByCard, [card.id]: enriched };
       setMappedByCard(nextMapped);
+      setMappedByCardRaw((prev) => ({ ...prev, [card.id]: rawList }));
       const nextCards: BlockPlannerCards = {
         ...blockPlannerCards,
         [blockId]: (blockPlannerCards[blockId] || []).map((c) =>
@@ -1330,7 +1332,7 @@ const CreateCultivationPlan: React.FC = () => {
           {day0 && <p className="text-muted-foreground mt-1 text-sm">Start Date: {format(day0, 'PPP')}</p>}
         </div>
         <div className="flex items-center gap-3">
-          {day0 && (
+          {(day0 || Object.keys(mappedByCard).length > 0) && (
             <Button
               size="lg"
               className="gap-2 px-8 py-3 text-white font-extrabold text-lg bg-gradient-to-r from-green-600 via-emerald-500 to-lime-500 shadow-lg shadow-green-300/40 border-2 border-green-700 ring-4 ring-green-200 focus:ring-green-400 focus:outline-none transition-all duration-200 hover:scale-105 hover:bg-gradient-to-br hover:from-green-700 hover:to-lime-600"
@@ -1338,7 +1340,7 @@ const CreateCultivationPlan: React.FC = () => {
               disabled={savingPlan}
             >
               <CircleDot className="h-6 w-6 animate-pulse text-white drop-shadow" />
-              {savingPlan ? 'Saving…' : 'Live Plan'}
+              Live Plan
             </Button>
           )}
           <Button onClick={() => setDialogOpen(true)} size="lg" className="gap-2">
@@ -1862,13 +1864,81 @@ const CreateCultivationPlan: React.FC = () => {
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Publishing Live Plan</DialogTitle>
+            <DialogTitle className="text-xl font-bold">Saving Plan</DialogTitle>
             <DialogDescription>
-              Please wait while we save the plan and assign farms.
+              Card-wise save progress (UI flow only).
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-sm font-semibold text-slate-800">
+                Making planner for total selected area: {saveFlowTotalAcres.toFixed(2)} acres
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Card View</div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {saveFlowCards.map((c) => (
+                  <div
+                    key={c.id}
+                    className="rounded-md border p-2 text-xs"
+                    style={{
+                      backgroundColor: c.color,
+                      borderColor:
+                        c.status === 'done'
+                          ? '#22c55e'
+                          : c.status === 'error'
+                            ? '#ef4444'
+                          : c.status === 'saving' || c.status === 'assigning'
+                            ? '#3b82f6'
+                            : '#94a3b8',
+                      color: '#1f2937',
+                    }}
+                  >
+                    <div className="rounded bg-white/70 p-2">
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                        <span className="font-medium text-slate-700">Block</span>
+                        <span className="text-right font-bold text-slate-900">{c.blockName || '-'}</span>
+                        <span className="font-medium text-slate-700">Total Area</span>
+                        <span className="text-right font-bold text-slate-900">{c.blockTotalArea || 0} ac</span>
+                        <span className="font-medium text-slate-700">Crop</span>
+                        <span className="text-right font-bold text-slate-900">{c.cropType || '-'}</span>
+                        <span className="font-medium text-slate-700">Master</span>
+                        <span className="text-right font-bold text-slate-900 truncate">{c.masterName || '-'}</span>
+                      </div>
+                    </div>
+                    <div className="mt-1 text-right font-semibold">Selected: {c.acres} ac</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="text-sm text-slate-700">{saveFlowDescription}</div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="font-medium text-slate-700">Progress</span>
+                <span className="font-semibold text-slate-900">
+                  {saveFlowTotalAcres > 0 ? Math.round((saveFlowSavedAcres / saveFlowTotalAcres) * 100) : 0}%
+                </span>
+              </div>
+              <div className="h-3 w-full overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-emerald-600 transition-all duration-500"
+                  style={{ width: `${saveFlowTotalAcres > 0 ? (saveFlowSavedAcres / saveFlowTotalAcres) * 100 : 0}%` }}
+                />
+              </div>
+              <div className="mt-2 text-xs text-slate-600">
+                {saveFlowSavedAcres.toFixed(2)} / {saveFlowTotalAcres.toFixed(2)} acres saved
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden space-y-4 py-2">
             {/* Step 1 */}
             <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 p-3">
               <div className="mt-0.5">
@@ -1996,12 +2066,12 @@ const CreateCultivationPlan: React.FC = () => {
           </div>
 
           <DialogFooter>
-            {adjustRentalServicesStatus === 'success' ? (
+            {!savingPlan && saveFlowTotalAcres > 0 && saveFlowSavedAcres >= saveFlowTotalAcres ? (
               <Button
                 className="bg-green-700 hover:bg-green-800"
                 onClick={() => {
                   setLivePlanProgressOpen(false);
-                  navigate('/cultivation-plan');
+                  toast.success('UI save flow completed.');
                 }}
               >
                 Done
@@ -2173,7 +2243,7 @@ const CreateCultivationPlan: React.FC = () => {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {months.map((month) => (
           <MonthCalendar
             key={month.toISOString()}
@@ -2185,10 +2255,13 @@ const CreateCultivationPlan: React.FC = () => {
             highlightCounts={highlightCounts}
             highlightColors={highlightColors}
             highlightCardColors={highlightCardColors}
+            hoverDetailsByDate={hoverDetailsByDate}
             blockedDates={showBlockedDates ? blockedDates : {}}
           />
         ))}
       </div>
+
+      {/* ResourceAllocationPanel temporarily hidden */}
     </div>
   );
 };

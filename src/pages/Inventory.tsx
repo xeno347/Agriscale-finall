@@ -3,8 +3,7 @@ import {
   Plus,
   Search,
   Edit3,
-  ArrowDownCircle,
-  ArrowUpCircle,
+  ArrowLeftRight,
   PackageCheck,
   History,
   Boxes,
@@ -17,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +26,8 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import getBaseUrl from '@/lib/config';
+import { useNavigate } from 'react-router-dom';
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -46,6 +48,7 @@ type StockItem = {
   sku: string;
   unit: string;
   currentStock: number;
+  stockInPipeline?: number;
   minStock: number;
   imageUrl: string;
   location: string;
@@ -66,11 +69,87 @@ type StockItem = {
 // ─────────────────────────────────────────────────────────────
 // MOCK DATA
 // ─────────────────────────────────────────────────────────────
-const CATEGORIES = ['All', 'Seeds', 'Fertilizers', 'Pesticides', 'Equipment', 'Tools', 'Packaging'];
-const UNITS = ['kg', 'litre', 'bags', 'units', 'boxes', 'rolls'];
+const CATEGORIES = [
+  'All',
+  'Seeds',
+  'Fertilizer',
+  'Agro Chemicals',
+  'Implements',
+  'Machines',
+  'Spare Parts',
+  'Tools & Consumables',
+  'Irrigation Materials',
+  'Packaging Material',
+  'Agro Equipments',
+  'Electrical items',
+  'Civil & Infra Equipments',
+  'Storage Materials',
+  'IT Assets',
+  'Office & Administration',
+  'Others',
+];
+const UNITS = ['KGS', 'Nos', 'L', 'ML', 'Grams', 'Tons', 'BAGS'];
+const INVENTORY_LOCATIONS = [
+  'Warehouse A',
+  'Warehouse B',
+  'Cold Storage',
+  'Chemical Store',
+  'Equipment Room',
+  'Irrigation Store',
+];
+// Category code map with normalization helper.
+// Keys in the raw map may vary; we'll normalize lookup to handle variants (case, & vs and, plurals).
+const CATEGORY_CODE_MAP_RAW: Record<string, string> = {
+  // canonical category labels
+  'Seeds': 'SED',
+  'Fertilizer': 'FRT',
+  'Fertilizers': 'FRT',
+  'Agro Chemicals': 'AGC',
+  'Implements': 'IMP',
+  'Machines': 'MAC',
+  'Spare Parts': 'SPR',
+  'Tools & Consumables': 'TNC',
+  'Tools and Consumables': 'TNC',
+  'Tools': 'TNC',
+  'Irrigation Materials': 'IRM',
+  'Irrigation materials': 'IRM',
+  'Packaging Material': 'PKG',
+  'Packaging': 'PKG',
+  'Agro Equipments': 'AGE',
+  'Agro equipments': 'AGE',
+  'Agro Equipment': 'AGE',
+  'Equipment': 'EQP',
+  'Equipments': 'EQP',
+  'Electrical items': 'ELC',
+  'Electrical Items': 'ELC',
+  'Civil & Infra Equipments': 'CIV',
+  'Civil and Infra Equipments': 'CIV',
+  'Storage Materials': 'STR',
+  'IT Assets': 'ITA',
+  'IT assets': 'ITA',
+  'Office & Administration': 'OFF',
+  'Office and Administration': 'OFF',
+  'Office and administratin': 'OFF',
+  'Pesticides': 'PST',
+  'Others': 'OTH',
+};
+
+const normalizeCategoryKey = (s: string) => String(s || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '').trim();
+
+const CATEGORY_CODE_MAP: Record<string, string> = Object.keys(CATEGORY_CODE_MAP_RAW).reduce((acc, k) => {
+  acc[normalizeCategoryKey(k)] = CATEGORY_CODE_MAP_RAW[k];
+  return acc;
+}, {} as Record<string, string>);
+
+const getCategoryCode = (category: string) => {
+  if (!category) return 'OTH';
+  const key = normalizeCategoryKey(category);
+  return CATEGORY_CODE_MAP[key] || 'OTH';
+};
 
 const PLACEHOLDER_IMG =
   'https://placehold.co/300x200/e2e8f0/64748b?text=No+Image';
+const BASE_URL = getBaseUrl().replace(/\/$/, '');
 
 const initialItems: StockItem[] = [
   {
@@ -80,6 +159,7 @@ const initialItems: StockItem[] = [
     sku: 'FRT-001',
     unit: 'kg',
     currentStock: 1200,
+    stockInPipeline: 0,
     minStock: 200,
     imageUrl: 'https://placehold.co/300x200/dcfce7/16a34a?text=Urea+Fertilizer',
     location: 'Warehouse A – Shelf 3',
@@ -99,6 +179,7 @@ const initialItems: StockItem[] = [
     sku: 'SED-012',
     unit: 'kg',
     currentStock: 85,
+    stockInPipeline: 0,
     minStock: 100,
     imageUrl: 'https://placehold.co/300x200/fef9c3/ca8a04?text=Paddy+Seeds',
     location: 'Cold Storage – Bay 1',
@@ -117,6 +198,7 @@ const initialItems: StockItem[] = [
     sku: 'PST-007',
     unit: 'litre',
     currentStock: 340,
+    stockInPipeline: 0,
     minStock: 50,
     imageUrl: 'https://placehold.co/300x200/fee2e2/dc2626?text=Chlorpyrifos',
     location: 'Chemical Store – Rack 2',
@@ -135,6 +217,7 @@ const initialItems: StockItem[] = [
     sku: 'EQP-043',
     unit: 'units',
     currentStock: 12,
+    stockInPipeline: 0,
     minStock: 3,
     imageUrl: 'https://placehold.co/300x200/dbeafe/1d4ed8?text=Power+Sprayer',
     location: 'Equipment Room – Row A',
@@ -153,6 +236,7 @@ const initialItems: StockItem[] = [
     sku: 'PKG-021',
     unit: 'bags',
     currentStock: 2500,
+    stockInPipeline: 0,
     minStock: 500,
     imageUrl: 'https://placehold.co/300x200/f3e8ff/7c3aed?text=HDPE+Bags',
     location: 'Warehouse B – Pallet 5',
@@ -170,6 +254,7 @@ const initialItems: StockItem[] = [
     sku: 'TLS-031',
     unit: 'rolls',
     currentStock: 38,
+    stockInPipeline: 0,
     minStock: 10,
     imageUrl: 'https://placehold.co/300x200/ecfdf5/059669?text=Drip+Tape',
     location: 'Irrigation Store – Shelf 1',
@@ -200,6 +285,7 @@ const txBadge: Record<StockTransaction['type'], { label: string; color: string }
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────
 const Inventory = () => {
+  const navigate = useNavigate();
   const [items, setItems] = useState<StockItem[]>(initialItems);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
@@ -211,11 +297,49 @@ const Inventory = () => {
   const prevStockRef = useRef<Record<string, number>>({});
   const [editItem, setEditItem] = useState<StockItem | null>(null);
   const [updateStockItem, setUpdateStockItem] = useState<StockItem | null>(null);
+  const [requestStockOpen, setRequestStockOpen] = useState(false);
+  const [requestStockItems, setRequestStockItems] = useState<StockItem[]>([]);
+  const [allocationOpen, setAllocationOpen] = useState(false);
   const [incomingItem, setIncomingItem] = useState<StockItem | null>(null);
   const [outgoingItem, setOutgoingItem] = useState<StockItem | null>(null);
   const [issuedItem, setIssuedItem] = useState<StockItem | null>(null);
   const [historyItem, setHistoryItem] = useState<StockItem | null>(null);
   const [deleteItem, setDeleteItem] = useState<StockItem | null>(null);
+
+  useEffect(() => {
+    const fetchAllItems = async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/inventory/get_all_item`);
+        const data: any = await res.json().catch(() => null);
+        if (!res.ok || !data?.success || !Array.isArray(data?.items)) {
+          throw new Error(data?.message || 'Failed to fetch inventory items');
+        }
+
+        const mapped: StockItem[] = data.items.map((it: any, idx: number) => ({
+          id: String(it?.Invent_id || it?.new_item_code || `inv_${idx}`),
+          name: String(it?.item_name || ''),
+          category: String(it?.category || 'Others'),
+          sku: String(it?.new_item_code || ''),
+          unit: String(it?.unit || ''),
+          currentStock: Number(it?.stock) || 0,
+          stockInPipeline: Number(it?.stock_in_pipeline || it?.pipeline_stock || 0),
+          minStock: Number(it?.threshold) || 0,
+          imageUrl: String(it?.item_image_url || ''),
+          location: String(it?.location || ''),
+          description: String(it?.description || ''),
+          vendors: [],
+          seriesNumber: '',
+          transactions: [],
+        }));
+
+        setItems(mapped);
+      } catch (e: any) {
+        toast.error(e?.message || 'Failed to load inventory items');
+      }
+    };
+
+    fetchAllItems();
+  }, []);
 
   // ── Low stock derived list ───────────────────────────────
   const lowStockItems = useMemo(
@@ -283,13 +407,22 @@ const Inventory = () => {
             Track stock levels, manage incoming & outgoing goods
           </p>
         </div>
-        <Button
-          onClick={() => setAddOpen(true)}
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setAllocationOpen(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+          >
+            <PackageCheck className="w-4 h-4" />
+            Equipment Allocation
+          </Button>
+          <Button
+            onClick={() => setAddOpen(true)}
             className="bg-green-600 hover:bg-green-700 text-white gap-2"
-        >
-          <Plus className="w-4 h-4" />
+          >
+            <Plus className="w-4 h-4" />
             Create New Product
-        </Button>
+          </Button>
+        </div>
       </div>
 
       {/* ── Low Stock Alert Panel ── */}
@@ -433,9 +566,11 @@ const Inventory = () => {
               key={item.id}
               item={item}
               onEdit={() => setEditItem(item)}
-              onUpdateStock={() => setUpdateStockItem(item)}
-              onIncoming={() => setIncomingItem(item)}
-              onOutgoing={() => setOutgoingItem(item)}
+              onUpdateStock={() => {
+                setRequestStockItems([item]);
+                setRequestStockOpen(true);
+              }}
+              onTransferStock={() => setUpdateStockItem(item)}
               onIssued={() => setIssuedItem(item)}
               onHistory={() => setHistoryItem(item)}
               onDelete={() => setDeleteItem(item)}
@@ -452,17 +587,59 @@ const Inventory = () => {
       <AddStockModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        onSave={(data) => {
-          setItems((prev) => [
-            {
-              ...data,
-              id: genId(),
-              transactions: [],
-            },
-            ...prev,
-          ]);
-          setAddOpen(false);
-          toast.success(`"${data.name}" added to inventory`);
+        onSave={async (data, imageFile) => {
+          try {
+            let itemImageUrl = '';
+            if (imageFile) {
+              const formData = new FormData();
+              formData.append('doc', imageFile);
+              const uploadRes = await fetch(`${BASE_URL}/inventory/upload_item_image`, {
+                method: 'POST',
+                body: formData,
+              });
+              const uploadData: any = await uploadRes.json().catch(() => null);
+              if (!uploadRes.ok || !uploadData?.success || !uploadData?.public_url) {
+                throw new Error(uploadData?.message || 'Failed to upload item image');
+              }
+              itemImageUrl = String(uploadData.public_url);
+            }
+
+            const createPayload = {
+              item_name: data.name,
+              new_item_code: data.sku,
+              category: data.category,
+              location: data.location,
+              unit: data.unit,
+              threshold: Number(data.minStock) || 0,
+              item_image_url: itemImageUrl,
+              description: data.description || '',
+            };
+
+            const createRes = await fetch(`${BASE_URL}/inventory/create_new_item`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(createPayload),
+            });
+            const createData: any = await createRes.json().catch(() => null);
+            if (!createRes.ok || !createData?.success) {
+              throw new Error(createData?.message || 'Failed to create item');
+            }
+
+            setItems((prev) => [
+              {
+                ...data,
+                imageUrl: itemImageUrl || data.imageUrl,
+                id: genId(),
+                transactions: [],
+              },
+              ...prev,
+            ]);
+            setAddOpen(false);
+            toast.success(createData?.message || `"${data.name}" added to inventory`);
+          } catch (e: any) {
+            toast.error(e?.message || 'Failed to create item');
+            throw e;
+          }
         }}
       />
 
@@ -495,6 +672,44 @@ const Inventory = () => {
           }}
         />
       )}
+
+      <RequestStockModal
+        open={requestStockOpen}
+        onClose={() => setRequestStockOpen(false)}
+        selectedItems={requestStockItems}
+        onChangeSelectedItems={setRequestStockItems}
+        allItems={items}
+        onContinue={() => {
+          const payloadItems = requestStockItems.map((it) => ({
+            itemCode: it.sku,
+            uom: it.unit,
+            itemName: it.name,
+            stock: it.currentStock,
+          }));
+          setRequestStockOpen(false);
+          navigate('/inventory-indents', {
+            state: {
+              fromInventoryRequest: true,
+              items: payloadItems,
+            },
+          });
+        }}
+      />
+
+      <EquipmentAllocationModal
+        open={allocationOpen}
+        items={items}
+        onAllocationSuccess={(itemId, quantity) => {
+          setItems((prev) =>
+            prev.map((stockItem) =>
+              stockItem.id === itemId
+                ? { ...stockItem, currentStock: Math.max(0, stockItem.currentStock - quantity) }
+                : stockItem,
+            ),
+          );
+        }}
+        onClose={() => setAllocationOpen(false)}
+      />
 
       {/* Incoming Request */}
       {incomingItem && (
@@ -575,8 +790,7 @@ interface CardProps {
   item: StockItem;
   onEdit: () => void;
   onUpdateStock: () => void;
-  onIncoming: () => void;
-  onOutgoing: () => void;
+  onTransferStock: () => void;
   onIssued: () => void;
   onHistory: () => void;
   onDelete: () => void;
@@ -586,8 +800,7 @@ const InventoryCard = ({
   item,
   onEdit,
   onUpdateStock,
-  onIncoming,
-  onOutgoing,
+  onTransferStock,
   onIssued,
   onHistory,
   onDelete,
@@ -665,25 +878,18 @@ const InventoryCard = ({
             className="flex items-center justify-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg py-2 transition-colors"
           >
             <Boxes className="w-3.5 h-3.5" />
-            Update Stock
+            Request Stock
           </button>
         </div>
 
         {/* Secondary action row */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
-            onClick={onIncoming}
-            className="flex flex-col items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg py-2 transition-colors"
+            onClick={onTransferStock}
+            className="flex flex-col items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg py-2 transition-colors"
           >
-            <ArrowDownCircle className="w-4 h-4" />
-            Incoming
-          </button>
-          <button
-            onClick={onOutgoing}
-            className="flex flex-col items-center gap-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg py-2 transition-colors"
-          >
-            <ArrowUpCircle className="w-4 h-4" />
-            Outgoing
+            <ArrowLeftRight className="w-4 h-4" />
+            Transfer Stock
           </button>
           <button
             onClick={onIssued}
@@ -722,19 +928,15 @@ type AddStockForm = Omit<StockItem, 'id' | 'transactions'>;
 const emptyForm = (): AddStockForm => ({
   name: '',
   category: 'Seeds',
-  sku: '',
-  unit: 'kg',
+  sku: 'SBR/INV/SED/001',
+  unit: 'KGS',
   currentStock: 0,
   minStock: 0,
   imageUrl: '',
-  location: '',
+  location: INVENTORY_LOCATIONS[0],
   description: '',
-  vendors: [
-    { level: 'L1', company: '', msmeCertificate: '', gstNumber: '', contact: '' },
-    { level: 'L2', company: '', msmeCertificate: '', gstNumber: '', contact: '' },
-    { level: 'L3', company: '', msmeCertificate: '', gstNumber: '', contact: '' },
-  ],
-  seriesNumber: 'SBR/INV/P2/',
+  vendors: [],
+  seriesNumber: '',
 });
 
 const AddStockModal = ({
@@ -744,28 +946,60 @@ const AddStockModal = ({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (data: AddStockForm) => void;
+  onSave: (data: AddStockForm, imageFile: File | null) => Promise<void> | void;
 }) => {
   const [form, setForm] = useState<AddStockForm>(emptyForm());
-
-  const setVendor = (index: number, key: keyof AddStockForm['vendors'][0], value: string) => {
-    setForm((p) => {
-      const next = { ...p };
-      const v = [...(next.vendors || [])];
-      v[index] = { ...v[index], [key]: value } as any;
-      next.vendors = v;
-      return next;
-    });
-  };
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [codeLoading, setCodeLoading] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   const set = (k: keyof AddStockForm, v: string | number) =>
     setForm((p) => ({ ...p, [k]: v }));
 
-  const handleSave = () => {
+  const generatedItemCode = useMemo(() => {
+    const code = getCategoryCode(form.category);
+    return `SBR/INV/${code}/001`;
+  }, [form.category]);
+
+  useEffect(() => {
+    if (!open || !form.category) return;
+    const fetchItemCode = async () => {
+      const categoryCode = getCategoryCode(form.category);
+      setCodeLoading(true);
+      try {
+        const res = await fetch(`${BASE_URL}/inventory/get_new_item_code/${categoryCode}`);
+        const data: any = await res.json().catch(() => null);
+        if (res.ok && data?.success && data?.new_item_code) {
+          setForm((prev) => ({ ...prev, sku: String(data.new_item_code) }));
+        } else {
+          setForm((prev) => ({ ...prev, sku: generatedItemCode }));
+        }
+      } catch {
+        setForm((prev) => ({ ...prev, sku: generatedItemCode }));
+      } finally {
+        setCodeLoading(false);
+      }
+    };
+    fetchItemCode();
+  }, [form.category, generatedItemCode, open]);
+
+  const handleSave = async () => {
     if (!form.name.trim()) return toast.error('Item name is required');
-    if (!form.sku.trim()) return toast.error('SKU is required');
-    onSave(form);
-    setForm(emptyForm());
+    setIsCreating(true);
+    try {
+      await onSave({
+        ...form,
+        sku: form.sku || generatedItemCode,
+        seriesNumber: `SBR/INV/${getCategoryCode(form.category)}/`,
+        vendors: [],
+      }, imageFile);
+      setForm(emptyForm());
+      setImageFile(null);
+    } catch {
+      // Error is already handled by parent onSave with toast.
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -779,7 +1013,7 @@ const AddStockModal = ({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <Field label="Product Name *">
+          <Field label="Product Name">
             <Input placeholder="e.g. Urea Fertilizer" value={form.name} onChange={(e) => set('name', e.target.value)} />
           </Field>
 
@@ -791,58 +1025,10 @@ const AddStockModal = ({
                 onChange={(v) => set('category', v)}
               />
             </Field>
-            <Field label="SKU *">
-              <Input placeholder="e.g. FRT-001" value={form.sku} onChange={(e) => set('sku', e.target.value)} />
+            <Field label="Item Code">
+              <Input value={form.sku || generatedItemCode} readOnly className="bg-gray-50" />
+              {codeLoading && <p className="text-[11px] text-gray-500 mt-1">Fetching item code...</p>}
             </Field>
-          </div>
-
-          {/* Vendors L1 / L2 / L3 (clean card layout with MSME upload) */}
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-gray-600">Vendors (L1 · L2 · L3)</p>
-            <div className="grid grid-cols-1 gap-2">
-              {form.vendors?.map((v, idx) => (
-                <div key={v.level} className="bg-white border border-gray-100 rounded-lg p-3 grid grid-cols-12 gap-3 items-center">
-                  <div className="col-span-1 flex items-center justify-center">
-                    <div className="text-xs font-semibold text-gray-700">{v.level}</div>
-                  </div>
-                  <div className="col-span-4">
-                    <Input placeholder="Company" value={v.company} onChange={(e) => setVendor(idx, 'company', e.target.value)} />
-                  </div>
-                  <div className="col-span-3">
-                    <Input placeholder="GST number" value={v.gstNumber} onChange={(e) => setVendor(idx, 'gstNumber', e.target.value)} />
-                  </div>
-                  <div className="col-span-4 flex items-center gap-2">
-                    <div className="flex-1">
-                      <label className="text-xs text-gray-500 mb-1 block">MSME Certificate</label>
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        className="text-sm"
-                        onChange={(e) => {
-                          const file = e.target.files && e.target.files[0];
-                          if (file) {
-                            const url = URL.createObjectURL(file);
-                            setVendor(idx, 'msmeCertificate', url);
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="w-16 h-10 flex-shrink-0">
-                      {v.msmeCertificate ? (
-                        // show image preview when possible, otherwise show filename
-                        v.msmeCertificate.endsWith('.pdf') ? (
-                          <div className="text-xs text-gray-600 truncate">PDF</div>
-                        ) : (
-                          <img src={v.msmeCertificate} alt={`msme-${v.level}`} className="w-16 h-10 object-cover rounded-md border" />
-                        )
-                      ) : (
-                        <div className="w-16 h-10 bg-gray-50 rounded-md border flex items-center justify-center text-xs text-gray-300">No file</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -850,20 +1036,20 @@ const AddStockModal = ({
               <SelectField value={form.unit} options={UNITS} onChange={(v) => set('unit', v)} />
             </Field>
             <Field label="Location">
-              <Input placeholder="e.g. Warehouse A" value={form.location} onChange={(e) => set('location', e.target.value)} />
+              <SelectField value={form.location} options={INVENTORY_LOCATIONS} onChange={(v) => set('location', v)} />
             </Field>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Opening Stock">
-              <Input type="number" min={0} value={form.currentStock} onChange={(e) => set('currentStock', Number(e.target.value))} />
+              <Input type="number" min={0} value={0} readOnly disabled className="bg-gray-50 text-gray-500 cursor-not-allowed" />
             </Field>
             <Field label="Threshold Quantity">
               <Input type="number" min={0} value={form.minStock} onChange={(e) => set('minStock', Number(e.target.value))} />
             </Field>
           </div>
 
-          <Field label="Upload Image">
+          <Field label="Product Media (1 image)">
             <div className="flex items-center gap-2">
               <input
                 type="file"
@@ -871,6 +1057,7 @@ const AddStockModal = ({
                 onChange={(e) => {
                   const file = e.target.files && e.target.files[0];
                   if (file) {
+                    setImageFile(file);
                     const url = URL.createObjectURL(file);
                     set('imageUrl', url);
                   }
@@ -881,12 +1068,6 @@ const AddStockModal = ({
               )}
             </div>
           </Field>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Series Number">
-              <Input value={form.seriesNumber} onChange={(e) => set('seriesNumber', e.target.value)} />
-            </Field>
-          </div>
 
           <Field label="Description">
             <textarea
@@ -901,8 +1082,8 @@ const AddStockModal = ({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSave}>
-            Create Product
+          <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSave} disabled={isCreating}>
+            {isCreating ? 'Creating...' : 'Create Product'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1076,6 +1257,470 @@ const TransactionModal = ({
           <Button className={cn(btnMap[txType], 'text-white')} onClick={handleSave}>
             Confirm
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+);
+};
+
+const RequestStockModal = ({
+  open,
+  onClose,
+  selectedItems,
+  onChangeSelectedItems,
+  allItems,
+  onContinue,
+}: {
+  open: boolean;
+  onClose: () => void;
+  selectedItems: StockItem[];
+  onChangeSelectedItems: (items: StockItem[]) => void;
+  allItems: StockItem[];
+  onContinue: () => void;
+}) => {
+  const [addMode, setAddMode] = useState(false);
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setAddMode(false);
+      setQuery('');
+    }
+  }, [open]);
+
+  const suggestions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const selectedIds = new Set(selectedItems.map((i) => i.id));
+    return allItems
+      .filter((item) => !selectedIds.has(item.id))
+      .filter((item) => item.name.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [allItems, query, selectedItems]);
+
+  const addItem = (item: StockItem) => {
+    onChangeSelectedItems([...selectedItems, item]);
+    setAddMode(false);
+    setQuery('');
+  };
+
+  const removeItem = (itemId: string) => {
+    onChangeSelectedItems(selectedItems.filter((i) => i.id !== itemId));
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl max-h-[88vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Boxes className="w-5 h-5 text-blue-600" />
+            Request Stock
+          </DialogTitle>
+          <p className="text-sm text-gray-500">Add more items to request for stock</p>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 py-2">
+          {selectedItems.map((item) => (
+            <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2 min-w-0">
+                  <img
+                    src={item.imageUrl || PLACEHOLDER_IMG}
+                    alt={item.name}
+                    className="w-12 h-12 rounded-md object-cover border border-gray-200 shrink-0"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMG;
+                    }}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">{item.sku}</p>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{item.category} • {item.location}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeItem(item.id)}
+                  className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
+                  title="Remove"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <div className="rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-3 min-h-[96px]">
+            {!addMode ? (
+              <button
+                type="button"
+                onClick={() => setAddMode(true)}
+                className="w-full h-full min-h-[84px] flex flex-col items-center justify-center gap-1 text-gray-500 hover:text-blue-600"
+              >
+                <Plus className="w-5 h-5" />
+                <span className="text-xs font-medium">Add Item</span>
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <Input
+                  autoFocus
+                  placeholder="Type item name or item code"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+                <div className="max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                  {suggestions.length > 0 ? (
+                    suggestions.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => addItem(s)}
+                        className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-gray-100 last:border-b-0"
+                      >
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={s.imageUrl || PLACEHOLDER_IMG}
+                            alt={s.name}
+                            className="w-8 h-8 rounded object-cover border border-gray-200 shrink-0"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMG;
+                            }}
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                            <p className="text-xs text-gray-500 truncate">{s.sku}</p>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-3 py-2 text-xs text-gray-500">No suggestions</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={onContinue} disabled={selectedItems.length === 0}>
+            Continue
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+type AllocationRowState = {
+  quantity: number;
+  providedQuantity: number;
+  completed: boolean;
+};
+
+type AllocationItem = {
+  equipment_name: string;
+  equipment_id: string;
+  quantity: number;
+};
+
+type AllocationDisplayRow = {
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  availableStock: number;
+  stockInPipeline: number;
+};
+
+const EquipmentAllocationModal = ({
+  open,
+  items,
+  onAllocationSuccess,
+  onClose,
+}: {
+  open: boolean;
+  items: StockItem[];
+  onAllocationSuccess: (itemId: string, quantity: number) => void;
+  onClose: () => void;
+}) => {
+  const [otp, setOtp] = useState('');
+  const [verified, setVerified] = useState(false);
+  const [allocationItems, setAllocationItems] = useState<AllocationItem[]>([]);
+  const [loadingAllocation, setLoadingAllocation] = useState(false);
+  const [allocationError, setAllocationError] = useState('');
+  const [completingItemId, setCompletingItemId] = useState('');
+  const [rowState, setRowState] = useState<Record<string, AllocationRowState>>({});
+
+  useEffect(() => {
+    if (!open) {
+      setOtp('');
+      setVerified(false);
+      setAllocationItems([]);
+      setLoadingAllocation(false);
+      setAllocationError('');
+      setCompletingItemId('');
+      setRowState({});
+      return;
+    }
+
+    if (!verified) {
+      setAllocationItems([]);
+      setAllocationError('');
+      setLoadingAllocation(false);
+    }
+  }, [open, verified]);
+
+  useEffect(() => {
+    if (!verified || otp.trim().length !== 4) return;
+
+    const fetchAllocationItems = async () => {
+      setLoadingAllocation(true);
+      setAllocationError('');
+      try {
+        const res = await fetch(`${BASE_URL}/inventory/get_equipment_allocation/${otp.trim()}`);
+        const data: any = await res.json().catch(() => null);
+        if (!res.ok || !data?.success || !Array.isArray(data?.items)) {
+          throw new Error(data?.message || 'Failed to fetch equipment allocation');
+        }
+
+        setAllocationItems(
+          data.items.map((item: any) => ({
+            equipment_name: String(item?.equipment_name || ''),
+            equipment_id: String(item?.equipment_id || ''),
+            quantity: Number(item?.quantity) || 0,
+          })),
+        );
+      } catch (e: any) {
+        setAllocationItems([]);
+        setAllocationError(e?.message || 'Failed to fetch equipment allocation');
+        toast.error(e?.message || 'Failed to fetch equipment allocation');
+      } finally {
+        setLoadingAllocation(false);
+      }
+    };
+
+    fetchAllocationItems();
+  }, [verified, otp]);
+
+  const handleVerify = () => {
+    if (otp.trim().length !== 4) {
+      toast.error('Enter a 4-digit OTP to view the allocation list');
+      return;
+    }
+    setVerified(true);
+  };
+
+  useEffect(() => {
+    if (!verified) return;
+
+    const nextState: Record<string, AllocationRowState> = {};
+    allocationItems.forEach((item) => {
+      nextState[item.equipment_id] = {
+        quantity: item.quantity,
+        providedQuantity: 0,
+        completed: false,
+      };
+    });
+    setRowState(nextState);
+  }, [verified, allocationItems]);
+
+  const allocationRows = useMemo<AllocationDisplayRow[]>(() => {
+    return allocationItems.map((allocationItem) => {
+      const inventoryItem = items.find((item) => item.id === allocationItem.equipment_id);
+      return {
+        itemId: allocationItem.equipment_id,
+        itemName: allocationItem.equipment_name || inventoryItem?.name || allocationItem.equipment_id,
+        quantity: allocationItem.quantity,
+        availableStock: inventoryItem?.currentStock ?? 0,
+        stockInPipeline: inventoryItem?.stockInPipeline ?? 0,
+      };
+    });
+  }, [allocationItems, items]);
+
+  const updateRow = (itemId: string, patch: Partial<AllocationRowState>) => {
+    setRowState((prev) => ({
+      ...prev,
+      [itemId]: {
+        quantity: 0,
+        providedQuantity: 0,
+        completed: false,
+        ...prev[itemId],
+        ...patch,
+      },
+    }));
+  };
+
+  const handleComplete = async (item: AllocationDisplayRow) => {
+    if (completingItemId) return;
+
+    const current = rowState[item.itemId];
+    const quantity = Number(current?.quantity) || 0;
+
+    if (quantity <= 0) {
+      toast.error('Enter a quantity before marking the item completed');
+      return;
+    }
+
+    setCompletingItemId(item.itemId);
+    try {
+      const res = await fetch(`${BASE_URL}/inventory/update_item_stock_on_allocation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_id: item.itemId,
+          quantity_allocated: quantity,
+        }),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Failed to update allocated stock');
+      }
+
+      onAllocationSuccess(item.itemId, quantity);
+
+      updateRow(item.itemId, {
+        providedQuantity: quantity,
+        completed: true,
+      });
+      toast.success('Allocation updated successfully');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update allocated stock');
+    } finally {
+      setCompletingItemId('');
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <PackageCheck className="w-5 h-5 text-emerald-600" />
+            Equipment Allocation
+          </DialogTitle>
+          <p className="text-sm text-gray-500">
+            Enter the OTP first. The item list stays hidden until the OTP is provided.
+          </p>
+        </DialogHeader>
+
+        <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-emerald-50 to-white p-4 space-y-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Verify allocation access</p>
+              <p className="text-xs text-gray-500">Use the OTP to unlock the equipment list.</p>
+            </div>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <InputOTP
+                maxLength={4}
+                value={otp}
+                onChange={setOtp}
+                containerClassName="justify-start"
+              >
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                  <InputOTPSlot index={3} />
+                </InputOTPGroup>
+              </InputOTP>
+              <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleVerify}>
+                Verify OTP
+              </Button>
+            </div>
+          </div>
+
+          {verified ? (
+            <Badge className="w-fit bg-emerald-100 text-emerald-700 hover:bg-emerald-100">OTP verified</Badge>
+          ) : (
+            <Badge variant="outline" className="w-fit border-dashed text-gray-500">
+              Allocation locked
+            </Badge>
+          )}
+        </div>
+
+        {verified ? (
+          <div className="rounded-2xl border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Item id</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Item name</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Quantity</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Available stock</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Stock in pipeline</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Provided quantity</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Completed</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {loadingAllocation ? (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-gray-500" colSpan={7}>
+                        Loading allocation items...
+                      </td>
+                    </tr>
+                  ) : allocationError ? (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-red-600" colSpan={7}>
+                        {allocationError}
+                      </td>
+                    </tr>
+                  ) : allocationRows.length === 0 ? (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-gray-500" colSpan={7}>
+                        No allocation items found for this OTP.
+                      </td>
+                    </tr>
+                  ) : allocationRows.map((item) => {
+                    const state = rowState[item.itemId] || { quantity: item.quantity, providedQuantity: 0, completed: false };
+
+                    return (
+                      <tr key={item.itemId} className={state.completed ? 'bg-emerald-50/50 opacity-70' : ''}>
+                        <td className="px-4 py-3 font-medium text-gray-900">{item.itemId}</td>
+                        <td className="px-4 py-3 text-gray-800">{item.itemName}</td>
+                        <td className="px-4 py-3 text-gray-700">{item.quantity.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-gray-700">{item.availableStock.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-gray-700">{item.stockInPipeline.toLocaleString()}</td>
+                        <td className="px-4 py-3 w-40">
+                          <Input
+                            type="number"
+                            min={0}
+                            value={state.quantity}
+                            disabled={state.completed}
+                            onChange={(e) => updateRow(item.itemId, { quantity: Number(e.target.value) })}
+                            className="h-9"
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {state.completed ? state.providedQuantity.toLocaleString() : '-'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Button
+                            size="sm"
+                            className={state.completed ? 'bg-gray-500 hover:bg-gray-500 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}
+                            onClick={() => handleComplete(item)}
+                            disabled={state.completed || completingItemId === item.itemId}
+                          >
+                            {state.completed ? 'Completed' : completingItemId === item.itemId ? 'Saving...' : 'Completed'}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-center text-sm text-gray-500">
+            No items are visible until the OTP is verified.
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

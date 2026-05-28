@@ -16,6 +16,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   readInventoryIndentConfig,
   writeInventoryIndentConfig,
@@ -290,10 +291,13 @@ const initialIndents: Indent[] = [
 
 const InventoryIndent = () => {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [indents, setIndents] = useState<Indent[]>(initialIndents);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [prefillDraft, setPrefillDraft] = useState<IndentDraft | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [configVersion, setConfigVersion] = useState(0);
   const [previewIndent, setPreviewIndent] = useState<Indent | null>(null);
@@ -376,6 +380,38 @@ const InventoryIndent = () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    const state: any = location.state;
+    const incomingItems = Array.isArray(state?.items) ? state.items : [];
+    if (!state?.fromInventoryRequest || incomingItems.length === 0) return;
+
+    const cfg = readInventoryIndentConfig();
+    const mappedItems: PRLineItem[] = incomingItems.map((it: any, idx: number) => ({
+      ...emptyLineItem(idx + 1),
+      id: genId(),
+      srNo: idx + 1,
+      partName: String(it?.itemName || ''),
+      itemCode: String(it?.itemCode || ''),
+      uom: String(it?.uom || 'No'),
+      lessQtyAvailableInStock: Number(it?.stock) || 0,
+    }));
+
+    setPrefillDraft({
+      project: (cfg.projects ?? [])[0] ?? '',
+      prNo: '',
+      department: '',
+      date: today(),
+      indentedBy: cfg.indentedBy ?? '',
+      forwardedBy: cfg.forwardedBy ?? '',
+      directorsApproval: cfg.directorsApproval ?? '',
+      remarksNotes: '',
+      budgetHead: '',
+      items: mappedItems,
+    });
+    setOpen(true);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -551,11 +587,16 @@ const InventoryIndent = () => {
 
       <AddIndentModal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          setOpen(false);
+          setPrefillDraft(null);
+        }}
         configVersion={configVersion}
         mode="create"
+        initialData={prefillDraft}
         onSave={(data) => {
           setIndents((p) => [{ ...data, id: genId(), status: 'open' }, ...p]);
+          setPrefillDraft(null);
           setOpen(false);
           toast.success('Indent created');
         }}
@@ -611,6 +652,16 @@ const AddIndentModal = ({
   const [openRowId, setOpenRowId] = useState(initialRow.id);
   const [configuredProjects, setConfiguredProjects] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const cachedStaffName = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('fc_auth_v1');
+      if (!raw) return '';
+      const parsed = JSON.parse(raw);
+      return String(parsed?.user?.name ?? '').trim();
+    } catch {
+      return '';
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -620,7 +671,7 @@ const AddIndentModal = ({
       setPrNo(initialData.prNo ?? '');
       setDate(initialData.date ?? today());
 
-      setIndentedBy(initialData.indentedBy ?? '');
+      setIndentedBy(cachedStaffName || initialData.indentedBy || '');
       setForwardedBy(initialData.forwardedBy ?? '');
       setDirectorsApproval(initialData.directorsApproval ?? '');
       setRemarksNotes(initialData.remarksNotes ?? '');
@@ -639,7 +690,7 @@ const AddIndentModal = ({
     const cfg = readInventoryIndentConfig();
     setConfiguredProjects(cfg.projects ?? []);
 
-    setIndentedBy((prev) => (prev.trim() ? prev : (cfg.indentedBy ?? '')));
+    setIndentedBy((prev) => (prev.trim() ? prev : (cachedStaffName || cfg.indentedBy || '')));
     setForwardedBy((prev) => (prev.trim() ? prev : (cfg.forwardedBy ?? '')));
     setDirectorsApproval((prev) =>
       prev.trim() ? prev : (cfg.directorsApproval ?? ''),
@@ -656,7 +707,7 @@ const AddIndentModal = ({
       setOpenRowId(next[next.length - 1].id);
       return next;
     });
-  }, [open, configVersion, initialData]);
+  }, [open, configVersion, initialData, cachedStaffName]);
 
   const updateItem = <K extends keyof PRLineItem>(id: string, key: K, value: PRLineItem[K]) => {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, [key]: value } : it)));
@@ -977,7 +1028,7 @@ const AddIndentModal = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-500">Indented By</label>
-                  <Input value={indentedBy} onChange={(e) => setIndentedBy(e.target.value)} />
+                  <Input value={indentedBy} readOnly disabled className="bg-gray-50 text-gray-600 cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-500">Forwarded By</label>

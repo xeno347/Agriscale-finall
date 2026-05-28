@@ -58,11 +58,18 @@ interface Zone {
   zone_id: string;
   zone_name?: string;
   total_area?: number;
-  field_manager?: {
-    name?: string;
-    field_manager_id?: string;
-    contact?: string;
-  } | null;
+  field_manager?:
+    | Array<{
+        name?: string;
+        field_manager_id?: string;
+        contact?: string;
+      }>
+    | {
+        name?: string;
+        field_manager_id?: string;
+        contact?: string;
+      }
+    | null;
 }
 
 interface ZoneLand {
@@ -196,11 +203,11 @@ const Blocks = () => {
   const [blockLandOriginalRows, setBlockLandOriginalRows] = useState<LandRow[]>([]);
   const [deletedBlockFarmerIds, setDeletedBlockFarmerIds] = useState<string[]>([]);
 
-  // Zone -> Field Manager (local UI state for now)
-  const [zoneFieldManagers, setZoneFieldManagers] = useState<Record<string, FieldManager | null>>({});
+  // Zone -> Field Managers (local UI state for now)
+  const [zoneFieldManagers, setZoneFieldManagers] = useState<Record<string, FieldManager[]>>({});
   const [isAssignManagerOpen, setIsAssignManagerOpen] = useState(false);
   const [assigningZone, setAssigningZone] = useState<Zone | null>(null);
-  const [selectedManagerId, setSelectedManagerId] = useState<string>('');
+  const [selectedManagerIds, setSelectedManagerIds] = useState<string[]>([]);
   const [fieldManagers, setFieldManagers] = useState<FieldManager[]>([]);
   const [isLoadingFieldManagers, setIsLoadingFieldManagers] = useState(false);
   const [fieldManagersError, setFieldManagersError] = useState<string | null>(null);
@@ -221,14 +228,6 @@ const Blocks = () => {
     loadZones();
     loadClusters();
   }, []);
-
-  useEffect(() => {
-    // If dialog is open and we loaded managers but nothing is selected yet, default to first option.
-    if (!isAssignManagerOpen) return;
-    if (selectedManagerId) return;
-    if (fieldManagers.length === 0) return;
-    setSelectedManagerId(fieldManagers[0].staff_id);
-  }, [isAssignManagerOpen, selectedManagerId, fieldManagers]);
 
   useEffect(() => {
     // If dialog is open and nothing is selected yet, default to first supervisor.
@@ -311,33 +310,32 @@ const Blocks = () => {
 
   const openAssignFieldManager = (zone: Zone) => {
     setAssigningZone(zone);
-    const current = zoneFieldManagers[zone.zone_id];
-    setSelectedManagerId(current?.staff_id || '');
+    const current = zoneFieldManagers[zone.zone_id] || [];
+    setSelectedManagerIds((current || []).map((manager) => manager.manager_id).filter(Boolean));
     setIsAssignManagerOpen(true);
     fetchAllFieldManagers().then((managers) => {
       if (managers.length === 0) return;
 
-      // If zone already has a manager assigned via get_zones, we might only have manager_id (not staff_id).
-      // Try to pre-select by matching manager_id first.
-      if (current?.staff_id) return;
-      if (current?.manager_id) {
-        const match = managers.find((m) => m.manager_id === current.manager_id);
-        if (match?.staff_id) {
-          setSelectedManagerId(match.staff_id);
-          return;
-        }
-      }
+      if (current.length === 0) return;
 
-      // Otherwise default to first option.
-      if (managers[0].staff_id) setSelectedManagerId(managers[0].staff_id);
+      const restored = current
+        .map((manager) => {
+          if (manager.manager_id) return managers.find((item) => item.manager_id === manager.manager_id) || manager;
+          if (manager.staff_id) return managers.find((item) => item.staff_id === manager.staff_id) || manager;
+          if (manager.manager_id) return managers.find((item) => item.manager_id === manager.manager_id) || manager;
+          return manager;
+        })
+        .filter(Boolean) as FieldManager[];
+
+      setSelectedManagerIds(restored.map((manager) => manager.manager_id).filter(Boolean));
     });
   };
 
   const confirmAssignFieldManager = async () => {
-    if (!assigningZone || !selectedManagerId) return;
-    const selected = fieldManagers.find((m) => m.staff_id === selectedManagerId) || null;
-    if (!selected) {
-      toast({ title: 'Error', description: 'Please select a field manager', variant: 'destructive' });
+    if (!assigningZone || selectedManagerIds.length === 0) return;
+    const selected = fieldManagers.filter((m) => selectedManagerIds.includes(m.staff_id));
+    if (selected.length === 0) {
+      toast({ title: 'Error', description: 'Please select at least one field manager', variant: 'destructive' });
       return;
     }
 
@@ -348,7 +346,7 @@ const Blocks = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          field_manager_id: selected.manager_id,
+          field_manager_id: selected.map((manager) => manager.manager_id),
           Zone_id: assigningZone.zone_id,
         }),
       });
@@ -357,7 +355,7 @@ const Blocks = () => {
       try {
         data = await resp.json();
       } catch {
-        // ignore non-json
+        // allow empty or non-JSON responses
       }
 
       if (!resp.ok) {
@@ -365,7 +363,15 @@ const Blocks = () => {
       }
 
       const successValue = data?.success;
-      const isSuccess = typeof successValue === 'boolean' ? successValue : true;
+      const isSuccess =
+        typeof successValue === 'boolean'
+          ? successValue
+          : typeof successValue === 'string'
+            ? ['true', '1', 'yes', 'y'].includes(successValue.trim().toLowerCase())
+            : typeof successValue === 'number'
+              ? successValue === 1
+              : true;
+
       if (!isSuccess) {
         toast({ title: 'Not assigned', description: 'API returned success=false', variant: 'destructive' });
         return;
@@ -375,13 +381,13 @@ const Blocks = () => {
       setIsAssignManagerOpen(false);
       toast({
         title: 'Assigned',
-        description: `Field Manager assigned to ${assigningZone.zone_name || assigningZone.zone_id}`,
+        description: `Field manager${selected.length > 1 ? 's' : ''} assigned to ${assigningZone.zone_name || assigningZone.zone_id}`,
       });
     } catch (error) {
       console.error('Failed to assign field manager:', error);
       toast({
         title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to assign field manager',
+        description: error instanceof Error ? error.message : 'Failed to assign field managers',
         variant: 'destructive',
       });
     } finally {
@@ -693,22 +699,24 @@ const Blocks = () => {
 
       // If backend already returns field_manager, reflect it in the UI.
       setZoneFieldManagers((prev) => {
-        const next: Record<string, FieldManager | null> = { ...prev };
+        const next: Record<string, FieldManager[]> = { ...prev };
         for (const zone of list) {
           const key = String(zone.zone_id);
           const fm = zone?.field_manager;
           if (fm === null) {
-            next[key] = null;
+            next[key] = [];
             continue;
           }
           if (!fm) continue;
-          if (!fm.field_manager_id) continue;
 
-          next[key] = {
-            manager_id: String(fm.field_manager_id),
-            name: fm.name || 'Unknown',
-            phone: fm.contact || 'N/A',
-          };
+          const managers = Array.isArray(fm) ? fm : [fm];
+          next[key] = managers
+            .filter((item) => !!item?.field_manager_id)
+            .map((item) => ({
+              manager_id: String(item.field_manager_id),
+              name: item.name || 'Unknown',
+              phone: item.contact || 'N/A',
+            }));
         }
         return next;
       });
@@ -1620,8 +1628,8 @@ const Blocks = () => {
                   {entityType === 'zone' && (
                     <div className="border-t border-green-100 bg-green-50/40 px-6 py-3">
                       {(() => {
-                        const manager = zoneFieldManagers[String(entity.zone_id)];
-                        if (!manager) {
+                        const managers = zoneFieldManagers[String(entity.zone_id)] || [];
+                        if (managers.length === 0) {
                           return (
                             <button
                               type="button"
@@ -1642,15 +1650,18 @@ const Blocks = () => {
 
                         return (
                           <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
                                 <BadgeCheck className="w-4 h-4 text-green-700" />
                                 <p className="text-xs uppercase font-bold tracking-wide text-green-800">Field Manager</p>
                               </div>
-                              <p className="mt-1 text-sm font-semibold text-slate-900 truncate">{manager.name}</p>
-                              <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
-                                <span className="inline-flex items-center gap-1"><User className="w-3 h-3" />{manager.manager_id}</span>
-                                <span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" />{manager.phone}</span>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {managers.map((manager) => (
+                                  <div key={manager.staff_id} className="inline-flex items-center gap-2 rounded-full border border-green-200 bg-white px-3 py-1 text-xs font-semibold text-green-900 shadow-sm">
+                                    <span>{manager.name}</span>
+                                    <span className="text-[10px] font-medium text-green-700">{manager.manager_id}</span>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                             <button
@@ -1740,7 +1751,7 @@ const Blocks = () => {
                 setIsAssignManagerOpen(open);
                 if (!open) {
                   setAssigningZone(null);
-                  setSelectedManagerId('');
+                  setSelectedManagerIds([]);
                 }
               }}
             >
@@ -1756,8 +1767,27 @@ const Blocks = () => {
                     </div>
                   </div>
 
+                  <div className="bg-green-50/60 border border-green-200 rounded-lg px-4 py-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-green-700 mb-2">Selected Managers</div>
+                    {selectedManagerIds.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {selectedManagerIds.map((id) => {
+                          const manager = fieldManagers.find((item) => item.manager_id === id);
+                          return (
+                            <span key={id} className="inline-flex items-center gap-2 rounded-full bg-white border border-green-200 px-3 py-1 text-xs font-semibold text-green-900">
+                              <User className="w-3 h-3 text-green-700" />
+                              {manager?.name || id}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-green-800/70">No field managers selected yet.</div>
+                    )}
+                  </div>
+
                   <div className="space-y-2">
-                    <div className="text-sm font-semibold text-foreground">Select a manager</div>
+                    <div className="text-sm font-semibold text-foreground">Select one or more managers</div>
                     <div className="space-y-2">
                       {isLoadingFieldManagers ? (
                         <div className="text-sm text-muted-foreground italic px-1">Loading field managers...</div>
@@ -1767,28 +1797,33 @@ const Blocks = () => {
                         <div className="text-sm text-muted-foreground italic px-1">No field managers found.</div>
                       ) : (
                         fieldManagers.map((m) => (
-                        <label
-                          key={m.staff_id}
-                          className={
-                            'flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/20 ' +
-                            (selectedManagerId === m.staff_id ? 'border-green-400 bg-green-50/40' : 'border-border bg-white')
-                          }
-                        >
-                          <input
-                            type="radio"
-                            name="field_manager"
-                            checked={selectedManagerId === m.staff_id}
-                            onChange={() => setSelectedManagerId(m.staff_id)}
-                            className="mt-1"
-                          />
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-foreground truncate">{m.name}</div>
-                            <div className="mt-0.5 text-[11px] text-muted-foreground flex flex-wrap gap-3">
-                              <span className="inline-flex items-center gap-1"><User className="w-3 h-3" />{m.manager_id}</span>
-                              <span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" />{m.phone}</span>
+                          <label
+                            key={m.manager_id}
+                            className={
+                              'flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/20 ' +
+                              (selectedManagerIds.includes(m.manager_id) ? 'border-green-400 bg-green-50/40' : 'border-border bg-white')
+                            }
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedManagerIds.includes(m.manager_id)}
+                              onChange={() => {
+                                setSelectedManagerIds((prev) =>
+                                  prev.includes(m.manager_id)
+                                    ? prev.filter((id) => id !== m.manager_id)
+                                    : [...prev, m.manager_id]
+                                );
+                              }}
+                              className="mt-1"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-foreground truncate">{m.name}</div>
+                              <div className="mt-0.5 text-[11px] text-muted-foreground flex flex-wrap gap-3">
+                                <span className="inline-flex items-center gap-1"><User className="w-3 h-3" />{m.manager_id}</span>
+                                <span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" />{m.phone}</span>
+                              </div>
                             </div>
-                          </div>
-                        </label>
+                          </label>
                         ))
                       )}
                     </div>
@@ -1799,9 +1834,9 @@ const Blocks = () => {
                   <Button
                     className="bg-green-700 hover:bg-green-800"
                     onClick={confirmAssignFieldManager}
-                    disabled={!assigningZone || !selectedManagerId || isLoadingFieldManagers || isAssigningFieldManager || fieldManagers.length === 0}
+                    disabled={!assigningZone || selectedManagerIds.length === 0 || isLoadingFieldManagers || isAssigningFieldManager || fieldManagers.length === 0}
                   >
-                    {isAssigningFieldManager ? 'Assigning…' : 'Assign'}
+                    {isAssigningFieldManager ? 'Saving…' : 'Save Selection'}
                   </Button>
                 </DialogFooter>
               </DialogContent>

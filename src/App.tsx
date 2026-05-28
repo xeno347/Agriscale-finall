@@ -21,6 +21,8 @@ import CultivationCalendar from "./pages/CultivationCalendar";
 import HarvestOrders from "./pages/HarvestOrders";
 import HarvestCards from "./pages/HarvestCards";
 import StaffOnboarding from "./pages/StaffOnboarding";
+import ManPowerRequisition from "./pages/ManPowerRequisition";
+import AdminMrfApproval from "./pages/adminmrfapproval";
 import LogisticsManagement from "./pages/LogisticsManagement";
 import AdminRequestPage from "./pages/AdminRequestPage";
 import Blocks from "./pages/Blocks";
@@ -110,6 +112,8 @@ const App = () => (
           <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
           <Route path="/fleet-chart" element={<AppLayout><FleetChart /></AppLayout>} />
           <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />
+          <Route path="/man-power-requisition" element={<AppLayout><ManPowerRequisition /></AppLayout>} />
+          <Route path="/admin-mrf-approvals" element={<AppLayout><AdminMrfApproval /></AppLayout>} />
                     {/* Human Resources */}
                     <Route path="/hrms/*" element={<AppLayout><HRMS /></AppLayout>} />
           

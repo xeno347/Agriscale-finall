@@ -307,6 +307,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavGroup label="Indents and Request" isSidebarCollapsed={isCollapsed}>
             <NavItem to="/admin-request" icon={ClipboardCheck} label="Admin Ops Request" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/admin-ops-indents" icon={FileText} label="Admin Ops Indents" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/admin-mrf-approvals" icon={FileText} label="Admin MRF Approvals" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
 
           {/* Group 1: Farm Management */}
@@ -377,6 +378,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavGroup label="Human Resource" isSidebarCollapsed={isCollapsed}>
             <NavItem to="/hrms" icon={Landmark} label="Payroll & Attendance" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/staff-onboarding" icon={UserPlus} label="Staff Onboarding" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/man-power-requisition" icon={FileText} label="Man Power Requisition" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
         </div>
 

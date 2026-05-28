@@ -500,6 +500,7 @@ const StaffOnboarding = () => {
                       <option value="HR">HR</option>
                       <option value="Logistics">Logistics</option>
                       <option value="Operations">Operations</option>
+                      <option value="Directors Office">Directors Office</option>
                     </select>
                     <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                   </div>
@@ -518,6 +519,7 @@ const StaffOnboarding = () => {
                       <option value="">Select designation</option>
                       <option value="Driver">Driver</option>
                       <option value="Executive">Executive</option>
+                      <option value="EA To Director">EA To Director</option>
                       <option value="Field Manager">Field Manager</option>
                       <option value="Manager">Manager</option>
                       <option value="Operator">Operator</option>

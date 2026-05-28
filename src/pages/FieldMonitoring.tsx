@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { MapContainer, TileLayer, Marker, Polygon, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polygon, Popup, Tooltip, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogOverlay, DialogPortal, DialogTitle } from 
 interface FarmLocation {
   id: string;
   name: string;
+  cropType?: string;
   coordinates: [number, number];
   boundary?: [number, number][];
   area: number;
@@ -34,21 +35,30 @@ interface FarmLocation {
     supervisor_id?: string;
     phone?: string;
   };
+  mediaPreview?: string;
 }
 
 interface ApiFarm {
   farm_id: string;
-  land_coordinates: [number, number] | [number, number][];
+  crop_type?: string;
+  created_at?: string;
   area: number;
+  harvest_log?: Record<string, unknown>;
+  priority?: number;
+  block_id?: string;
   land_data?: {
+    land_coordinates?: [number, number] | [number, number][];
     state?: string;
     district?: string;
     village?: string;
     farming_option?: string;
+    land_media?: {
+      images?: string[];
+      video?: string;
+    };
   };
-  priority?: number;
   farmer_id?: string;
-  block_id?: string;
+  payment_log?: Record<string, unknown>;
   supervisor?: {
     name?: string;
     supervisor_id?: string;
@@ -104,6 +114,30 @@ const ZoomToFarm: React.FC<{ search: string; farms: FarmLocation[] }> = ({ searc
   return null;
 };
 
+const FitToFarmBounds: React.FC<{ farms: FarmLocation[] }> = ({ farms }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (farms.length === 0) return;
+
+    const points: [number, number][] = farms.flatMap((farm) => {
+      if (farm.boundary && farm.boundary.length > 0) return farm.boundary;
+      return [farm.coordinates];
+    });
+
+    if (points.length === 0) return;
+
+    const bounds = L.latLngBounds(points);
+    map.fitBounds(bounds, {
+      padding: [40, 40],
+      maxZoom: 18,
+      animate: true,
+    });
+  }, [farms, map]);
+
+  return null;
+};
+
 interface FieldMonitoringProps {
   userRole?: 'farm-manager' | 'field-manager';
   regionFilter?: string;
@@ -134,7 +168,7 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
         
         if (data.farms) {
           const transformedFarms: FarmLocation[] = data.farms.map((apiFarm: ApiFarm) => {
-            const coords = apiFarm.land_coordinates;
+            const coords = apiFarm.land_data?.land_coordinates ?? [0, 0];
             const isPolygon = Array.isArray(coords[0]);
             
             // Calculate center point for polygon or use single coordinate
@@ -156,6 +190,7 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
             return {
               id: apiFarm.farm_id,
               name: `${apiFarm.land_data?.village || 'Farm'} - ${apiFarm.land_data?.district || 'Unknown'}`,
+              cropType: apiFarm.crop_type,
               coordinates: centerCoords,
               boundary,
               area: apiFarm.area,
@@ -166,6 +201,7 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
               priority: apiFarm.priority,
               farmer_id: apiFarm.farmer_id,
               block_id: apiFarm.block_id,
+              mediaPreview: apiFarm.land_data?.land_media?.images?.[0],
               supervisor: apiFarm.supervisor
                 ? {
                     name: apiFarm.supervisor.name,
@@ -372,13 +408,14 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
       </div>
 
       {/* Full-width Map */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative min-h-[calc(100vh-7rem)]">
         <MapContainer
           center={mapCenter}
           zoom={13}
           style={{ height: '100%', width: '100%' }}
           scrollWheelZoom={true}
         >
+          <FitToFarmBounds farms={filteredFarms} />
           <ZoomToFarm search={farmIdSearch} farms={filteredFarms} />
           <TileLayer
             attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
@@ -394,10 +431,10 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
                   <Polygon
                     positions={farm.boundary}
                     pathOptions={{
-                      color: isSelected ? '#2563eb' : '#22c55e',
-                      fillColor: isSelected ? '#60a5fa' : '#22c55e',
-                      fillOpacity: isSelected ? 0.25 : 0.18,
-                      weight: isSelected ? 3 : 2,
+                      color: isSelected ? '#2563eb' : '#16a34a',
+                      fillColor: isSelected ? '#93c5fd' : '#86efac',
+                      fillOpacity: isSelected ? 0.28 : 0.22,
+                      weight: isSelected ? 4 : 3,
                     }}
                     eventHandlers={{
                       click: () => handleFarmClick(farm),
@@ -412,6 +449,18 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
                     click: () => handleFarmClick(farm),
                   }}
                 >
+                  <Tooltip direction="top" offset={[0, -8]} opacity={1} permanent>
+                    <div className="px-2 py-1 rounded-md bg-white border border-emerald-200 shadow-sm text-[11px] font-semibold text-gray-800">
+                      {farm.name}
+                    </div>
+                  </Tooltip>
+                  <Popup>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-gray-900">{farm.name}</div>
+                      <div className="text-xs text-gray-600">{farm.cropType || 'Crop not set'} • {farm.area} acres</div>
+                      <div className="text-xs text-gray-500">{farm.village || '—'} • {farm.district || '—'} • {farm.state || '—'}</div>
+                    </div>
+                  </Popup>
                 </Marker>
               </React.Fragment>
             );
