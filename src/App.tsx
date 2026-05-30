@@ -52,6 +52,7 @@ import DirectorCostMonitoring from "./pages/DirectorCostMonitoring";
 import DirectorEmisInvestments from "./pages/DirectorEmisInvestments";
 import DirectorAssetsLiabilities from "./pages/DirectorAssetsLiabilities";
 import HRMS from "./pages/HRMS";
+import OnDemandTask from "./pages/OnDemandTask";
 
 const queryClient = new QueryClient();
 
@@ -89,6 +90,7 @@ const App = () => (
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
           <Route path="/inventory-indents" element={<AppLayout><InventoryIndent /></AppLayout>} />
           <Route path="/admin-ops-indents" element={<AppLayout><AdminOpsIndent /></AppLayout>} />
+          <Route path="/on-demand-task" element={<AppLayout><OnDemandTask /></AppLayout>} />
           <Route path="/finance-admin-ops-indents" element={<AppLayout><FinanceAdminOpsIndent /></AppLayout>} />
           <Route
             path="/purchase-requisition"

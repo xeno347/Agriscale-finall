@@ -1204,8 +1204,9 @@ return;
 }
 
 if (data?.success === true) {
+const taskId = data?.task_id ?? data?.task?.task_id;
 const updateCalls = Array.from(assignedByCalendarFarmActivity.entries()).map(async ([calanderId, map]) => {
-const updatePayload = { calander_id: calanderId, assigned_acres: Array.from(map.values()) };
+const updatePayload = { calander_id: calanderId, assigned_acres: Array.from(map.values()), task_id: taskId };
 const updateRes = await fetch(`${BASE_URL}/admin_cultivation/update_task_status`, {
 method: 'POST',
 headers: { 'Content-Type': 'application/json' },

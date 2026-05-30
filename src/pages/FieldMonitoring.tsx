@@ -1,12 +1,13 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { MapContainer, TileLayer, Marker, Polygon, Popup, Tooltip, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polygon, Popup, Tooltip, Polyline, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { getBaseUrl } from '@/lib/config';
+import { useLocationTracing } from '@/hooks/useLocationTracing';
 import { 
   MapPin, 
   Wheat,
@@ -90,6 +91,37 @@ interface Supervisor {
   designation?: string;
 }
 
+interface StaffOption {
+  id: string;
+  name: string;
+}
+
+interface TracePoint {
+  timestamp: string;
+  lat: number;
+  long: number;
+}
+
+const normalizeTraceData = (value: unknown): number[][] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) return null;
+
+      const lat = Number(entry[0]);
+      const long = Number(entry[1]);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(long)) return null;
+      return [lat, long] as number[];
+    })
+    .filter((entry): entry is number[] => Array.isArray(entry) && entry.length === 2);
+};
+
+const countUniqueTracePoints = (traceData: number[][]) => {
+  return new Set(traceData.map((point) => `${point[0]}:${point[1]}`)).size;
+};
+
 const ZoomToFarm: React.FC<{ search: string; farms: FarmLocation[] }> = ({ search, farms }) => {
   const map = useMap();
 
@@ -138,6 +170,23 @@ const FitToFarmBounds: React.FC<{ farms: FarmLocation[] }> = ({ farms }) => {
   return null;
 };
 
+const FitToTraceBounds: React.FC<{ traceData: number[][] }> = ({ traceData }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (traceData.length === 0) return;
+
+    const bounds = L.latLngBounds(traceData.map((point) => [point[0], point[1]] as [number, number]));
+    map.fitBounds(bounds, {
+      padding: [40, 40],
+      maxZoom: 18,
+      animate: true,
+    });
+  }, [traceData, map]);
+
+  return null;
+};
+
 interface FieldMonitoringProps {
   userRole?: 'farm-manager' | 'field-manager';
   regionFilter?: string;
@@ -147,6 +196,7 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
   const [selectedFarm, setSelectedFarm] = useState<FarmLocation | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [showLandMapping, setShowLandMapping] = useState(true);
   const [farmIdSearch, setFarmIdSearch] = useState('');
   const [farms, setFarms] = useState<FarmLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -159,6 +209,82 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
   const [selectedSupervisor, setSelectedSupervisor] = useState<Supervisor | null>(null);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+  const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [staffError, setStaffError] = useState<string | null>(null);
+  const [selectedTracingStaffId, setSelectedTracingStaffId] = useState('');
+  const [liveTracingEnabled, setLiveTracingEnabled] = useState(false);
+  const [fetchedTraceData, setFetchedTraceData] = useState<number[][]>([]);
+  const [fetchedTraceLoading, setFetchedTraceLoading] = useState(false);
+  const [fetchedTraceError, setFetchedTraceError] = useState<string | null>(null);
+
+  const {
+    connected: traceConnected,
+    tracerData,
+    totalPoints,
+    uniquePoints,
+    error: traceError,
+  } = useLocationTracing(selectedTracingStaffId, liveTracingEnabled);
+
+  const activeTraceData = useMemo(() => {
+    if (liveTracingEnabled && tracerData.length > 0) {
+      return tracerData;
+    }
+
+    return fetchedTraceData;
+  }, [fetchedTraceData, liveTracingEnabled, tracerData]);
+
+  const activeTracePoints = useMemo(
+    () => activeTraceData.map((point, index) => ({ timestamp: String(index), lat: point[0], long: point[1] })),
+    [activeTraceData]
+  );
+
+  useEffect(() => {
+    if (!selectedTracingStaffId) {
+      setFetchedTraceData([]);
+      setFetchedTraceError(null);
+      setFetchedTraceLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const fetchSelectedTrace = async () => {
+      try {
+        setFetchedTraceLoading(true);
+        setFetchedTraceError(null);
+
+        const response = await fetch(
+          `${getBaseUrl()}/admin_staff/get_staff_location_tracing/${selectedTracingStaffId}`,
+          { signal: controller.signal }
+        );
+
+        let data: any = null;
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+
+        if (!response.ok) {
+          throw new Error(data?.message || `Failed to load tracing (${response.status})`);
+        }
+
+        setFetchedTraceData(normalizeTraceData(data?.tracer_data));
+      } catch (error) {
+        if ((error as Error)?.name === 'AbortError') return;
+        console.error('Error fetching selected staff trace:', error);
+        setFetchedTraceData([]);
+        setFetchedTraceError('Unable to load tracing from API.');
+      } finally {
+        setFetchedTraceLoading(false);
+      }
+    };
+
+    fetchSelectedTrace();
+
+    return () => controller.abort();
+  }, [selectedTracingStaffId]);
 
   useEffect(() => {
     const fetchFarms = async () => {
@@ -222,6 +348,51 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
     };
     
     fetchFarms();
+  }, []);
+
+  useEffect(() => {
+    const fetchStaffOptions = async () => {
+      try {
+        setStaffLoading(true);
+        setStaffError(null);
+
+        const response = await fetch(`${getBaseUrl()}/admin_staff/get_all_staff`, { method: 'GET' });
+        let data: any = null;
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+
+        if (!response.ok) {
+          throw new Error(data?.message || `Failed to load staff (${response.status})`);
+        }
+
+        const list: any[] = Array.isArray(data) ? data : Array.isArray(data?.staff) ? data.staff : [];
+        const mapped: StaffOption[] = list
+          .map((staff) => ({
+            id: String(staff?.staff_id || staff?.id || '').trim(),
+            name:
+              staff?.staff_information?.staff_name ||
+              staff?.staff_information?.name ||
+              staff?.staff_information?.full_name ||
+              staff?.name ||
+              staff?.full_name ||
+              staff?.staff_id ||
+              'Unnamed staff',
+          }))
+          .filter((staff) => !!staff.id);
+
+        setStaffOptions(mapped);
+      } catch (error) {
+        console.error('Error fetching staff options:', error);
+        setStaffError('Unable to load staff list.');
+      } finally {
+        setStaffLoading(false);
+      }
+    };
+
+    fetchStaffOptions();
   }, []);
 
   useEffect(() => {
@@ -394,16 +565,80 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
     <div className="h-[calc(100vh-4rem)] flex flex-col">
       {/* Header with search */}
       <div className="px-6 py-4 border-b bg-white">
-        <div className="flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-bold tracking-tight">Field Monitoring</h1>
-          <div className="w-full max-w-sm">
-            <Input
-              value={farmIdSearch}
-              onChange={(e) => setFarmIdSearch(e.target.value)}
-              placeholder="Search by Farm ID..."
-              className="bg-white"
-            />
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Field Monitoring</h1>
+            <p className="text-sm text-muted-foreground mt-1">Search farms or track a staff member live on the map.</p>
           </div>
+          <div className="flex w-full flex-col gap-3 lg:max-w-5xl">
+            <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-[1.2fr_1fr_auto]">
+              <Input
+                value={farmIdSearch}
+                onChange={(e) => setFarmIdSearch(e.target.value)}
+                placeholder="Search by Farm ID..."
+                className="bg-white"
+              />
+              <div className="flex flex-col gap-2">
+                <select
+                  value={selectedTracingStaffId}
+                  onChange={(e) => {
+                    const nextStaffId = e.target.value;
+                    setSelectedTracingStaffId(nextStaffId);
+                    setLiveTracingEnabled(false);
+                  }}
+                  className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm shadow-sm outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">Select staff to trace</option>
+                  {staffLoading ? (
+                    <option value="" disabled>Loading staff...</option>
+                  ) : staffOptions.map((staff) => (
+                    <option key={staff.id} value={staff.id}>
+                      {staff.name} ({staff.id})
+                    </option>
+                  ))}
+                </select>
+                {selectedTracingStaffId && (
+                  <Button
+                    type="button"
+                    variant={liveTracingEnabled ? 'secondary' : 'outline'}
+                    className="h-10 w-full"
+                    onClick={() => setLiveTracingEnabled((prev) => !prev)}
+                  >
+                    {liveTracingEnabled ? 'stop live' : 'watch live'}
+                  </Button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLandMapping((prev) => !prev)}
+                className={showLandMapping
+                  ? 'h-10 rounded-md border border-slate-200 bg-slate-900 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800'
+                  : 'h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50'}
+              >
+                {showLandMapping ? 'Hide land mapping' : 'Show land mapping'}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {staffError && <span className="text-red-600">{staffError}</span>}
+          {fetchedTraceError && <span className="text-red-600">{fetchedTraceError}</span>}
+          {selectedTracingStaffId ? <Badge variant="secondary">Tracing: {selectedTracingStaffId}</Badge> : <span>Select a staff member to view tracing from the API.</span>}
+          {selectedTracingStaffId && fetchedTraceLoading && <span>Loading trace...</span>}
+          {selectedTracingStaffId && !fetchedTraceLoading && activeTraceData.length > 0 && (
+            <span>
+              Points: {activeTraceData.length} total, {countUniqueTracePoints(activeTraceData)} unique
+            </span>
+          )}
+          {selectedTracingStaffId && liveTracingEnabled && (
+            <Badge variant="outline">{traceConnected ? 'Connected' : 'Connecting...'}</Badge>
+          )}
+          {selectedTracingStaffId && liveTracingEnabled && (
+            <span>
+              Live: {totalPoints} total, {uniquePoints} unique
+            </span>
+          )}
+          {traceError && <span className="text-red-600">{traceError}</span>}
         </div>
       </div>
 
@@ -415,18 +650,27 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
           style={{ height: '100%', width: '100%' }}
           scrollWheelZoom={true}
         >
-          <FitToFarmBounds farms={filteredFarms} />
+          {showLandMapping && <FitToFarmBounds farms={filteredFarms} />}
+          {activeTraceData.length > 0 && <FitToTraceBounds traceData={activeTraceData} />}
           <ZoomToFarm search={farmIdSearch} farms={filteredFarms} />
           <TileLayer
             attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
             url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
           />
 
-          {filteredFarms.map((farm) => {
+          {activeTraceData.length > 0 && (
+            <>
+              <Polyline
+                positions={activeTraceData.map((point) => [point[0], point[1]] as [number, number])}
+                pathOptions={{ color: '#facc15', weight: 3, opacity: 0.95 }}
+              />
+            </>
+          )}
+
+          {showLandMapping && filteredFarms.map((farm) => {
             const isSelected = selectedFarm?.id === farm.id;
             return (
               <React.Fragment key={farm.id}>
-                {/* Only render polygon if farm has boundary data */}
                 {farm.boundary && (
                   <Polygon
                     positions={farm.boundary}
