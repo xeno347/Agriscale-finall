@@ -107,13 +107,22 @@ const normalizeTraceData = (value: unknown): number[][] => {
 
   return value
     .map((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) return null;
-
-      const lat = Number(entry[0]);
-      const long = Number(entry[1]);
-
-      if (!Number.isFinite(lat) || !Number.isFinite(long)) return null;
-      return [lat, long] as number[];
+      // Array format: [lat, long] (WebSocket compact format)
+      if (Array.isArray(entry) && entry.length >= 2) {
+        const lat = Number(entry[0]);
+        const long = Number(entry[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(long)) return null;
+        return [lat, long] as number[];
+      }
+      // Object format: { lat, long } or { lat, lng } (REST API format)
+      if (entry !== null && typeof entry === 'object') {
+        const obj = entry as Record<string, unknown>;
+        const lat = Number(obj.lat ?? obj.latitude);
+        const long = Number(obj.long ?? obj.lng ?? obj.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(long)) return null;
+        return [lat, long] as number[];
+      }
+      return null;
     })
     .filter((entry): entry is number[] => Array.isArray(entry) && entry.length === 2);
 };
@@ -253,6 +262,7 @@ export default function FieldMonitoring({ userRole = 'farm-manager', regionFilte
       try {
         setFetchedTraceLoading(true);
         setFetchedTraceError(null);
+        setFetchedTraceData([]);
 
         const response = await fetch(
           `${getBaseUrl()}/admin_staff/get_staff_location_tracing/${selectedTracingStaffId}`,

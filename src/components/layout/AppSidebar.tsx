@@ -324,6 +324,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             <NavItem to="/farmers" icon={UserCheck} label="Farmers" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/blocks" icon={Layers} label="Land Hierarchy" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/land-acquisition" icon={Map} label="Land Acquisition" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/farm-directory" icon={FolderKanban} label="Farm Directory" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
         </div>
 

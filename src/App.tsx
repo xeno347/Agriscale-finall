@@ -53,6 +53,7 @@ import DirectorEmisInvestments from "./pages/DirectorEmisInvestments";
 import DirectorAssetsLiabilities from "./pages/DirectorAssetsLiabilities";
 import HRMS from "./pages/HRMS";
 import OnDemandTask from "./pages/OnDemandTask";
+import FarmDirectory from "./pages/FarmDirectory";
 
 const queryClient = new QueryClient();
 
@@ -72,6 +73,7 @@ const App = () => (
           <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
           <Route path="/farmers/:farmer_id" element={<AppLayout><FarmerProfile /></AppLayout>} />
           <Route path="/land-acquisition" element={<AppLayout><LandAcquisition /></AppLayout>} />
+          <Route path="/farm-directory" element={<AppLayout><FarmDirectory /></AppLayout>} />
           
           {/* Operations */}
           <Route path="/cultivation-calendar" element={<AppLayout><CultivationCalendar /></AppLayout>} />
