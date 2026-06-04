@@ -58,6 +58,9 @@ export type ComparativeModel = {
 
   // HO local-only UI state
   hoLocked?: boolean;
+
+  // Indent type — drives upload dialog heading (PR | SPR | WO | PO | …)
+  indent_type?: 'PR' | 'SPR' | 'WO' | 'PO' | (string & {});
 };
 
 const formatInr = (value: number) => {

@@ -12,6 +12,8 @@ import {
   Trash2,
   ChevronDown,
   AlertTriangle,
+  ClipboardList,
+  Undo2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -300,6 +302,7 @@ const Inventory = () => {
   const [requestStockOpen, setRequestStockOpen] = useState(false);
   const [requestStockItems, setRequestStockItems] = useState<StockItem[]>([]);
   const [allocationOpen, setAllocationOpen] = useState(false);
+  const [issuedItemsOpen, setIssuedItemsOpen] = useState(false);
   const [incomingItem, setIncomingItem] = useState<StockItem | null>(null);
   const [outgoingItem, setOutgoingItem] = useState<StockItem | null>(null);
   const [issuedItem, setIssuedItem] = useState<StockItem | null>(null);
@@ -408,6 +411,13 @@ const Inventory = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setIssuedItemsOpen(true)}
+            className="bg-purple-600 hover:bg-purple-700 text-white gap-2"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Issue Items
+          </Button>
           <Button
             onClick={() => setAllocationOpen(true)}
             className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
@@ -779,6 +789,13 @@ const Inventory = () => {
           }}
         />
       )}
+
+      {/* Issued Items */}
+      <IssuedItemsModal
+        open={issuedItemsOpen}
+        items={items}
+        onClose={() => setIssuedItemsOpen(false)}
+      />
     </div>
   );
 };
@@ -1194,6 +1211,38 @@ const TransactionModal = ({
   const [note, setNote] = useState('');
   const [by, setBy] = useState('');
 
+  // Issue-specific state
+  const [issueTo, setIssueTo] = useState('');
+  const [issueStartDate, setIssueStartDate] = useState('');
+  const [issueEndDate, setIssueEndDate] = useState('');
+  const [staffList, setStaffList] = useState<Array<{ id: string; name: string; designation: string }>>([]);
+  const [staffLoading, setStaffLoading] = useState(false);
+
+  useEffect(() => {
+    if (txType !== 'issued') return;
+    const fetchStaff = async () => {
+      setStaffLoading(true);
+      try {
+        const res = await fetch(`${BASE_URL}/admin_staff/get_all_staff`);
+        const data: any = await res.json().catch(() => null);
+        if (res.ok && Array.isArray(data)) {
+          setStaffList(
+            data.map((s: any) => ({
+              id: String(s?.staff_id ?? ''),
+              name: String(s?.staff_information?.staff_name ?? ''),
+              designation: String(s?.staff_information?.staff_designation ?? ''),
+            }))
+          );
+        }
+      } catch {
+        // staff list stays empty; user can still type
+      } finally {
+        setStaffLoading(false);
+      }
+    };
+    fetchStaff();
+  }, [txType]);
+
   const colorMap: Record<StockTransaction['type'], string> = {
     incoming: 'text-green-600',
     outgoing: 'text-red-600',
@@ -1209,7 +1258,14 @@ const TransactionModal = ({
 
   const handleSave = () => {
     if (!qty || qty <= 0) return toast.error('Quantity must be greater than 0');
-    onSave({ type: txType, qty, date: today(), note, by });
+    if (txType === 'issued') {
+      if (!issueTo) return toast.error('Please select a staff member');
+      if (!issueStartDate || !issueEndDate) return toast.error('Please fill both issue dates');
+      if (issueEndDate < issueStartDate) return toast.error('End date must be after start date');
+      onSave({ type: txType, qty, date: issueStartDate, note: `${issueStartDate} → ${issueEndDate}`, by: issueTo });
+    } else {
+      onSave({ type: txType, qty, date: today(), note, by });
+    }
   };
 
   return (
@@ -1244,12 +1300,64 @@ const TransactionModal = ({
               placeholder="0"
             />
           </Field>
-          <Field label="Performed By">
-            <Input placeholder="Staff name" value={by} onChange={(e) => setBy(e.target.value)} />
-          </Field>
-          <Field label="Note / Reference">
-            <Input placeholder="Purchase order, field, reason…" value={note} onChange={(e) => setNote(e.target.value)} />
-          </Field>
+
+          {txType === 'issued' ? (
+            <>
+              <Field label="Issue To">
+                <div className="relative">
+                  <select
+                    className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 pr-8 disabled:bg-gray-50 disabled:text-gray-400"
+                    value={issueTo}
+                    onChange={(e) => setIssueTo(e.target.value)}
+                    disabled={staffLoading}
+                  >
+                    <option value="">{staffLoading ? 'Loading staff…' : 'Select staff member'}</option>
+                    {staffList.map((s) => (
+                      <option key={s.id} value={s.name}>
+                        {s.name}{s.designation ? ` — ${s.designation}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                </div>
+              </Field>
+
+              <div className="rounded-lg border border-purple-100 bg-purple-50/40 p-3 space-y-3">
+                <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Issue Timeline</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Start Date">
+                    <Input
+                      type="date"
+                      value={issueStartDate}
+                      onChange={(e) => setIssueStartDate(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="End Date">
+                    <Input
+                      type="date"
+                      value={issueEndDate}
+                      min={issueStartDate || undefined}
+                      onChange={(e) => setIssueEndDate(e.target.value)}
+                    />
+                  </Field>
+                </div>
+                {issueStartDate && issueEndDate && issueEndDate >= issueStartDate && (
+                  <p className="text-[11px] text-purple-600 font-medium">
+                    Duration: {Math.round((new Date(issueEndDate).getTime() - new Date(issueStartDate).getTime()) / 86400000) + 1} day(s)
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <Field label="Performed By">
+                <Input placeholder="Staff name" value={by} onChange={(e) => setBy(e.target.value)} />
+              </Field>
+              <Field label="Note / Reference">
+                <Input placeholder="Purchase order, field, reason…" value={note} onChange={(e) => setNote(e.target.value)} />
+              </Field>
+            </>
+          )}
         </div>
 
         <DialogFooter className="mt-2">
@@ -1260,7 +1368,7 @@ const TransactionModal = ({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-);
+  );
 };
 
 const RequestStockModal = ({
@@ -1811,6 +1919,333 @@ const DeleteConfirmModal = ({
     </DialogContent>
   </Dialog>
 );
+
+// ─────────────────────────────────────────────────────────────
+// ISSUED ITEMS MODAL
+// ─────────────────────────────────────────────────────────────
+type IssueRequest = {
+  item_id: string;
+  item_name: string;
+  issue_id: string;
+  quantity: number;
+  issue_start_date: string;
+  issue_end_date: string;
+  status: 'pending' | 'issued' | 'returned' | 'partially_returned' | 'rejected';
+  created_at: string;
+  staff_id: string;
+};
+
+type IssueStatusTab = 'all' | IssueRequest['status'];
+
+const STATUS_TABS: { key: IssueStatusTab; label: string; active: string; badge: string }[] = [
+  { key: 'all',               label: 'All',               active: 'bg-gray-800 text-white border-gray-800',         badge: 'bg-white/20 text-white' },
+  { key: 'pending',           label: 'Pending',           active: 'bg-amber-500 text-white border-amber-500',       badge: 'bg-white/20 text-white' },
+  { key: 'issued',            label: 'Issued',            active: 'bg-blue-600 text-white border-blue-600',         badge: 'bg-white/20 text-white' },
+  { key: 'returned',          label: 'Returned',          active: 'bg-emerald-600 text-white border-emerald-600',   badge: 'bg-white/20 text-white' },
+  { key: 'partially_returned', label: 'Partial Return',  active: 'bg-violet-600 text-white border-violet-600',     badge: 'bg-white/20 text-white' },
+  { key: 'rejected',          label: 'Rejected',          active: 'bg-red-600 text-white border-red-600',           badge: 'bg-white/20 text-white' },
+];
+
+const STATUS_PILL: Record<IssueRequest['status'], string> = {
+  pending:            'bg-amber-50 text-amber-700 ring-amber-100',
+  issued:             'bg-blue-50 text-blue-700 ring-blue-100',
+  returned:           'bg-emerald-50 text-emerald-700 ring-emerald-100',
+  partially_returned: 'bg-violet-50 text-violet-700 ring-violet-100',
+  rejected:           'bg-red-50 text-red-700 ring-red-100',
+};
+
+const calcProgress = (start: string, end: string) => {
+  const s = new Date(start).getTime();
+  const e = new Date(end).getTime();
+  const n = Date.now();
+  if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return 0;
+  return Math.max(0, Math.min(100, ((n - s) / (e - s)) * 100));
+};
+
+const IssuedItemsModal = ({
+  open,
+  items,
+  onClose,
+}: {
+  open: boolean;
+  items: StockItem[];
+  onClose: () => void;
+}) => {
+  const [requests, setRequests] = useState<IssueRequest[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<IssueStatusTab>('all');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [returnQtys, setReturnQtys] = useState<Record<string, number>>({});
+
+  const fetchRequests = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE_URL}/inventory/get_issue_requests`);
+      const data: any = await res.json().catch(() => null);
+      if (res.ok && data?.success && Array.isArray(data?.issue_requests)) {
+        setRequests(data.issue_requests);
+        const qtys: Record<string, number> = {};
+        data.issue_requests.forEach((r: IssueRequest) => { qtys[r.issue_id] = r.quantity; });
+        setReturnQtys(qtys);
+      } else {
+        toast.error(data?.message || 'Failed to fetch issue requests');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to fetch issue requests');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open) {
+      fetchRequests();
+      setActiveTab('all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const getItemImage = (itemId: string) =>
+    items.find((i) => i.id === itemId)?.imageUrl || PLACEHOLDER_IMG;
+
+  const filtered = activeTab === 'all' ? requests : requests.filter((r) => r.status === activeTab);
+  const countFor = (key: IssueStatusTab) =>
+    key === 'all' ? requests.length : requests.filter((r) => r.status === key).length;
+
+  const handleIssue = async (req: IssueRequest) => {
+    setActionLoading(req.issue_id);
+    try {
+      const res = await fetch(`${BASE_URL}/inventory/update_issue_request_status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: req.item_id, issue_id: req.issue_id, new_status: 'issued' }),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to issue item');
+      toast.success(`"${req.item_name}" issued successfully`);
+      await fetchRequests();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to issue item');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReturn = async (req: IssueRequest) => {
+    const qtyReturned = returnQtys[req.issue_id] ?? req.quantity;
+    if (!qtyReturned || qtyReturned <= 0) return toast.error('Enter a valid return quantity');
+    setActionLoading(req.issue_id);
+    try {
+      const res = await fetch(`${BASE_URL}/inventory/return_issue_item`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue_id: req.issue_id, quantity_returned: qtyReturned }),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to return item');
+      toast.success(`"${req.item_name}" marked as returned`);
+      await fetchRequests();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to return item');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-purple-700">
+            <ClipboardList className="w-5 h-5" />
+            Issue Requests
+          </DialogTitle>
+          <p className="text-sm text-gray-500">Manage all inventory issue requests</p>
+        </DialogHeader>
+
+        {/* ── Status filter tabs ── */}
+        <div className="flex flex-wrap gap-2">
+          {STATUS_TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+            const count = countFor(tab.key);
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold border transition-colors',
+                  isActive ? tab.active : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                )}
+              >
+                {tab.label}
+                <span className={cn(
+                  'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                  isActive ? tab.badge : 'bg-gray-100 text-gray-600'
+                )}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Content ── */}
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-7 h-7 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
+            <ClipboardList className="w-10 h-10 opacity-30" />
+            <p className="text-sm font-medium">No requests in this category</p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600 w-14">Image</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Item Name</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Issued To</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600 min-w-[210px]">Issue Timeline</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Qty</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Status</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {filtered.map((req) => {
+                    const progress = calcProgress(req.issue_start_date, req.issue_end_date);
+                    const isOverdue = new Date(req.issue_end_date).getTime() < Date.now();
+                    const isActing = actionLoading === req.issue_id;
+
+                    return (
+                      <tr key={req.issue_id} className="hover:bg-gray-50 transition-colors">
+
+                        {/* Image */}
+                        <td className="px-4 py-3">
+                          <img
+                            src={getItemImage(req.item_id)}
+                            alt={req.item_name}
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMG; }}
+                            className="w-10 h-10 rounded-lg object-cover border border-gray-200"
+                          />
+                        </td>
+
+                        {/* Item Name */}
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-gray-900">{req.item_name}</p>
+                          <p className="text-[11px] text-gray-400 mt-0.5">{req.item_id}</p>
+                        </td>
+
+                        {/* Issued To */}
+                        <td className="px-4 py-3">
+                          <span
+                            className="inline-flex items-center rounded-full bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 ring-1 ring-purple-100 max-w-[130px] truncate"
+                            title={req.staff_id}
+                          >
+                            {req.staff_id.slice(0, 8)}…
+                          </span>
+                        </td>
+
+                        {/* Timeline */}
+                        <td className="px-4 py-3">
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px] text-gray-500">
+                              <span>{req.issue_start_date}</span>
+                              <span className={cn('font-semibold', req.status === 'issued' && isOverdue ? 'text-red-600' : 'text-gray-500')}>
+                                {req.status === 'issued' && isOverdue ? 'Overdue' : `${Math.round(progress)}%`}
+                              </span>
+                              <span>{req.issue_end_date}</span>
+                            </div>
+                            <div className="h-2 w-full rounded-full bg-gray-100 overflow-hidden">
+                              <div
+                                className={cn(
+                                  'h-full rounded-full transition-all',
+                                  req.status === 'returned'           ? 'bg-emerald-500' :
+                                  req.status === 'partially_returned' ? 'bg-violet-500'  :
+                                  req.status === 'rejected'           ? 'bg-red-400'     :
+                                  isOverdue                           ? 'bg-red-500'     :
+                                  progress >= 75                      ? 'bg-amber-500'   : 'bg-purple-500'
+                                )}
+                                style={{ width: `${Math.min(100, progress)}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Qty */}
+                        <td className="px-4 py-3 font-bold text-gray-800">
+                          {req.quantity.toLocaleString()}
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-4 py-3">
+                          <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 capitalize', STATUS_PILL[req.status])}>
+                            {req.status.replace(/_/g, ' ')}
+                          </span>
+                        </td>
+
+                        {/* Action */}
+                        <td className="px-4 py-3">
+                          {req.status === 'pending' && (
+                            <Button
+                              size="sm"
+                              onClick={() => handleIssue(req)}
+                              disabled={isActing}
+                              className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-sm whitespace-nowrap"
+                            >
+                              <PackageCheck className="w-3.5 h-3.5" />
+                              {isActing ? 'Issuing…' : 'Issue'}
+                            </Button>
+                          )}
+
+                          {req.status === 'issued' && (
+                            <div className="flex items-center gap-1.5">
+                              <Input
+                                type="number"
+                                min={1}
+                                max={req.quantity}
+                                value={returnQtys[req.issue_id] ?? req.quantity}
+                                onChange={(e) =>
+                                  setReturnQtys((prev) => ({ ...prev, [req.issue_id]: Number(e.target.value) }))
+                                }
+                                className="h-8 w-16 text-xs text-center px-1"
+                                disabled={isActing}
+                              />
+                              <Button
+                                size="sm"
+                                onClick={() => handleReturn(req)}
+                                disabled={isActing}
+                                className="gap-1 bg-white border border-gray-200 text-gray-700 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 shadow-sm whitespace-nowrap"
+                              >
+                                <Undo2 className="w-3.5 h-3.5" />
+                                {isActing ? 'Returning…' : 'Return'}
+                              </Button>
+                            </div>
+                          )}
+
+                          {(req.status === 'returned' || req.status === 'partially_returned' || req.status === 'rejected') && (
+                            <span className="text-xs text-gray-400 italic">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 // ─────────────────────────────────────────────────────────────
 // SMALL HELPERS

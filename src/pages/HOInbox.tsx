@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { ComparativeQuotationApprovalRow } from '@/components/ho-inbox/ComparativeQuotationApprovalRow';
 import { type ComparativeModel } from '@/components/purchase/ComparativeStatementPreview';
+import { cn } from '@/lib/utils';
 import { getBaseUrl } from '@/lib/config';
 import { toast } from 'sonner';
 
@@ -37,6 +38,7 @@ type ApiTcComparative = {
   NFA_status?: unknown;
   comparison_id?: unknown;
   comparision_id?: unknown;
+  indent_type?: unknown;
 };
 
 const HO_OVERRIDES_KEY = 'farmconnect.hoInboxOverrides.v1';
@@ -202,16 +204,35 @@ const mapTcToModel = (x: ApiTcComparative): ComparativeModel | null => {
 
     tcApprovedVendorId: isTcApproved ? (backendApprovedVendorId || undefined) : undefined,
     tcApprovedAt: undefined,
+    indent_type: (() => {
+      const t = safeTrim((x as any)?.indent_type).toUpperCase();
+      return t === 'SPR' ? 'SPR' : t === 'PR' ? 'PR' : undefined;
+    })(),
   };
 
   return model;
 };
+
+// ─── Tab configuration ────────────────────────────────────────────────────────
+
+const TAB_ORDER = ['all', 'PR', 'SPR', 'WO', 'PO'] as const;
+
+const TAB_META: Record<string, { label: string; full: string }> = {
+  all: { label: 'All',             full: 'All Orders' },
+  PR:  { label: 'PR',              full: 'Purchase Requisitions' },
+  SPR: { label: 'SPR',             full: 'Special Purchase Requisitions' },
+  WO:  { label: 'Work Orders',     full: 'Work Orders' },
+  PO:  { label: 'Purchase Orders', full: 'Purchase Orders' },
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function HOInbox() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [all, setAll] = useState<Record<string, ComparativeModel>>({});
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('all');
 
   const openIndentId = safeTrim(searchParams.get('open'));
   const desiredTab = (() => {
@@ -230,13 +251,12 @@ export default function HOInbox() {
 
       setLoading(true);
       try {
+        // ── Step 1: fetch all TC comparatives ──────────────────────────────
         const url = `${baseUrl}/purchase_flow/get_TC`;
         const doFetch = (method: 'GET' | 'POST') =>
           fetch(url, {
             method,
-            headers: {
-              Accept: 'application/json',
-            },
+            headers: { Accept: 'application/json' },
             signal: ac.signal,
           });
 
@@ -250,24 +270,47 @@ export default function HOInbox() {
 
         const data: unknown = await res.json().catch(() => null);
         const list: ApiTcComparative[] = Array.isArray(data) ? (data as ApiTcComparative[]) : [];
-        const mapped = list
-          .map(mapTcToModel)
-          .filter(Boolean) as ComparativeModel[];
+        const mapped = list.map(mapTcToModel).filter(Boolean) as ComparativeModel[];
 
+        // ── Step 2: resolve definitive order type for every item ───────────
+        // find_the_order_type is the authoritative source; runs in parallel.
+        const typeResults = await Promise.allSettled(
+          mapped.map(async (m) => {
+            try {
+              const r = await fetch(`${baseUrl}/purchase_flow/find_the_order_type`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Accept: 'application/json',
+                },
+                body: JSON.stringify({ pr_number: m.indentId }),
+                signal: ac.signal,
+              });
+              if (!r.ok) return m;
+              const d = await r.json().catch(() => null);
+              const orderType = safeTrim((d as any)?.order_type).toUpperCase() || undefined;
+              return orderType ? { ...m, indent_type: orderType } : m;
+            } catch {
+              return m;
+            }
+          })
+        );
+
+        const resolvedMapped = typeResults.map((r, i) =>
+          r.status === 'fulfilled' ? r.value : mapped[i]
+        );
+
+        // ── Step 3: merge with local HO overrides ──────────────────────────
         const overrides = readHoOverrides();
-
         const next: Record<string, ComparativeModel> = {};
-        for (const m of mapped) {
+        for (const m of resolvedMapped) {
           const o = overrides[m.indentId];
           next[m.indentId] = o
             ? {
                 ...m,
                 ...o,
-                // Prefer local selection when present (user may preselect before backend writes it)
                 hoSelectedVendorId: o.hoSelectedVendorId || m.hoSelectedVendorId,
-                // Prefer backend approval when present
                 tcApprovedVendorId: m.tcApprovedVendorId || o.tcApprovedVendorId,
-                // Only local for timestamps today
                 tcApprovedAt: o.tcApprovedAt || m.tcApprovedAt,
                 hoForwardedAt: o.hoForwardedAt || m.hoForwardedAt,
               }
@@ -302,6 +345,35 @@ export default function HOInbox() {
     return comparativeRows.map((x) => ({ kind: 'comparative' as const, key: x.indentId, item: x }));
   }, [comparativeRows]);
 
+  // ── Tab counts ─────────────────────────────────────────────────────────────
+  const tabCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: inboxRows.length };
+    for (const r of inboxRows) {
+      const type = safeTrim(r.item.indent_type).toUpperCase() || 'OTHER';
+      counts[type] = (counts[type] || 0) + 1;
+    }
+    return counts;
+  }, [inboxRows]);
+
+  // Only show tabs that actually have items, in logical order
+  const visibleTabs = useMemo(() => {
+    const known = (TAB_ORDER as readonly string[]).filter(
+      (t) => t === 'all' || (tabCounts[t] ?? 0) > 0
+    );
+    const extras = Object.keys(tabCounts).filter(
+      (t) => t !== 'all' && !(TAB_ORDER as readonly string[]).includes(t) && tabCounts[t] > 0
+    );
+    return [...known, ...extras];
+  }, [tabCounts]);
+
+  // Rows visible in the current tab
+  const filteredRows = useMemo(() => {
+    if (activeTab === 'all') return inboxRows;
+    return inboxRows.filter(
+      (r) => safeTrim(r.item.indent_type).toUpperCase() === activeTab
+    );
+  }, [inboxRows, activeTab]);
+
   const updateComparative = (indentId: string, patch: Partial<ComparativeModel>) => {
     setAll((prev) => {
       const existing = prev[indentId];
@@ -315,10 +387,6 @@ export default function HOInbox() {
         tcApprovedVendorId: merged.tcApprovedVendorId,
         tcApprovedAt: merged.tcApprovedAt,
         hoLocked: (merged as any)?.hoLocked,
-        poCreatedAt: (merged as any)?.poCreatedAt,
-        poNo: (merged as any)?.poNo,
-        poStatus: (merged as any)?.poStatus,
-        poNextProcessSeries: (merged as any)?.poNextProcessSeries,
       };
       writeHoOverrides(overrides);
       return { ...prev, [indentId]: merged };
@@ -330,23 +398,64 @@ export default function HOInbox() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <div className="text-2xl font-bold">HO Inbox</div>
-          <div className="text-xs text-muted-foreground">Select an indent to review quotations and forward to Finance Admin Ops.</div>
+          <div className="text-xs text-muted-foreground">
+            Select an indent to review quotations and forward to Finance Admin Ops.
+          </div>
         </div>
       </div>
 
       <div className="rounded-xl border border-border bg-card">
-        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-          <div className="text-sm font-semibold">Inbox</div>
-          <div className="ml-auto text-xs text-muted-foreground">Total: {inboxRows.length}</div>
+
+        {/* ── Tab bar ────────────────────────────────────────────────────── */}
+        <div className="border-b border-border px-2 flex items-end gap-0 overflow-x-auto">
+          {visibleTabs.map((tab) => {
+            const meta = TAB_META[tab] ?? { label: tab, full: tab };
+            const count = tabCounts[tab] ?? 0;
+            const isActive = activeTab === tab;
+            return (
+              <button
+                key={tab}
+                title={meta.full}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  'flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap select-none',
+                  isActive
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'
+                )}
+              >
+                {meta.label}
+                <span
+                  className={cn(
+                    'text-xs px-1.5 py-0.5 rounded-full font-normal transition-colors',
+                    isActive
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-muted text-muted-foreground'
+                  )}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+          {/* Total counter pushed to the right */}
+          <div className="ml-auto flex items-center px-4 py-3">
+            <span className="text-xs text-muted-foreground">Total: {inboxRows.length}</span>
+          </div>
         </div>
 
+        {/* ── Content ─────────────────────────────────────────────────────── */}
         {loading ? (
           <div className="p-6 text-sm text-muted-foreground">Loading…</div>
-        ) : inboxRows.length === 0 ? (
-          <div className="p-6 text-sm text-muted-foreground">No comparatives found. Create quotations first to see items here.</div>
+        ) : filteredRows.length === 0 ? (
+          <div className="p-6 text-sm text-muted-foreground">
+            {activeTab === 'all'
+              ? 'No comparatives found. Create quotations first to see items here.'
+              : `No ${TAB_META[activeTab]?.full ?? activeTab} found in the inbox.`}
+          </div>
         ) : (
           <div className="divide-y divide-border">
-            {inboxRows.map((r) => {
+            {filteredRows.map((r) => {
               if (r.kind === 'comparative') {
                 const isTarget = Boolean(openIndentId) && r.item.indentId === openIndentId;
                 return (
@@ -360,7 +469,6 @@ export default function HOInbox() {
                   />
                 );
               }
-
               return null;
             })}
           </div>

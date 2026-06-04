@@ -103,6 +103,13 @@ category: 'Vehicle' | 'Equipment';
 schedule: Record<string, number>;
 }
 
+interface VendorScopeEntry {
+vendor_details: { vendor_name: string; vendor_contact: string };
+activities: string[];
+start_date: string;
+end_date: string;
+}
+
 type ApiVehicle = {
 servise_history?: any[];
 fuel_logs?: any[];
@@ -593,6 +600,14 @@ const [inventoryItems, setInventoryItems] = useState<ApiInventoryItem[]>([]);
 const [isLoadingInventoryItems, setIsLoadingInventoryItems] = useState(false);
 const [equipmentSearchTerm, setEquipmentSearchTerm] = useState('');
 const [isAssigningTask, setIsAssigningTask] = useState(false);
+const [step1Mode, setStep1Mode] = useState<'vehicle' | 'vendor'>('vehicle');
+const [step2Mode, setStep2Mode] = useState<'equipment' | 'vendor'>('equipment');
+const [vendorVehicle, setVendorVehicle] = useState({ name: '', contact: '', notes: '' });
+const [vendorEquipment, setVendorEquipment] = useState({ name: '', contact: '', notes: '' });
+const [scopeVendors, setScopeVendors] = useState<Record<string, VendorScopeEntry>>({});
+const [isLoadingScope, setIsLoadingScope] = useState(false);
+const [selectedScopeVendorId, setSelectedScopeVendorId] = useState<string | null>(null);
+const [selectedScopeVendorIdEq, setSelectedScopeVendorIdEq] = useState<string | null>(null);
 
 const [activitiesData, setActivitiesData] = useState<CalendarData>({});
 const [farmsById, setFarmsById] = useState<FarmsById>({});
@@ -772,6 +787,10 @@ setAssignmentStep(1);
 setSelectedVehicleIds([]);
 setEquipmentCounts({});
 setEquipmentSearchTerm('');
+setStep1Mode('vehicle');
+setStep2Mode('equipment');
+setVendorVehicle({ name: '', contact: '', notes: '' });
+setVendorEquipment({ name: '', contact: '', notes: '' });
 setDateSwapTaskKey(null);
 setDateSwapValue('');
 setDateSwapPopupPos(null);
@@ -783,6 +802,13 @@ setAssignmentStep(1);
 setSelectedVehicleIds([]);
 setEquipmentCounts({});
 setEquipmentSearchTerm('');
+setStep1Mode('vehicle');
+setStep2Mode('equipment');
+setVendorVehicle({ name: '', contact: '', notes: '' });
+setVendorEquipment({ name: '', contact: '', notes: '' });
+setScopeVendors({});
+setSelectedScopeVendorId(null);
+setSelectedScopeVendorIdEq(null);
 };
 
 const isTaskPending = (task: CalendarActivity) => {
@@ -936,6 +962,45 @@ return `${task.calander_id}__${task.plan_id}__${task.block_id}__${task.index}__$
 useEffect(() => {
 if (isModalOpen) setSelectedTaskKeys({});
 }, [isModalOpen, selectedDate]);
+
+// Fetch scope-of-work vendors when either vendor tab is opened
+useEffect(() => {
+const vendorTabActive = step1Mode === 'vendor' || step2Mode === 'vendor';
+if (!vendorTabActive || !isAssignmentOpen) {
+setScopeVendors({});
+setSelectedScopeVendorId(null);
+setSelectedScopeVendorIdEq(null);
+return;
+}
+const selectedTask = selectedActivities.find(
+(t) => selectedTaskKeys[getTaskKey(t)] && isTaskAssignable(t)
+);
+const farmId = selectedTask?.farm_id;
+if (!farmId) return;
+
+let mounted = true;
+setIsLoadingScope(true);
+setScopeVendors({});
+setSelectedScopeVendorId(null);
+(async () => {
+try {
+const res = await fetch(`${BASE_URL}/admin_cultivation/get_scope_of_work_for_land/${farmId}`);
+const data = await res.json().catch(() => null);
+if (!mounted) return;
+if (data?.success && data?.scope_of_work && typeof data.scope_of_work === 'object') {
+setScopeVendors(data.scope_of_work as Record<string, VendorScopeEntry>);
+} else {
+setScopeVendors({});
+}
+} catch {
+if (mounted) setScopeVendors({});
+} finally {
+if (mounted) setIsLoadingScope(false);
+}
+})();
+return () => { mounted = false; };
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [step1Mode, step2Mode, isAssignmentOpen]);
 
 const selectedActivities = selectedDate && filteredActivitiesData[selectedDate] ? filteredActivitiesData[selectedDate] : [];
 const allSelectedKeys = selectedActivities.map(getTaskKey);
@@ -1096,7 +1161,11 @@ return { ...prev, [eId]: next };
 
 const handleConfirmAssignment = async () => {
 if (!selectedDate) return;
-if (selectedVehicleIds.length === 0) return;
+if (step1Mode === 'vehicle' && selectedVehicleIds.length === 0) return;
+if (step1Mode === 'vendor' && !vendorVehicle.name.trim()) {
+toast.error('Please enter a vendor name');
+return;
+}
 
 const selectedTasks = selectedActivities.filter((t) => selectedTaskKeys[getTaskKey(t)] && isTaskAssignable(t));
 if (selectedTasks.length === 0) {
@@ -1151,12 +1220,15 @@ assignedByCalendarFarmActivity.set(calanderId, perCalendar);
 const feildIds = Array.from(feildIdSet);
 const assignedAcres = Array.from(assignedByFarmActivity.values());
 
-const vehicles = selectedVehicleIds.map((vehicleId) => {
+const vehicles = step1Mode === 'vehicle'
+? selectedVehicleIds.map((vehicleId) => {
 const v = vehiclesForAssignment.find((x) => x.id === vehicleId);
 return { vehicle_id: vehicleId, vehicle_number: v?.name || vehicleId };
-});
+})
+: [];
 
-const equipment = Object.entries(equipmentCounts)
+const equipment = step2Mode === 'equipment'
+? Object.entries(equipmentCounts)
 .filter(([, qty]) => (Number(qty) || 0) > 0)
 .map(([equipmentId, qty]) => {
 const item = inventoryItems.find((it) => getInventoryItemId(it) === equipmentId);
@@ -1165,9 +1237,22 @@ equipment_id: equipmentId,
 equipment_name: String(item?.item_name || item?.name || item?.item || equipmentId),
 quantity: Math.max(0, Math.floor(Number(qty) || 0))
 };
-});
+})
+: [];
 
-const payload: Record<string, any> = { feild_id: feildIds, assigned_acres: assignedAcres, vehicles, equipment, calander_id: calanderId };
+const payload: Record<string, any> = {
+feild_id: feildIds,
+assigned_acres: assignedAcres,
+calander_id: calanderId,
+...(step1Mode === 'vehicle' && { vehicles }),
+...(step2Mode === 'equipment' && { equipment }),
+...(step1Mode === 'vendor' && selectedScopeVendorId && {
+vehicle_vendor: [{ vendor_id: selectedScopeVendorId, vendor_name: vendorVehicle.name.trim() }],
+}),
+...(step2Mode === 'vendor' && selectedScopeVendorIdEq && {
+equipment_vendor: [{ vendor_id: selectedScopeVendorIdEq, vendor_name: vendorEquipment.name.trim() }],
+}),
+};
 
 const totalAssignedAcres = assignedAcres.reduce((sum, x) => sum + (Number(x.assigned_acres) || 0), 0);
 
@@ -1218,18 +1303,15 @@ return await updateRes.json();
 
 if (updateCalls.length > 0) await Promise.allSettled(updateCalls);
 
-// Update vehicle calendars for the selected vehicles
+// Update vehicle calendars only when in vehicle mode
+if (step1Mode === 'vehicle' && vehicles.length > 0) {
 const vehiclesCount = Math.max(1, vehicles.length);
 const acresPerVehicle = vehiclesCount > 0 ? totalAssignedAcres / vehiclesCount : 0;
-
-// Collect all unique block_id, farm_id, activity combinations from selected tasks
 const taskDetails = selectedTasks.map(t => ({
 blockId: t.block_id,
 farmId: t.farm_id,
 activity: t.activity
 }));
-
-// Create calendar update calls for each vehicle and task detail combination
 const vehicleCalendarCalls = vehicles.flatMap((v) =>
 taskDetails.map((detail) =>
 updateVehicleCalendar(
@@ -1241,12 +1323,12 @@ detail.activity
 )
 )
 );
-
 if (vehicleCalendarCalls.length > 0) {
 const results = await Promise.allSettled(vehicleCalendarCalls);
 const failed = results.filter((r) => r.status === 'rejected');
 if (failed.length > 0) {
 toast.error(`Vehicle calendar update failed for ${failed.length} vehicle(s)`);
+}
 }
 }
 
@@ -1690,7 +1772,7 @@ Apply
 <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
 <div>
 <h3 className="text-lg font-semibold text-foreground">Assign Resources</h3>
-<p className="text-sm text-muted-foreground">Step {assignmentStep} of 2 • {assignmentStep === 1 ? 'Vehicle allocation' : 'Equipment selection'} • {new Date(selectedDate).toDateString()}</p>
+<p className="text-sm text-muted-foreground">Step {assignmentStep} of 2 • {assignmentStep === 1 ? (step1Mode === 'vehicle' ? 'Vehicle allocation' : 'Vendor — Vehicle') : (step2Mode === 'equipment' ? 'Equipment selection' : 'Vendor — Equipment')} • {new Date(selectedDate).toDateString()}</p>
 </div>
 <button onClick={closeAssignmentModal} className="p-1 hover:bg-muted rounded-md"><X className="w-5 h-5 text-muted-foreground" /></button>
 </div>
@@ -1699,9 +1781,25 @@ Apply
 {assignmentStep === 1 ? (
 <div>
 <div className="flex items-center justify-between mb-3">
-<h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Truck className="w-4 h-4" /> Select Vehicles</h4>
-{selectedVehicleIds.length > 0 && <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">{selectedVehicleIds.length} Selected</span>}
+<h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+<Truck className="w-4 h-4" />
+{step1Mode === 'vehicle' ? 'Select Vehicles' : 'Select Vendor — Vehicle'}
+</h4>
+<div className="flex items-center gap-3">
+{step1Mode === 'vehicle' && selectedVehicleIds.length > 0 && (
+<span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">{selectedVehicleIds.length} Selected</span>
+)}
+<div className="flex items-center rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold shadow-sm">
+<button type="button" onClick={() => setStep1Mode('vehicle')} className={cn("px-3 py-1.5 flex items-center gap-1.5 transition-colors", step1Mode === 'vehicle' ? "bg-green-700 text-white" : "bg-white text-gray-600 hover:bg-gray-50")}>
+<Truck className="w-3 h-3" /> Vehicle
+</button>
+<button type="button" onClick={() => setStep1Mode('vendor')} className={cn("px-3 py-1.5 flex items-center gap-1.5 border-l border-gray-200 transition-colors", step1Mode === 'vendor' ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50")}>
+<User className="w-3 h-3" /> Vendor
+</button>
 </div>
+</div>
+</div>
+{step1Mode === 'vehicle' ? (
 <div className="overflow-x-auto bg-white rounded-lg border border-border shadow-sm p-4">
 <div className="min-w-[600px]">
 <div className="grid grid-cols-[1.5fr_repeat(5,1fr)] gap-2 mb-4 text-xs font-semibold text-muted-foreground">
@@ -1713,14 +1811,94 @@ Apply
 </div>
 </div>
 </div>
+) : (
+<div className="space-y-2">
+{isLoadingScope ? (
+<div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground bg-white rounded-lg border border-indigo-100">
+<div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+Loading vendors for this land…
+</div>
+) : Object.keys(scopeVendors).length > 0 ? (
+<>
+<p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide flex items-center gap-1.5">
+<CheckCircle2 className="w-3.5 h-3.5" /> Select a vendor scoped for this land
+</p>
+{Object.entries(scopeVendors).map(([vendorId, scope]) => {
+const isSelected = selectedScopeVendorId === vendorId;
+return (
+<button
+key={vendorId}
+type="button"
+onClick={() => {
+setSelectedScopeVendorId(vendorId);
+setVendorVehicle({ name: scope.vendor_details.vendor_name, contact: scope.vendor_details.vendor_contact, notes: '' });
+}}
+className={cn(
+"w-full text-left rounded-lg border p-3 transition-all",
+isSelected ? "border-indigo-400 bg-indigo-50 ring-1 ring-indigo-300" : "border-gray-200 bg-white hover:border-indigo-200 hover:bg-indigo-50/40"
+)}
+>
+<div className="flex items-start justify-between gap-3">
+<div className="min-w-0">
+<div className="flex items-center gap-2">
+<span className="text-sm font-semibold text-slate-800">{scope.vendor_details.vendor_name}</span>
+{isSelected && <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded">Selected</span>}
+</div>
+<div className="mt-0.5 text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+<span className="font-mono text-slate-400">{vendorId}</span>
+{scope.vendor_details.vendor_contact && <span>· {scope.vendor_details.vendor_contact}</span>}
+</div>
+{scope.activities.length > 0 && (
+<div className="mt-1.5 flex flex-wrap gap-1">
+{scope.activities.map(a => (
+<span key={a} className="text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded font-medium">{a}</span>
+))}
+</div>
+)}
+</div>
+<div className="text-[10px] text-slate-400 text-right shrink-0">
+{scope.start_date && <div>{scope.start_date}</div>}
+{scope.end_date && <div>→ {scope.end_date}</div>}
+</div>
+</div>
+</button>
+);
+})}
+</>
+) : (
+<div className="flex flex-col items-center gap-2 py-8 text-center bg-white rounded-lg border border-dashed border-gray-200">
+<User className="w-6 h-6 text-gray-300" />
+<p className="text-sm text-slate-500 font-medium">No vendor scope found for this land</p>
+<p className="text-xs text-slate-400">Assign a vendor in Scope of Work before using this option.</p>
+</div>
+)}
+</div>
+)}
 </div>
 ) : (
 <div>
 <div className="flex items-center justify-between mb-3">
-<h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2"><Wrench className="w-4 h-4" /> Select Equipment</h4>
-{Object.values(equipmentCounts).reduce((a,b)=>a+b,0) > 0 && <span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200"><Hash className="w-3 h-3" />{Object.values(equipmentCounts).reduce((a,b)=>a+b,0)} Total</span>}
+<h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+<Wrench className="w-4 h-4" />
+{step2Mode === 'equipment' ? 'Select Equipment' : 'Select Vendor — Equipment'}
+</h4>
+<div className="flex items-center gap-3">
+{step2Mode === 'equipment' && Object.values(equipmentCounts).reduce((a,b)=>a+b,0) > 0 && (
+<span className="inline-flex items-center gap-1.5 bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-200"><Hash className="w-3 h-3" />{Object.values(equipmentCounts).reduce((a,b)=>a+b,0)} Total</span>
+)}
+<div className="flex items-center rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold shadow-sm">
+<button type="button" onClick={() => setStep2Mode('equipment')} className={cn("px-3 py-1.5 flex items-center gap-1.5 transition-colors", step2Mode === 'equipment' ? "bg-orange-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50")}>
+<Wrench className="w-3 h-3" /> Equipment
+</button>
+<button type="button" onClick={() => setStep2Mode('vendor')} className={cn("px-3 py-1.5 flex items-center gap-1.5 border-l border-gray-200 transition-colors", step2Mode === 'vendor' ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50")}>
+<User className="w-3 h-3" /> Vendor
+</button>
 </div>
-<div className="text-xs text-muted-foreground mb-3">Vehicles allocated: <span className="font-semibold text-foreground">{selectedVehicleIds.length}</span></div>
+</div>
+</div>
+{step2Mode === 'equipment' ? (
+<>
+<div className="text-xs text-muted-foreground mb-3">Vehicles allocated: <span className="font-semibold text-foreground">{step1Mode === 'vehicle' ? selectedVehicleIds.length : '—'}</span>{step1Mode === 'vendor' && vendorVehicle.name && <span className="ml-2 text-indigo-600 font-medium">Vendor: {vendorVehicle.name}</span>}</div>
 <div className="mb-4">
 <input
 type="text"
@@ -1735,6 +1913,70 @@ className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 te
 {isLoadingInventoryItems ? <div className="col-span-full p-4 text-sm text-muted-foreground">Loading inventory items…</div> : filteredInventoryItems.length === 0 ? <div className="col-span-full p-4 text-sm text-muted-foreground">No inventory items found.</div> : filteredInventoryItems.filter((it) => !!getInventoryItemId(it)).map((it) => { const id = getInventoryItemId(it); return <EquipmentQuantityRow key={id} item={it} count={equipmentCounts[id] || 0} />; })}
 </div>
 </div>
+</>
+) : (
+<div className="space-y-2">
+{isLoadingScope ? (
+<div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground bg-white rounded-lg border border-indigo-100">
+<div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+Loading vendors for this land…
+</div>
+) : Object.keys(scopeVendors).length > 0 ? (
+<>
+<p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide flex items-center gap-1.5">
+<CheckCircle2 className="w-3.5 h-3.5" /> Select a vendor scoped for this land
+</p>
+{Object.entries(scopeVendors).map(([vendorId, scope]) => {
+const isSelected = selectedScopeVendorIdEq === vendorId;
+return (
+<button
+key={vendorId}
+type="button"
+onClick={() => {
+setSelectedScopeVendorIdEq(vendorId);
+setVendorEquipment({ name: scope.vendor_details.vendor_name, contact: scope.vendor_details.vendor_contact, notes: '' });
+}}
+className={cn(
+"w-full text-left rounded-lg border p-3 transition-all",
+isSelected ? "border-indigo-400 bg-indigo-50 ring-1 ring-indigo-300" : "border-gray-200 bg-white hover:border-indigo-200 hover:bg-indigo-50/40"
+)}
+>
+<div className="flex items-start justify-between gap-3">
+<div className="min-w-0">
+<div className="flex items-center gap-2">
+<span className="text-sm font-semibold text-slate-800">{scope.vendor_details.vendor_name}</span>
+{isSelected && <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded">Selected</span>}
+</div>
+<div className="mt-0.5 text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+<span className="font-mono text-slate-400">{vendorId}</span>
+{scope.vendor_details.vendor_contact && <span>· {scope.vendor_details.vendor_contact}</span>}
+</div>
+{scope.activities.length > 0 && (
+<div className="mt-1.5 flex flex-wrap gap-1">
+{scope.activities.map(a => (
+<span key={a} className="text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded font-medium">{a}</span>
+))}
+</div>
+)}
+</div>
+<div className="text-[10px] text-slate-400 text-right shrink-0">
+{scope.start_date && <div>{scope.start_date}</div>}
+{scope.end_date && <div>→ {scope.end_date}</div>}
+</div>
+</div>
+</button>
+);
+})}
+</>
+) : (
+<div className="flex flex-col items-center gap-2 py-8 text-center bg-white rounded-lg border border-dashed border-gray-200">
+<User className="w-6 h-6 text-gray-300" />
+<p className="text-sm text-slate-500 font-medium">No vendor scope found for this land</p>
+<p className="text-xs text-slate-400">Assign a vendor in Scope of Work before using this option.</p>
+</div>
+)}
+</div>
+)}
 </div>
 )}
 </div>
@@ -1747,7 +1989,7 @@ className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 te
 <div className="flex gap-2">
 <button onClick={closeAssignmentModal} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Cancel</button>
 {assignmentStep === 2 && <button type="button" onClick={() => setAssignmentStep(1)} className="px-4 py-2 text-sm font-medium border rounded-md bg-white hover:bg-muted transition-colors">Back</button>}
-{assignmentStep === 1 ? <button type="button" onClick={() => setAssignmentStep(2)} disabled={selectedVehicleIds.length === 0} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors", selectedVehicleIds.length > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed")}>Next</button> : <button onClick={handleConfirmAssignment} disabled={isAssigningTask} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-primary text-primary-foreground hover:bg-primary/90">{isAssigningTask ? 'Assigning…' : 'Confirm Assignment'}</button>}
+{assignmentStep === 1 ? (() => { const canNext = step1Mode === 'vehicle' ? selectedVehicleIds.length > 0 : vendorVehicle.name.trim().length > 0; return <button type="button" onClick={() => setAssignmentStep(2)} disabled={!canNext} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors", canNext ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed")}>Next</button>; })() : <button onClick={handleConfirmAssignment} disabled={isAssigningTask} className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-primary text-primary-foreground hover:bg-primary/90">{isAssigningTask ? 'Assigning…' : 'Confirm Assignment'}</button>}
 </div>
 </div>
 </div>

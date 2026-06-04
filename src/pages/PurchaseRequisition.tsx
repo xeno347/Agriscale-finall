@@ -48,8 +48,30 @@ type PRLineItem = {
   netPrQtyOverride?: number;
 };
 
+type SprLineItem = {
+  id: string;
+  srNo: number;
+  serviceDescription: string;
+  uom: string;
+  quantity: number;
+  startDate: string;
+  duration: string;
+  completionDate: string;
+  validity: string;
+  servicesFrom: string;
+  scopeAttached: string;
+  boqAttached: string;
+  approxValue: number;
+  gstPercent: number;
+  gstAmount: number;
+  proposedVendors: string;
+  previousWO: string;
+  remarks: string;
+};
+
 type Indent = {
   id: string;
+  indentType?: 'PR' | 'SPR';
   project: string;
   prNo: string;
   date: string;
@@ -63,6 +85,11 @@ type Indent = {
   remarksNotes?: string;
   budgetHead?: string;
   items: PRLineItem[];
+  // SPR-specific
+  areaOfService?: string;
+  func?: string;
+  natureOfService?: string;
+  sprItems?: SprLineItem[];
   status: 'draft' | 'signed' | 'raised' | 'po';
   purchaseOrder?: {
     id: string;
@@ -182,13 +209,28 @@ const fetchIndentsForPr = async (): Promise<Indent[]> => {
     const forwardedByName = str(x?.forwarded_by?.name_id);
     const approvedByName = str(x?.approved_by?.name_id);
 
-    const items: PRLineItem[] = itemRows.map((r) => {
-      const srNo = num(r?.sr_no) ?? 0;
+    const isSpr = Boolean(indentData?.area_of_service || indentData?.name_of_service);
+
+    // PR items — empty for SPR (but SPR items are also mapped below for quotation workflows)
+    const items: PRLineItem[] = itemRows.map((r, idx) => {
+      const srNo = num(r?.sr_no) ?? idx + 1;
+      if (isSpr) {
+        // Map SPR fields to PRLineItem so quotation workflows still get line items
+        const qty = num(r?.quantity) ?? 0;
+        return {
+          id: `${prNo}-spr-${srNo}`,
+          srNo,
+          partName: str(r?.service_description) || 'Service',
+          uom: str(r?.uom) || '',
+          totalQtyRequired: qty,
+          lessQtyAvailableInStock: 0,
+          netPrQtyOverride: qty,
+        };
+      }
       const totalQtyRequired = num(r?.total_qty_required) ?? 0;
       const lessQtyAvailableInStock = num(r?.less_qty_available_in_stock);
       const netPrQtyOverride = num(r?.net_pr_qty);
       const ratePerItem = num(r?.rate_per_item);
-
       return {
         id: `${prNo}-${srNo || genId()}`,
         srNo: srNo || 0,
@@ -212,8 +254,31 @@ const fetchIndentsForPr = async (): Promise<Indent[]> => {
       };
     });
 
+    // Full SPR items for the SPR preview document
+    const sprItems: SprLineItem[] = isSpr ? itemRows.map((r, idx) => ({
+      id: `${prNo}-spr-${r?.sr_no ?? idx + 1}`,
+      srNo: r?.sr_no ?? idx + 1,
+      serviceDescription: str(r?.service_description) || '',
+      uom: str(r?.uom) || '',
+      quantity: num(r?.quantity) ?? 0,
+      startDate: str(r?.start_date_of_contract) || '',
+      duration: str(r?.duration_of_contract) || '',
+      completionDate: str(r?.completion_date_of_contract) || '',
+      validity: str(r?.validity_of_contract) || '',
+      servicesFrom: str(r?.services_required_from) || '',
+      scopeAttached: str(r?.detailed_scope_attached) || '',
+      boqAttached: str(r?.detailed_boq_attached) || '',
+      approxValue: num(r?.approx_value_of_services) ?? 0,
+      gstPercent: num(r?.gst_percentage) ?? 0,
+      gstAmount: num(r?.gst_amount) ?? 0,
+      proposedVendors: str(r?.proposed_vendors) || '',
+      previousWO: str(r?.previous_wo_details) || '',
+      remarks: str(r?.remarks) || '',
+    })) : [];
+
     return {
       id: prNo,
+      indentType: isSpr ? 'SPR' : 'PR',
       project: str(indentData?.project) || '—',
       prNo,
       date: dateOnly(x?.created_at),
@@ -227,6 +292,10 @@ const fetchIndentsForPr = async (): Promise<Indent[]> => {
       remarksNotes: maybeStr(x?.notes),
       budgetHead: '',
       items,
+      areaOfService: str(indentData?.area_of_service) || undefined,
+      func: str(indentData?.function) || undefined,
+      natureOfService: str(indentData?.name_of_service) || undefined,
+      sprItems: sprItems.length ? sprItems : undefined,
       status: 'draft',
     };
   });
@@ -235,6 +304,7 @@ const fetchIndentsForPr = async (): Promise<Indent[]> => {
 const sample: Indent[] = [
   {
     id: 'pr-1',
+    indentType: 'PR',
     project: 'Chhattisgarh 2250 Acres',
     prNo: 'SBR/PR/26/001',
     date: today(),
@@ -539,6 +609,258 @@ const PRPreview = ({
             <div className="p-2">
               <div className="font-semibold">Budget Head</div>
               <div className="text-gray-700 mt-1">{indent.budgetHead || '—'}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SprPreview = ({
+  indent,
+  attachments,
+  onAddQuote,
+  onRemoveQuote,
+  readOnly,
+  approved,
+}: {
+  indent: Omit<Indent, 'id' | 'status'>;
+  attachments?: SignatureDiary;
+  onAddQuote?: (lineItemId: string, quote: Quote) => void;
+  onRemoveQuote?: (lineItemId: string, quoteId: string) => void;
+  readOnly?: boolean;
+  approved?: boolean;
+}) => {
+  const sigFor = (name: string) => attachments?.[name] ?? null;
+  const rows = indent.sprItems ?? [];
+  const subtotal = rows.reduce((s, r) => s + r.approxValue, 0);
+  const gstTotal = rows.reduce((s, r) => s + r.gstAmount, 0);
+  const total = subtotal + gstTotal;
+
+  return (
+    <div className="min-w-[980px]">
+      <div className="border border-gray-300 bg-white relative">
+        {approved ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="border-4 border-green-700/30 text-green-700/30 rounded-lg px-10 py-4 font-extrabold text-5xl tracking-[0.25em]">
+              APPROVED
+            </div>
+          </div>
+        ) : null}
+
+        <div className="text-center font-semibold text-sm py-2 border-b border-gray-300">
+          SAI BIORESOURCES PRIVATE LIMITED
+        </div>
+
+        <div className="grid grid-cols-12 border-b border-gray-300 text-xs">
+          <div className="col-span-4 p-2 border-r border-gray-300">
+            <span className="font-semibold">Area of Service:</span> {indent.areaOfService || '—'}
+          </div>
+          <div className="col-span-4 p-2 border-r border-gray-300 text-center font-semibold">
+            SERVICE PURCHASE REQUISITION (SPR)
+          </div>
+          <div className="col-span-2 p-2 border-r border-gray-300">
+            <span className="font-semibold">SPR No.</span> {indent.prNo || '—'}
+          </div>
+          <div className="col-span-2 p-2">
+            <span className="font-semibold">Date:</span> {indent.date || '—'}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 border-b border-gray-300 text-xs">
+          <div className="p-2 border-r border-gray-300">
+            <span className="font-semibold">Function:</span> {indent.func || '—'}
+          </div>
+          <div className="p-2">
+            <span className="font-semibold">Nature of Service:</span> {indent.natureOfService || '—'}
+          </div>
+        </div>
+
+        <table className="w-full text-[10px] border-collapse">
+          <thead>
+            <tr className="bg-gray-50">
+              <th className="border border-gray-300 px-1 py-1 w-[28px]">Sr.</th>
+              <th className="border border-gray-300 px-1 py-1">Service Description</th>
+              <th className="border border-gray-300 px-1 py-1 w-[40px]">UOM</th>
+              <th className="border border-gray-300 px-1 py-1 w-[40px]">Qty</th>
+              <th className="border border-gray-300 px-1 py-1 w-[75px]">Start Date</th>
+              <th className="border border-gray-300 px-1 py-1 w-[70px]">Duration</th>
+              <th className="border border-gray-300 px-1 py-1 w-[75px]">Completion</th>
+              <th className="border border-gray-300 px-1 py-1 w-[75px]">Validity</th>
+              <th className="border border-gray-300 px-1 py-1 w-[55px]">OEM/Prop</th>
+              <th className="border border-gray-300 px-1 py-1 w-[45px]">Scope</th>
+              <th className="border border-gray-300 px-1 py-1 w-[45px]">BOQ</th>
+              <th className="border border-gray-300 px-1 py-1 w-[85px]">Approx Value (₹)</th>
+              <th className="border border-gray-300 px-1 py-1 w-[45px]">GST %</th>
+              <th className="border border-gray-300 px-1 py-1 w-[85px]">GST Amt (₹)</th>
+              <th className="border border-gray-300 px-1 py-1">Proposed Vendors</th>
+              <th className="border border-gray-300 px-1 py-1 w-[70px]">Prev WO</th>
+              <th className="border border-gray-300 px-1 py-1 w-[70px]">Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.srNo}</td>
+                <td className="border border-gray-300 px-1 py-1">{row.serviceDescription}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.uom}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.quantity}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.startDate}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.duration}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.completionDate}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.validity}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.servicesFrom}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.scopeAttached}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.boqAttached}</td>
+                <td className="border border-gray-300 px-1 py-1 text-right">{formatInr(row.approxValue)}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.gstPercent}%</td>
+                <td className="border border-gray-300 px-1 py-1 text-right">{formatInr(row.gstAmount)}</td>
+                <td className="border border-gray-300 px-1 py-1">{row.proposedVendors}</td>
+                <td className="border border-gray-300 px-1 py-1">{row.previousWO}</td>
+                <td className="border border-gray-300 px-1 py-1">{row.remarks}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={17} className="border border-gray-300 px-1 py-2 text-center text-gray-400">No service items</td>
+              </tr>
+            )}
+            <tr>
+              <td colSpan={11} className="border border-gray-300 px-1 py-1 text-right font-semibold">Sub-Total</td>
+              <td colSpan={6} className="border border-gray-300 px-1 py-1 text-right font-semibold">{formatInr(subtotal)}</td>
+            </tr>
+            <tr>
+              <td colSpan={11} className="border border-gray-300 px-1 py-1 text-right font-semibold">GST</td>
+              <td colSpan={6} className="border border-gray-300 px-1 py-1 text-right font-semibold">{formatInr(gstTotal)}</td>
+            </tr>
+            <tr>
+              <td colSpan={11} className="border border-gray-300 px-1 py-1 text-right font-semibold">TOTAL</td>
+              <td colSpan={6} className="border border-gray-300 px-1 py-1 text-right font-semibold">{formatInr(total)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Quotations — reuses the same items mapped for quotation workflows */}
+        <div className="border-t border-gray-300">
+          <div className="px-2 py-1 text-xs font-semibold bg-gray-50 border-b border-gray-300">Quotations</div>
+          <div className="p-2 space-y-3">
+            {indent.items.map((it) => (
+              <div key={it.id} className="border border-gray-200 rounded">
+                <div className="flex items-center justify-between px-2 py-1 bg-white">
+                  <div className="text-xs font-semibold text-gray-800">
+                    Service {it.srNo}: <span className="font-normal">{it.partName}</span>
+                  </div>
+                  {onAddQuote && !readOnly ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs gap-1"
+                      onClick={() => {
+                        const vendorName = window.prompt('Vendor Name');
+                        if (!vendorName?.trim()) return;
+                        const rateStr = window.prompt('Quoted Rate');
+                        const quotedRate = Number(rateStr);
+                        if (!Number.isFinite(quotedRate) || quotedRate <= 0) return;
+                        onAddQuote(it.id, { id: genId(), vendorName: vendorName.trim(), quotedRate });
+                      }}
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" /> Add Quote
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="px-2 pb-2">
+                  {(it.quotes?.length || 0) === 0 ? (
+                    <div className="text-[11px] text-gray-400 py-2">No quotes added.</div>
+                  ) : (
+                    <table className="w-full text-[11px] border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50">
+                          <th className="border border-gray-200 px-2 py-1 text-left">Vendor</th>
+                          <th className="border border-gray-200 px-2 py-1 text-right w-[120px]">Quoted Rate</th>
+                          <th className="border border-gray-200 px-2 py-1 text-left">Notes</th>
+                          <th className="border border-gray-200 px-2 py-1 w-[40px]"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {it.quotes?.map((q) => (
+                          <tr key={q.id}>
+                            <td className="border border-gray-200 px-2 py-1">{q.vendorName}</td>
+                            <td className="border border-gray-200 px-2 py-1 text-right">{formatInr(q.quotedRate)}</td>
+                            <td className="border border-gray-200 px-2 py-1">{q.notes || '—'}</td>
+                            <td className="border border-gray-200 px-2 py-1">
+                              {onRemoveQuote && !readOnly ? (
+                                <button type="button" className="text-gray-400 hover:text-red-600" onClick={() => onRemoveQuote(it.id, q.id)}>
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-12 text-xs border-t border-gray-300">
+          <div className="col-span-8 border-r border-gray-300">
+            <div className="grid grid-cols-4 border-b border-gray-300">
+              <div className="p-2 font-semibold">SAI BIORESOURCES PRIVATE LIMITED</div>
+              <div className="p-2 font-semibold text-center">Name/ID</div>
+              <div className="p-2 font-semibold text-center">Signature</div>
+              <div className="p-2 font-semibold text-center">Date</div>
+            </div>
+            <div className="grid grid-cols-4 border-b border-gray-300">
+              <div className="p-2 font-semibold">Indented By</div>
+              <div className="p-2 text-center">{indent.indentedBy || '—'}</div>
+              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {sigFor(indent.indentedBy)?.signature ? (
+                    <img src={sigFor(indent.indentedBy)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : indent.indentedSignature ? (
+                    <span className="text-[10px] text-gray-700 text-center leading-tight">{indent.indentedSignature}</span>
+                  ) : <span className="text-gray-400">—</span>}
+                </div>
+              </div>
+              <div className="p-2 text-center">{indent.date || '—'}</div>
+            </div>
+            <div className="grid grid-cols-4 border-b border-gray-300">
+              <div className="p-2 font-semibold">Forwarded By</div>
+              <div className="p-2 text-center">{indent.forwardedBy || '—'}</div>
+              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {sigFor(indent.forwardedBy)?.signature ? (
+                    <img src={sigFor(indent.forwardedBy)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : indent.forwardedSignature ? (
+                    <span className="text-[10px] text-gray-700 text-center leading-tight">{indent.forwardedSignature}</span>
+                  ) : <span className="text-gray-400">—</span>}
+                </div>
+              </div>
+              <div className="p-2 text-center">{indent.date || '—'}</div>
+            </div>
+            <div className="grid grid-cols-4">
+              <div className="p-2 font-semibold">Director's Approval</div>
+              <div className="p-2 text-center">{indent.directorsApproval || '—'}</div>
+              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {sigFor(indent.directorsApproval)?.signature ? (
+                    <img src={sigFor(indent.directorsApproval)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : indent.directorSignature ? (
+                    <span className="text-[10px] text-gray-700 text-center leading-tight">{indent.directorSignature}</span>
+                  ) : <span className="text-gray-400">—</span>}
+                </div>
+              </div>
+              <div className="p-2 text-center">{indent.date || '—'}</div>
+            </div>
+          </div>
+          <div className="col-span-4">
+            <div className="border-b border-gray-300 p-2">
+              <div className="font-semibold">Remarks / Notes</div>
+              <div className="text-gray-700 mt-1 whitespace-pre-wrap">{indent.remarksNotes || '—'}</div>
             </div>
           </div>
         </div>
@@ -1174,7 +1496,8 @@ const PurchaseRequisition = () => {
       };
       writeComparatives(all);
     }
-    navigate(`/purchase-requisition/${encodeURIComponent(indent.id)}/quotation`);
+    const typeSegment = indent.indentType === 'SPR' ? 'SPR' : 'PR';
+    navigate(`/purchase-requisition/${typeSegment}/${encodeURIComponent(indent.id)}/quotation`);
   };
 
   const indentsAfterSearch = useMemo(() => {
@@ -1579,33 +1902,44 @@ const PurchaseRequisition = () => {
       <Dialog open={Boolean(previewIndent)} onOpenChange={(v) => { if (!v) setPreviewIndent(null); }}>
         <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>PR Preview</DialogTitle>
+            <DialogTitle>{previewIndent?.indentType === 'SPR' ? 'SPR Preview' : 'PR Preview'}</DialogTitle>
           </DialogHeader>
           <div className="flex-1 overflow-auto pr-1">
             {previewIndent ? (
               <div className="space-y-4">
-                <PRPreview
-                  indent={{
-                    project: previewIndent.project,
-                    prNo: previewIndent.prNo,
-                    date: previewIndent.date,
-                    department: previewIndent.department,
-                    indentedBy: previewIndent.indentedBy,
-                    forwardedBy: previewIndent.forwardedBy,
-                    directorsApproval: previewIndent.directorsApproval,
-                    indentedSignature: previewIndent.indentedSignature,
-                    forwardedSignature: previewIndent.forwardedSignature,
-                    directorSignature: previewIndent.directorSignature,
-                    remarksNotes: previewIndent.remarksNotes || '',
-                    budgetHead: previewIndent.budgetHead || '',
-                    items: previewIndent.items,
-                  }}
-                  attachments={diary}
-                  onAddQuote={(lineItemId, quote) => addQuote(previewIndent.id, lineItemId, quote)}
-                  onRemoveQuote={(lineItemId, quoteId) => removeQuote(previewIndent.id, lineItemId, quoteId)}
-                  readOnly={isForwarded(str(previewIndent.prNo || previewIndent.id))}
-                  approved={signaturesPresent(previewIndent).director}
-                />
+                {previewIndent.indentType === 'SPR' ? (
+                  <SprPreview
+                    indent={previewIndent}
+                    attachments={diary}
+                    onAddQuote={(lineItemId, quote) => addQuote(previewIndent.id, lineItemId, quote)}
+                    onRemoveQuote={(lineItemId, quoteId) => removeQuote(previewIndent.id, lineItemId, quoteId)}
+                    readOnly={isForwarded(str(previewIndent.prNo || previewIndent.id))}
+                    approved={signaturesPresent(previewIndent).director}
+                  />
+                ) : (
+                  <PRPreview
+                    indent={{
+                      project: previewIndent.project,
+                      prNo: previewIndent.prNo,
+                      date: previewIndent.date,
+                      department: previewIndent.department,
+                      indentedBy: previewIndent.indentedBy,
+                      forwardedBy: previewIndent.forwardedBy,
+                      directorsApproval: previewIndent.directorsApproval,
+                      indentedSignature: previewIndent.indentedSignature,
+                      forwardedSignature: previewIndent.forwardedSignature,
+                      directorSignature: previewIndent.directorSignature,
+                      remarksNotes: previewIndent.remarksNotes || '',
+                      budgetHead: previewIndent.budgetHead || '',
+                      items: previewIndent.items,
+                    }}
+                    attachments={diary}
+                    onAddQuote={(lineItemId, quote) => addQuote(previewIndent.id, lineItemId, quote)}
+                    onRemoveQuote={(lineItemId, quoteId) => removeQuote(previewIndent.id, lineItemId, quoteId)}
+                    readOnly={isForwarded(str(previewIndent.prNo || previewIndent.id))}
+                    approved={signaturesPresent(previewIndent).director}
+                  />
+                )}
 
                 {previewComparative ? (
                   <ComparativeStatementPreview

@@ -99,8 +99,30 @@ type PRLineItem = {
   repairingPossibility: 'Yes' | 'No' | 'NA';
 };
 
+type SprLineItem = {
+  id: string;
+  srNo: number;
+  serviceDescription: string;
+  uom: string;
+  quantity: number;
+  startDate: string;
+  duration: string;
+  completionDate: string;
+  validity: string;
+  servicesFrom: string;
+  scopeAttached: string;
+  boqAttached: string;
+  approxValue: number;
+  gstPercent: number;
+  gstAmount: number;
+  proposedVendors: string;
+  previousWO: string;
+  remarks: string;
+};
+
 type Indent = {
   id: string;
+  indentType: 'PR' | 'SPR';
   project: string;
   prNo: string;
   date: string;
@@ -117,6 +139,11 @@ type Indent = {
   remarksNotes: string;
   budgetHead: string;
   items: PRLineItem[];
+  // SPR-specific
+  areaOfService?: string;
+  func?: string;
+  natureOfService?: string;
+  sprItems?: SprLineItem[];
   status: 'pending' | 'forwarded';
 };
 
@@ -296,42 +323,234 @@ const FinalizedVendorQuotationCompact = ({
 };
 
 const initialIndents: Indent[] = [
-  {
-    id: 'aoi-1',
-    project: 'Chhattisgarh 2250 Acres',
-    prNo: 'SBR/NF/25-26/03',
-    date: '2026-02-09',
-    department: 'Cultivation',
-    indentedBy: 'SUKHDEEP SINGH',
-    forwardedBy: 'RAJINDER SINGH PADDA',
-    directorsApproval: 'RAJENDRA SHRINGARPUTALE',
-    remarksNotes: '',
-    budgetHead: 'Machinery - Cultivation',
-    status: 'pending',
-    items: [
-      {
-        id: 'aoi-li-1',
-        srNo: 1,
-        itemCode: '',
-        partName: 'Chisel Plough',
-        specification: '5 - Tynes/W - 4 ft',
-        uom: 'No',
-        totalQtyRequired: 4,
-        lessQtyAvailableInStock: 0,
-        procurementLeadTimeWeeks: 2,
-        materialRequiredByDate: '2026-02-09',
-        indigenousOrImported: 'Indigenous',
-        ratePerItem: 45000,
-        preferredVendorName: 'Vishwakarma',
-        validityOfWarrantyAndGuarantee: 'NA',
-        fullLifeHr: 'NA',
-        actualLifeHr: 'NA',
-        reasonForReplacement: 'Project Item',
-        repairingPossibility: 'NA',
-      },
-    ],
-  },
+    {
+      id: 'aoi-1',
+      project: 'Chhattisgarh 2250 Acres',
+      prNo: 'SBR/NF/25-26/03',
+      date: '2026-02-09',
+      department: 'Cultivation',
+      indentedBy: 'SUKHDEEP SINGH',
+      forwardedBy: 'RAJINDER SINGH PADDA',
+      directorsApproval: 'RAJENDRA SHRINGARPUTALE',
+      remarksNotes: '',
+      budgetHead: 'Machinery - Cultivation',
+      status: 'pending',
+      items: [
+        {
+          id: 'aoi-li-1',
+          srNo: 1,
+          itemCode: '',
+          partName: 'Chisel Plough',
+          specification: '5 - Tynes/W - 4 ft',
+          uom: 'No',
+          totalQtyRequired: 4,
+          lessQtyAvailableInStock: 0,
+          procurementLeadTimeWeeks: 2,
+          materialRequiredByDate: '2026-02-09',
+          indigenousOrImported: 'Indigenous',
+          ratePerItem: 45000,
+          preferredVendorName: 'Vishwakarma',
+          validityOfWarrantyAndGuarantee: 'NA',
+          fullLifeHr: 'NA',
+          actualLifeHr: 'NA',
+          reasonForReplacement: 'Project Item',
+          repairingPossibility: 'NA',
+        },
+      ],
+    },
 ];
+
+const SprPreview = ({
+  indent,
+  attachments,
+  showDirectorSignature,
+}: {
+  indent: Omit<Indent, 'id' | 'status'>;
+  attachments?: SignatureDiary;
+  showDirectorSignature?: boolean;
+}) => {
+  const sigFor = (name: string) => attachments?.[name] ?? null;
+  const rows = indent.sprItems ?? [];
+  const subtotal = rows.reduce((s, r) => s + r.approxValue, 0);
+  const gstTotal = rows.reduce((s, r) => s + r.gstAmount, 0);
+  const total = subtotal + gstTotal;
+
+  return (
+    <div className="min-w-[980px]">
+      <div className="border border-gray-300 bg-white">
+        <div className="text-center font-semibold text-sm py-2 border-b border-gray-300">
+          SAI BIORESOURCES PRIVATE LIMITED
+        </div>
+
+        <div className="grid grid-cols-12 border-b border-gray-300 text-xs">
+          <div className="col-span-4 p-2 border-r border-gray-300">
+            <span className="font-semibold">Area of Service:</span> {indent.areaOfService || '—'}
+          </div>
+          <div className="col-span-4 p-2 border-r border-gray-300 text-center font-semibold">
+            SERVICE PURCHASE REQUISITION (SPR)
+          </div>
+          <div className="col-span-2 p-2 border-r border-gray-300">
+            <span className="font-semibold">SPR No.</span> {indent.prNo || '—'}
+          </div>
+          <div className="col-span-2 p-2">
+            <span className="font-semibold">Date:</span> {indent.date || '—'}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 border-b border-gray-300 text-xs">
+          <div className="p-2 border-r border-gray-300">
+            <span className="font-semibold">Function:</span> {indent.func || '—'}
+          </div>
+          <div className="p-2">
+            <span className="font-semibold">Nature of Service:</span> {indent.natureOfService || '—'}
+          </div>
+        </div>
+
+        <table className="w-full text-[10px] border-collapse">
+          <thead>
+            <tr className="bg-gray-50">
+              <th className="border border-gray-300 px-1 py-1 w-[28px]">Sr.</th>
+              <th className="border border-gray-300 px-1 py-1">Service Description</th>
+              <th className="border border-gray-300 px-1 py-1 w-[40px]">UOM</th>
+              <th className="border border-gray-300 px-1 py-1 w-[40px]">Qty</th>
+              <th className="border border-gray-300 px-1 py-1 w-[75px]">Start Date</th>
+              <th className="border border-gray-300 px-1 py-1 w-[70px]">Duration</th>
+              <th className="border border-gray-300 px-1 py-1 w-[75px]">Completion Date</th>
+              <th className="border border-gray-300 px-1 py-1 w-[75px]">Validity</th>
+              <th className="border border-gray-300 px-1 py-1 w-[55px]">OEM / Prop</th>
+              <th className="border border-gray-300 px-1 py-1 w-[45px]">Scope</th>
+              <th className="border border-gray-300 px-1 py-1 w-[45px]">BOQ</th>
+              <th className="border border-gray-300 px-1 py-1 w-[85px]">Approx Value (₹)</th>
+              <th className="border border-gray-300 px-1 py-1 w-[45px]">GST %</th>
+              <th className="border border-gray-300 px-1 py-1 w-[85px]">GST Amt (₹)</th>
+              <th className="border border-gray-300 px-1 py-1">Proposed Vendors</th>
+              <th className="border border-gray-300 px-1 py-1 w-[70px]">Prev WO</th>
+              <th className="border border-gray-300 px-1 py-1 w-[70px]">Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.srNo}</td>
+                <td className="border border-gray-300 px-1 py-1">{row.serviceDescription}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.uom}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.quantity}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.startDate}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.duration}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.completionDate}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.validity}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.servicesFrom}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.scopeAttached}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.boqAttached}</td>
+                <td className="border border-gray-300 px-1 py-1 text-right">{formatInr(row.approxValue)}</td>
+                <td className="border border-gray-300 px-1 py-1 text-center">{row.gstPercent}%</td>
+                <td className="border border-gray-300 px-1 py-1 text-right">{formatInr(row.gstAmount)}</td>
+                <td className="border border-gray-300 px-1 py-1">{row.proposedVendors}</td>
+                <td className="border border-gray-300 px-1 py-1">{row.previousWO}</td>
+                <td className="border border-gray-300 px-1 py-1">{row.remarks}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={17} className="border border-gray-300 px-1 py-2 text-center text-gray-400">No service items</td>
+              </tr>
+            )}
+            <tr>
+              <td colSpan={11} className="border border-gray-300 px-1 py-1 text-right font-semibold">Sub-Total</td>
+              <td colSpan={6} className="border border-gray-300 px-1 py-1 text-right font-semibold">{formatInr(subtotal)}</td>
+            </tr>
+            <tr>
+              <td colSpan={11} className="border border-gray-300 px-1 py-1 text-right font-semibold">GST</td>
+              <td colSpan={6} className="border border-gray-300 px-1 py-1 text-right font-semibold">{formatInr(gstTotal)}</td>
+            </tr>
+            <tr>
+              <td colSpan={11} className="border border-gray-300 px-1 py-1 text-right font-semibold">TOTAL</td>
+              <td colSpan={6} className="border border-gray-300 px-1 py-1 text-right font-semibold">{formatInr(total)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div className="grid grid-cols-12 text-xs border-t border-gray-300">
+          <div className="col-span-8 border-r border-gray-300">
+            <div className="grid grid-cols-4 border-b border-gray-300">
+              <div className="p-2 font-semibold">SAI BIORESOURCES PRIVATE LIMITED</div>
+              <div className="p-2 font-semibold text-center">Name/ID</div>
+              <div className="p-2 font-semibold text-center">Signature</div>
+              <div className="p-2 font-semibold text-center">Date</div>
+            </div>
+
+            <div className="grid grid-cols-4 border-b border-gray-300">
+              <div className="p-2 font-semibold">Indented By</div>
+              <div className="p-2 text-center">{indent.indentedBy || '—'}</div>
+              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {sigFor(indent.indentedBy)?.signature ? (
+                    <img src={sigFor(indent.indentedBy)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : indent.indentedBySignature ? (
+                    <div className="text-[11px] text-gray-700 text-center">{indent.indentedBySignature}</div>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </div>
+                {sigFor(indent.indentedBy)?.stamp ? (
+                  <img src={sigFor(indent.indentedBy)!.stamp} alt="Stamp" className="h-8 object-contain" />
+                ) : null}
+              </div>
+              <div className="p-2 text-center">{indent.indentedByTimestamp || indent.date || '—'}</div>
+            </div>
+
+            <div className="grid grid-cols-4 border-b border-gray-300">
+              <div className="p-2 font-semibold">Forwarded By</div>
+              <div className="p-2 text-center">{indent.forwardedBy || '—'}</div>
+              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {sigFor(indent.forwardedBy)?.signature ? (
+                    <img src={sigFor(indent.forwardedBy)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : indent.forwardedBySignature ? (
+                    <div className="text-[11px] text-gray-700 text-center">{indent.forwardedBySignature}</div>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </div>
+                {sigFor(indent.forwardedBy)?.stamp ? (
+                  <img src={sigFor(indent.forwardedBy)!.stamp} alt="Stamp" className="h-8 object-contain" />
+                ) : null}
+              </div>
+              <div className="p-2 text-center">{indent.forwardedByTimestamp || indent.date || '—'}</div>
+            </div>
+
+            <div className="grid grid-cols-4">
+              <div className="p-2 font-semibold">Director's Approval</div>
+              <div className="p-2 text-center">{indent.directorsApproval || '—'}</div>
+              <div className="p-2 flex flex-col items-center justify-center gap-0.5">
+                <div className="w-full h-10 border border-gray-200 rounded bg-white flex items-center justify-center px-1">
+                  {showDirectorSignature && sigFor(indent.directorsApproval)?.signature ? (
+                    <img src={sigFor(indent.directorsApproval)!.signature} alt="Signature" className="h-8 object-contain" />
+                  ) : indent.directorsApprovalSignature ? (
+                    <div className="text-[11px] text-gray-700 text-center">{indent.directorsApprovalSignature}</div>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </div>
+                {showDirectorSignature && sigFor(indent.directorsApproval)?.stamp ? (
+                  <img src={sigFor(indent.directorsApproval)!.stamp} alt="Stamp" className="h-8 object-contain" />
+                ) : null}
+              </div>
+              <div className="p-2 text-center">{indent.directorsApprovalTimestamp || indent.date || '—'}</div>
+            </div>
+          </div>
+
+          <div className="col-span-4">
+            <div className="grid grid-cols-1 border-b border-gray-300">
+              <div className="p-2 font-semibold">Remarks / Notes</div>
+              <div className="p-2 min-h-[56px] text-gray-700">{indent.remarksNotes || ''}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const AdminOpsIndent = () => {
   const [indents, setIndents] = useState<Indent[]>(initialIndents);
@@ -501,7 +720,9 @@ const AdminOpsIndent = () => {
 
         const arr = json.finance_ops_indents ?? json.admin_ops_indents ?? json.finance_admin_ops_indents ?? [];
         const list: Indent[] = (arr || []).map((r: any, idx: number) => {
-          const items: PRLineItem[] = (r.indent_data?.item_row || []).map((it: any, i: number) => ({
+          const isSpr = Boolean(r.indent_data?.area_of_service || r.indent_data?.name_of_service);
+
+          const items: PRLineItem[] = isSpr ? [] : (r.indent_data?.item_row || []).map((it: any, i: number) => ({
             id: `${r.pr_number ?? 'api'}-li-${i}`,
             srNo: it.sr_no ?? i + 1,
             itemCode: it.item_code ?? '',
@@ -522,6 +743,27 @@ const AdminOpsIndent = () => {
             repairingPossibility: it.repairing_possibility ?? 'NA',
           }));
 
+          const sprItems: SprLineItem[] = isSpr ? (r.indent_data?.item_row || []).map((it: any, i: number) => ({
+            id: `${r.pr_number ?? 'api'}-spr-${i}`,
+            srNo: it.sr_no ?? i + 1,
+            serviceDescription: it.service_description ?? '',
+            uom: it.uom ?? '',
+            quantity: it.quantity ?? 0,
+            startDate: it.start_date_of_contract ?? '',
+            duration: it.duration_of_contract ?? '',
+            completionDate: it.completion_date_of_contract ?? '',
+            validity: it.validity_of_contract ?? '',
+            servicesFrom: it.services_required_from ?? '',
+            scopeAttached: it.detailed_scope_attached ?? '',
+            boqAttached: it.detailed_boq_attached ?? '',
+            approxValue: it.approx_value_of_services ?? 0,
+            gstPercent: it.gst_percentage ?? 0,
+            gstAmount: it.gst_amount ?? 0,
+            proposedVendors: it.proposed_vendors ?? '',
+            previousWO: it.previous_wo_details ?? '',
+            remarks: it.remarks ?? '',
+          })) : [];
+
           const indentedByName = r.indented_by?.name_id ?? '';
           const signatureText = r.indented_by?.signature ?? '';
           const timestamp = r.indented_by?.timestamp ?? r.created_at ?? '';
@@ -534,6 +776,7 @@ const AdminOpsIndent = () => {
 
           return {
             id: r.pr_number ?? `api-${idx}`,
+            indentType: isSpr ? 'SPR' : 'PR',
             project: r.indent_data?.project ?? '',
             prNo: r.pr_number ?? '',
             date: timestamp ? new Date(timestamp).toISOString().slice(0, 10) : (r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : ''),
@@ -550,6 +793,10 @@ const AdminOpsIndent = () => {
             remarksNotes: r.notes ?? '',
             budgetHead: '',
             items,
+            areaOfService: r.indent_data?.area_of_service ?? '',
+            func: r.indent_data?.function ?? '',
+            natureOfService: r.indent_data?.name_of_service ?? '',
+            sprItems,
             // Consider indent 'pending' when director's approval signature is missing
             status: approvedBySignature ? 'forwarded' : 'pending',
           } as Indent;
@@ -1163,9 +1410,15 @@ const AdminOpsIndent = () => {
       <Dialog open={Boolean(previewIndent)} onOpenChange={(v) => { if (!v) setPreviewIndent(null); }}>
         <DialogContent className="max-w-[1200px] w-[1200px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>PR Preview</DialogTitle>
+            <DialogTitle>{previewIndent?.indentType === 'SPR' ? 'SPR Preview' : 'PR Preview'}</DialogTitle>
           </DialogHeader>
-          {previewIndent && (
+          {previewIndent && previewIndent.indentType === 'SPR' ? (
+            <SprPreview
+              indent={previewIndent}
+              attachments={attachments}
+              showDirectorSignature={Boolean(directorsAttachedMap[previewIndent.id])}
+            />
+          ) : previewIndent && (
             <PRPreview
               indent={{
                 project: previewIndent.project,

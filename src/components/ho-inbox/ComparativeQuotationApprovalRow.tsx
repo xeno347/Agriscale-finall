@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, ChevronDown, ClipboardList, FileText, Lock, SendHorizonal, ShoppingCart, Unlock, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, Lock, Pencil, SendHorizonal, ShoppingCart, Unlock, Upload, Wrench, X } from 'lucide-react';
 import { toast } from 'sonner';
+
+import { cn } from '@/lib/utils';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -147,53 +149,55 @@ const normalizeRepairing = (v: unknown): 'Yes' | 'No' | 'NA' => {
   return 'NA';
 };
 
-function StepPill({
-  label,
-  done,
-  sub,
-}: {
-  label: string;
-  done: boolean;
-  sub?: string;
-}) {
+type StepState = 'done' | 'active' | 'pending';
+
+function StepPill({ label, state, sub }: { label: string; state: StepState; sub?: string }) {
   return (
     <div className="flex flex-col items-center gap-0.5 min-w-0">
-      <div
-        className={
-          'flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-[11px] font-semibold border ' +
-          (done
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-            : 'bg-slate-50 border-slate-200 text-slate-500')
-        }
-      >
-        {done ? <Check className="h-3 w-3 shrink-0" /> : null}
+      <div className={cn(
+        'flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-[11px] font-semibold border transition-all',
+        state === 'done'    && 'bg-emerald-50 border-emerald-200 text-emerald-700',
+        state === 'active'  && 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm ring-2 ring-blue-100',
+        state === 'pending' && 'bg-slate-50 border-slate-200 text-slate-400',
+      )}>
+        {state === 'done' && <Check className="h-3 w-3 shrink-0" />}
+        {state === 'active' && (
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+          </span>
+        )}
+        {state === 'pending' && <span className="h-2 w-2 shrink-0 rounded-full bg-slate-300" />}
         {label}
       </div>
-      {sub ? (
-        <span className="text-[10px] text-slate-400 tabular-nums">{sub}</span>
-      ) : null}
+      {sub && <span className="text-[10px] text-slate-400 tabular-nums">{sub}</span>}
     </div>
   );
 }
 
-function InlineTracker({
-  steps,
-}: {
-  steps: Array<{ label: string; done: boolean; sub?: string }>;
-}) {
+function StepConnector({ prevDone }: { prevDone: boolean }) {
   return (
-    <div className="flex items-center gap-1">
-      {steps.map((s, idx) => (
-        <div key={s.label} className="flex items-center gap-1">
-          <StepPill label={s.label} done={s.done} sub={s.sub} />
-          {idx < steps.length - 1 ? (
-            <div className={
-              'h-px w-5 shrink-0 ' +
-              (s.done ? 'bg-emerald-300' : 'bg-slate-200')
-            } />
-          ) : null}
-        </div>
-      ))}
+    <div className="flex items-center shrink-0 gap-0.5 mx-0.5">
+      <div className={cn('h-px w-4', prevDone ? 'bg-emerald-300' : 'bg-slate-200')} />
+      <ChevronRight className={cn('h-3 w-3', prevDone ? 'text-emerald-400' : 'text-slate-300')} />
+      <div className={cn('h-px w-4', prevDone ? 'bg-emerald-300' : 'bg-slate-200')} />
+    </div>
+  );
+}
+
+function InlineTracker({ steps }: { steps: Array<{ label: string; done: boolean; sub?: string }> }) {
+  const activeIdx = steps.findIndex((s) => !s.done);
+  return (
+    <div className="flex items-center">
+      {steps.map((s, idx) => {
+        const state: StepState = s.done ? 'done' : idx === activeIdx ? 'active' : 'pending';
+        return (
+          <div key={s.label} className="flex items-center">
+            <StepPill label={s.label} state={state} sub={s.sub} />
+            {idx < steps.length - 1 && <StepConnector prevDone={s.done} />}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -205,6 +209,94 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
   const [poForwardDialogOpen, setPoForwardDialogOpen] = useState(false);
   const [poForwarding, setPoForwarding] = useState(false);
   const didCheckPoRef = useRef<string>('');
+
+  const [uploadPoDialogOpen, setUploadPoDialogOpen] = useState(false);
+  const [uploadPoFile, setUploadPoFile] = useState<File | null>(null);
+  const [uploadPoPreviewUrl, setUploadPoPreviewUrl] = useState<string | null>(null);
+  const [uploadPoNumber, setUploadPoNumber] = useState('');
+  const dialogFileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingPo, setUploadingPo] = useState(false);
+
+  const closeUploadPoDialog = () => {
+    setUploadPoDialogOpen(false);
+    setUploadPoFile(null);
+    if (uploadPoPreviewUrl) URL.revokeObjectURL(uploadPoPreviewUrl);
+    setUploadPoPreviewUrl(null);
+    setUploadPoNumber('');
+  };
+
+  const handleDialogFilePick = (file: File) => {
+    if (uploadPoPreviewUrl) URL.revokeObjectURL(uploadPoPreviewUrl);
+    setUploadPoFile(file);
+    setUploadPoPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const handleUploadPoSubmit = async () => {
+    if (!uploadPoFile) return toast.error('Please select a document');
+    if (!uploadPoNumber.trim()) return toast.error('Please enter a PO / WO number');
+    const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
+    if (!baseUrl) return toast.error('Missing API base URL');
+    setUploadingPo(true);
+    try {
+      // ── Step 1: upload the file ──────────────────────────────
+      const formData = new FormData();
+      formData.append('document', uploadPoFile, uploadPoFile.name);
+      const uploadRes = await fetch(`${baseUrl}/purchase_flow/upload_PO_document`, {
+        method: 'POST',
+        body: formData,
+      });
+      const uploadData: any = await uploadRes.json().catch(() => null);
+      if (!uploadRes.ok || !uploadData?.success) throw new Error(uploadData?.message || 'File upload failed');
+      const docUrl: string = String(uploadData.file_url ?? '');
+      if (!docUrl) throw new Error('No file URL returned from upload');
+
+      // ── Step 2: save the purchase / work order ───────────────
+      const orderType = item.indent_type === 'SPR' ? 'SPR' : 'PR';
+      const saveRes = await fetch(`${baseUrl}/purchase_flow/save_purchase_order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comparison_id: safeTrim(item.comparisonId),
+          pr_number: safeTrim(item.indentId),
+          order_number: uploadPoNumber.trim(),
+          doc_url: docUrl,
+          order_type: orderType,
+        }),
+      });
+      const saveData: any = await saveRes.json().catch(() => null);
+      if (!saveRes.ok || !saveData?.success) throw new Error(saveData?.message || 'Failed to save order');
+
+      const savedOrderNo: string = String(saveData.order_number ?? uploadPoNumber.trim());
+      const label = orderType === 'SPR' ? 'Work Order' : 'Purchase Order';
+      toast.success(`${label} ${savedOrderNo} saved successfully`);
+
+      onUpdate(item.indentId, { poNo: savedOrderNo, poCreatedAt: new Date().toISOString(), poStatus: 'created', poDocUrl: docUrl } as any);
+      closeUploadPoDialog();
+      const existing = (item as any)?.poNextProcessSeries;
+      if (Array.isArray(existing) && existing.length)
+        setPoNextProcessSeries(existing as PoNextProcessId[]);
+      else
+        setPoNextProcessSeries(PO_NEXT_PROCESS_OPTIONS.map((x) => x.id) as PoNextProcessId[]);
+      setPoForwardDialogOpen(true);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to upload order document');
+    } finally {
+      setUploadingPo(false);
+    }
+  };
+
+  const downloadAllDocs = async () => {
+    const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
+    if (!baseUrl) return toast.error('Missing API base URL');
+    const prNo = safeTrim(item.indentId);
+    if (!prNo) return toast.error('Missing PR number');
+    try {
+      const url = `${baseUrl}/purchase_flow/download_all_documents?pr_number=${encodeURIComponent(prNo)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      toast.error('Failed to download documents');
+    }
+  };
 
   const [poNextProcessSeries, setPoNextProcessSeries] = useState<PoNextProcessId[]>(() => {
     const existing = (item as any)?.poNextProcessSeries;
@@ -243,8 +335,13 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
   const poCreatedAt = String((item as any)?.poCreatedAt ?? '').trim();
   const poNo = String((item as any)?.poNo ?? (item as any)?.order_number ?? '').trim();
   const poStatus = String((item as any)?.poStatus ?? '').trim().toLowerCase();
+  const poDocUrl = String((item as any)?.poDocUrl ?? '').trim();
 
   const hoLocked = Boolean((item as any)?.hoLocked);
+
+  const isSPR = safeTrim(item.indent_type).toUpperCase() === 'SPR';
+  const lastStepLabel = isSPR ? 'WO' : 'PO';
+  const lastStepFull  = isSPR ? 'Work Order' : 'Purchase Order';
 
   const tcDone = tcStatusLower === 'approved' || Boolean(approvedVendorId);
   const nfaDone = nfaStatusLower === 'approved';
@@ -303,12 +400,14 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
         if (!orderNo && !status) return;
 
         const createdAt = safeTrim(latest?.created_at) || safeTrim(latest?.updated_at) || safeTrim(latest?.saved_at);
+        const docUrl = safeTrim(latest?.doc_url) || safeTrim(latest?.document_url) || safeTrim(latest?.docUrl);
         onUpdate(
           item.indentId,
           {
             poNo: orderNo || undefined,
             poStatus: status || undefined,
             poCreatedAt: createdAt || (orderNo || status ? new Date().toISOString() : undefined),
+            poDocUrl: docUrl || undefined,
           } as any
         );
       } catch (e: any) {
@@ -530,7 +629,7 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
 
   const forwardPo = () => {
     if (!poDone) return;
-    if (poForwarded) return toast.message('PO already forwarded');
+    if (poForwarded) return toast.message(`${lastStepLabel} already forwarded`);
     const existing = (item as any)?.poNextProcessSeries;
     if (Array.isArray(existing) && existing.length) setPoNextProcessSeries(existing as PoNextProcessId[]);
     else setPoNextProcessSeries(PO_NEXT_PROCESS_OPTIONS.map((x) => x.id) as PoNextProcessId[]);
@@ -549,7 +648,7 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
       sub: nfaDone ? (item.lastSavedAt ? fmt(item.lastSavedAt) : undefined) : undefined,
     },
     {
-      label: 'PO',
+      label: lastStepLabel,
       done: poDone,
       sub: poCreatedAt ? fmt(poCreatedAt) : undefined,
     },
@@ -567,9 +666,9 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
                 <SendHorizonal className="h-5 w-5" />
               </div>
               <div className="flex-1 min-w-0">
-                <DialogTitle className="text-base font-bold tracking-tight">Forward Purchase Order</DialogTitle>
+                <DialogTitle className="text-base font-bold tracking-tight">Forward {lastStepFull}</DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                  Define the document workflow that must be completed after this PO is forwarded. Arrange the steps in the required sequence.
+                  Define the document workflow that must be completed after this {lastStepLabel} is forwarded. Arrange the steps in the required sequence.
                 </DialogDescription>
               </div>
             </div>
@@ -806,7 +905,7 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
 
                     onUpdate(item.indentId, { poStatus: 'forwarded', poNextProcessSeries: poNextProcessSeries } as any);
                     setPoForwardDialogOpen(false);
-                    toast.success('PO forwarded — procurement workflow initiated');
+                    toast.success(`${lastStepFull} forwarded — procurement workflow initiated`);
                   } catch (e: any) {
                     const msg = safeTrim(e?.message ?? e);
                     toast.error(`Failed to forward PO${msg ? `: ${msg}` : ''}`);
@@ -816,7 +915,7 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
                 }}
               >
                 <SendHorizonal className="h-3.5 w-3.5" />
-                Forward PO
+                Forward {lastStepLabel}
               </Button>
             </div>
           </div>
@@ -835,6 +934,116 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
           toast.success('PO saved');
         }}
       />
+
+      {/* ── Upload PO Dialog ─────────────────────────────────── */}
+      <Dialog open={uploadPoDialogOpen} onOpenChange={(open) => { if (!open) closeUploadPoDialog(); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5 text-blue-600" />
+              {item.indent_type === 'SPR' ? 'Upload Work Order' : 'Upload Purchase Order'}
+            </DialogTitle>
+            <DialogDescription>
+              {item.indent_type === 'SPR'
+                ? 'Enter the WO number and upload the work order document. A preview will appear once you select a file.'
+                : 'Enter the PO number and upload the purchase order document. A preview will appear once you select a file.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            {/* PO Number */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                Purchase Order Number
+              </label>
+              <input
+                type="text"
+                value={uploadPoNumber}
+                onChange={(e) => setUploadPoNumber(e.target.value)}
+                placeholder="e.g. PO-2026-001"
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* File Upload Area */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                Document (PDF or Image)
+              </label>
+              <input
+                ref={dialogFileInputRef}
+                type="file"
+                accept="application/pdf,image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleDialogFilePick(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => dialogFileInputRef.current?.click()}
+                className="w-full rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-blue-50 hover:border-blue-400 transition-colors p-6 flex flex-col items-center gap-2"
+              >
+                <Upload className="h-7 w-7 text-gray-400" />
+                {uploadPoFile ? (
+                  <>
+                    <span className="text-sm font-semibold text-gray-800">{uploadPoFile.name}</span>
+                    <span className="text-xs text-gray-400">
+                      {(uploadPoFile.size / 1024).toFixed(1)} KB · click to change
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-medium text-gray-600">Click to browse</span>
+                    <span className="text-xs text-gray-400">PDF or image files accepted</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Document Preview */}
+            {uploadPoPreviewUrl && uploadPoFile && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                  Preview
+                </label>
+                <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50" style={{ height: '380px' }}>
+                  {uploadPoFile.type === 'application/pdf' ? (
+                    <iframe
+                      src={uploadPoPreviewUrl}
+                      className="w-full h-full"
+                      title="PO Document Preview"
+                    />
+                  ) : (
+                    <img
+                      src={uploadPoPreviewUrl}
+                      alt="PO Document Preview"
+                      className="w-full h-full object-contain"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={closeUploadPoDialog}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleUploadPoSubmit}
+              disabled={uploadingPo || !uploadPoFile || !uploadPoNumber.trim()}
+              className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <Upload className="h-4 w-4" />
+              {uploadingPo ? 'Uploading…' : 'Upload & Forward'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Collapsible open={open} onOpenChange={setOpen}>
         {/* ── Always-visible row ─────────────────────────────────── */}
@@ -875,6 +1084,7 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
             {/* Toolbox (lock + PO actions + collapse) */}
             <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/20 p-1">
+                {/* Lock / Unlock */}
                 <Button
                   type="button"
                   variant="ghost"
@@ -895,34 +1105,81 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
                   )}
                 </Button>
 
+                {/* Make PO / WO */}
                 <Button
                   type="button"
-                  size="sm"
+                  size="icon"
+                  className="h-8 w-8"
                   variant={poDone ? 'outline' : 'default'}
                   onClick={openMakePo}
                   disabled={poDone || hoLocked}
+                  title={`Make ${lastStepLabel}`}
+                  aria-label={`Make ${lastStepLabel}`}
                 >
-                  Make PO
+                  {isSPR
+                    ? <Wrench className="h-4 w-4" aria-hidden="true" />
+                    : <ShoppingCart className="h-4 w-4" aria-hidden="true" />}
                 </Button>
+
+                {/* Edit PO / WO */}
                 <Button
                   type="button"
-                  size="sm"
+                  size="icon"
+                  className="h-8 w-8"
                   variant="outline"
                   onClick={openEditPo}
                   disabled={!poDone || hoLocked}
+                  title={`Edit ${lastStepLabel}`}
+                  aria-label={`Edit ${lastStepLabel}`}
                 >
-                  Edit PO
+                  <Pencil className="h-4 w-4" aria-hidden="true" />
                 </Button>
+
+                {/* Forward PO / WO */}
                 <Button
                   type="button"
-                  size="sm"
+                  size="icon"
+                  className="h-8 w-8"
                   variant="outline"
                   onClick={forwardPo}
                   disabled={!poDone}
+                  title={`Forward ${lastStepLabel}`}
+                  aria-label={`Forward ${lastStepLabel}`}
                 >
-                  Forward PO
+                  <SendHorizonal className="h-4 w-4" aria-hidden="true" />
                 </Button>
 
+                {/* Download All Documents */}
+                <Button
+                  type="button"
+                  size="icon"
+                  className="h-8 w-8"
+                  variant="outline"
+                  onClick={downloadAllDocs}
+                  title="Download All Documents"
+                  aria-label="Download All Documents"
+                >
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                </Button>
+
+                {/* Upload PO */}
+                <Button
+                  type="button"
+                  size="icon"
+                  className="h-8 w-8"
+                  variant="outline"
+                  onClick={() => {
+                    setUploadPoNumber(poNo || '');
+                    setUploadPoDialogOpen(true);
+                  }}
+                  disabled={uploadingPo}
+                  title="Upload PO"
+                  aria-label="Upload PO"
+                >
+                  <Upload className="h-4 w-4" aria-hidden="true" />
+                </Button>
+
+                {/* Collapse / Expand */}
                 <Button
                   type="button"
                   variant="ghost"
@@ -961,8 +1218,10 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
                 </TabsTrigger>
                 <TabsTrigger value="po">
                   <span className="inline-flex items-center gap-2">
-                    <ShoppingCart className="h-4 w-4" aria-hidden="true" />
-                    <span>Purchase Order</span>
+                    {isSPR
+                      ? <Wrench className="h-4 w-4" aria-hidden="true" />
+                      : <ShoppingCart className="h-4 w-4" aria-hidden="true" />}
+                    <span>{lastStepFull}</span>
                   </span>
                 </TabsTrigger>
               </TabsList>
@@ -1033,34 +1292,84 @@ export function ComparativeQuotationApprovalRow({ item, onUpdate, defaultOpen, d
               </TabsContent>
 
               <TabsContent value="po">
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <div className="mb-3">
-                    <div className="text-sm font-semibold text-foreground">Purchase Order</div>
-                    <div className="text-xs text-muted-foreground">
-                      {poDone
-                        ? 'Purchase order document.'
-                        : 'No purchase order created yet.'}
+                <div className="rounded-lg border border-border bg-card p-4 space-y-5">
+
+                  {/* ── Header ─────────────────────────────────────────── */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">{lastStepFull}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {poDone
+                          ? `${lastStepFull} details and document.`
+                          : `No ${lastStepFull.toLowerCase()} created yet.`}
+                      </div>
                     </div>
+                    {poNo && (
+                      <span className="shrink-0 rounded-full border border-border bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-foreground">
+                        {lastStepLabel} #{poNo}
+                      </span>
+                    )}
                   </div>
 
-                  {poDone ? (
-                    <>
-                      {/* Inline PO preview (same layout as Make PO popup, rendered in-place) */}
-                      <div className="h-[600px] overflow-y-auto">
-                        <MakePurchaseOrderPopup
-                          open={open && activeTab === 'po'}
-                          comparative={item}
-                          vendorId={item.hoSelectedVendorId}
-                          onClose={() => { /* inline preview */ }}
-                          variant="inline"
-                          inlineSimulatePrint
-                        />
-                      </div>
-                    </>
-                  ) : (
+                  {!poDone && (
                     <div className="text-sm text-muted-foreground">
-                      Create a PO using the <span className="font-semibold text-foreground">Make PO</span> button in the row.
+                      Create a {lastStepLabel} using the{' '}
+                      <span className="font-semibold text-foreground">Make {lastStepLabel}</span> button in the row.
                     </div>
+                  )}
+
+                  {poDone && (
+                    poDocUrl ? (
+                      /* ── Document URL present → show the uploaded document ── */
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                            {lastStepFull} Document
+                          </div>
+                          <a
+                            href={poDocUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                          >
+                            <Download className="h-3 w-3" />
+                            Open
+                          </a>
+                        </div>
+                        <div className="rounded-xl border border-border overflow-hidden bg-muted/20" style={{ height: '560px' }}>
+                          {/\.pdf($|\?)/i.test(poDocUrl) ? (
+                            <iframe
+                              src={poDocUrl}
+                              className="w-full h-full"
+                              title={`${lastStepFull} Document`}
+                            />
+                          ) : (
+                            <img
+                              src={poDocUrl}
+                              alt={`${lastStepFull} Document`}
+                              className="w-full h-full object-contain"
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      /* ── No document URL → show templated view ─────────── */
+                      <div className="space-y-2">
+                        <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                          {lastStepFull} Details
+                        </div>
+                        <div className="h-[600px] overflow-y-auto rounded-lg border border-border">
+                          <MakePurchaseOrderPopup
+                            open={open && activeTab === 'po'}
+                            comparative={item}
+                            vendorId={item.hoSelectedVendorId}
+                            onClose={() => { /* inline preview */ }}
+                            variant="inline"
+                            inlineSimulatePrint
+                          />
+                        </div>
+                      </div>
+                    )
                   )}
                 </div>
               </TabsContent>

@@ -39,6 +39,7 @@ type VendorQuote = {
 
 type Comparative = {
   indentId: string;
+  indentType?: 'PR' | 'SPR';
   title: string;
   subTitle?: string;
   vendors: QuoteVendor[];
@@ -221,6 +222,55 @@ const fetchComparativeDraft = async (prNumber: string): Promise<GetComparativeDr
   return items[0] ?? null;
 };
 
+const fetchIndentByPrNumber = async (
+  prNumber: string,
+): Promise<{ items: PrItem[]; indentType: 'PR' | 'SPR' }> => {
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) return { items: [], indentType: 'PR' };
+
+  const res = await fetch(`${baseUrl}/purchase_flow/get_indents`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) return { items: [], indentType: 'PR' };
+
+  const data: any = await res.json().catch(() => null);
+  const indents: any[] = Array.isArray(data?.indents) ? data.indents : [];
+  const indent = indents.find((r: any) => safeTrim(r?.pr_number) === prNumber);
+  if (!indent) return { items: [], indentType: 'PR' };
+
+  const isSpr = Boolean(indent.indent_data?.area_of_service || indent.indent_data?.name_of_service);
+  const itemRows: any[] = Array.isArray(indent.indent_data?.item_row) ? indent.indent_data.item_row : [];
+
+  const items: PrItem[] = itemRows.map((it: any, idx: number) => {
+    if (isSpr) {
+      const name = safeTrim(it?.service_description) || `Service ${idx + 1}`;
+      return {
+        id: stableItemId(name, idx),
+        srNo: idx + 1,
+        partName: name,
+        uom: safeTrim(it?.uom) || '',
+        qty: Number(it?.quantity ?? 0) || 0,
+        gstPercent: Number(it?.gst_percentage ?? 0) || 0,
+      };
+    } else {
+      const name = safeTrim(it?.part_name) || `Item ${idx + 1}`;
+      const totalQty = Number(it?.total_qty_required ?? 0) || 0;
+      const lessQty = Number(it?.less_qty_available_in_stock ?? 0) || 0;
+      const netQty = Number(it?.net_pr_qty) || Math.max(0, totalQty - lessQty);
+      return {
+        id: stableItemId(name, idx),
+        srNo: idx + 1,
+        partName: name,
+        uom: safeTrim(it?.uom) || '',
+        qty: netQty,
+        gstPercent: 0,
+      };
+    }
+  });
+
+  return { items, indentType: isSpr ? 'SPR' : 'PR' };
+};
+
 const stableItemId = (itemName: string, idx: number) => {
   const base = safeTrim(itemName) || 'item';
   const safe = base.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
@@ -306,7 +356,7 @@ function AutoGrowTextarea({
 }
 
 export default function QuotationComparative() {
-  const { indentId } = useParams();
+  const { indentId } = useParams<{ indentId: string }>();
   const navigate = useNavigate();
   const [model, setModel] = useState<Comparative | null>(null);
   const [openRecommendation, setOpenRecommendation] = useState(false);
@@ -382,8 +432,9 @@ export default function QuotationComparative() {
             : [];
 
           const items: PrItem[] = itemRows.map((r, idx) => {
-            const itemName = safeTrim((r as any)?.item_name);
-            const uom = safeTrim((r as any)?.UoM);
+            // PR drafts use item_name; SPR drafts may use service_description
+            const itemName = safeTrim((r as any)?.item_name) || safeTrim((r as any)?.service_description);
+            const uom = safeTrim((r as any)?.UoM) || safeTrim((r as any)?.uom);
             const qty = Number((r as any)?.quantity ?? 0) || 0;
             const gst = Number((r as any)?.gst_percentage ?? 0);
             return {
@@ -408,6 +459,7 @@ export default function QuotationComparative() {
           const paymentTerms: Record<string, string> = {};
           const deliveryTimeline: Record<string, string> = {};
           const warranty: Record<string, string> = {};
+          const priceBasis: Record<string, string> = {};
           const freightCharges: Record<string, number> = {};
           const otherCharges: Record<string, number> = {};
 
@@ -433,9 +485,11 @@ export default function QuotationComparative() {
               const pt = safeTrim((q as any)?.payment_terms);
               const dt = safeTrim((q as any)?.delivery_time);
               const wg = safeTrim((q as any)?.warrenty_garantee);
+              const pb = safeTrim((q as any)?.price_basis);
               if (pt) paymentTerms[vendorId] = pt;
               if (dt) deliveryTimeline[vendorId] = dt;
               if (wg) warranty[vendorId] = wg;
+              if (pb) priceBasis[vendorId] = pb;
 
               return {
                 vendorId,
@@ -443,12 +497,26 @@ export default function QuotationComparative() {
               };
             });
 
+          // If the draft had no item_row (or all items have blank names), seed from indent API
+          let resolvedItems = items;
+          let resolvedIndentType: 'PR' | 'SPR' = 'PR';
+          if (resolvedItems.length === 0 || resolvedItems.every((it) => !it.partName)) {
+            try {
+              const seeded = await fetchIndentByPrNumber(normalizedIndentId);
+              resolvedItems = seeded.items;
+              resolvedIndentType = seeded.indentType;
+            } catch {
+              // ignore, keep empty
+            }
+          }
+
           const next: Comparative = {
             indentId: normalizedIndentId,
+            indentType: resolvedIndentType,
             title: 'Price Comparative Statement',
             subTitle: 'for office Porta Cabins at Chhattisgarh',
             vendors,
-            items,
+            items: resolvedItems,
             quotes,
             gstPercent: undefined,
             freightCharges,
@@ -458,6 +526,7 @@ export default function QuotationComparative() {
             paymentTerms,
             deliveryTimeline,
             warranty,
+            priceBasis,
             lastSavedAt: createdAt || undefined,
             lastSavedSource: createdAt ? 'server' : undefined,
           };
@@ -476,16 +545,27 @@ export default function QuotationComparative() {
         return;
       }
 
-      // 3) Finally, start fresh
+      // 3) Finally, start fresh — seed items from the indent API
+      let freshItems: PrItem[] = [];
+      let freshIndentType: 'PR' | 'SPR' = 'PR';
+      try {
+        const seeded = await fetchIndentByPrNumber(normalizedIndentId);
+        freshItems = seeded.items;
+        freshIndentType = seeded.indentType;
+      } catch {
+        // ignore, keep empty
+      }
+
       const empty: Comparative = {
         indentId: normalizedIndentId,
+        indentType: freshIndentType,
         title: 'Price Comparative Statement',
         subTitle: 'for office Porta Cabins at Chhattisgarh',
         vendors: [
           { id: genId(), name: 'CHHATTISGARH PORTABLE INFRATECH', location: '(Bhilai, Chhattisgarh -', phone: '9165271111)' },
           { id: genId(), name: 'MAHAKAL PORTABLE CABIN & FABRICATION', location: '(Khasra, Durg, Chhattisgarh -', phone: '9702430797)' },
         ],
-        items: [],
+        items: freshItems,
         quotes: [],
         gstPercent: undefined,
         freightCharges: {},
@@ -771,6 +851,7 @@ export default function QuotationComparative() {
     payment_terms?: string | null;
     delivery_time?: string | null;
     warrenty_garantee?: string | null;
+    price_basis?: string | null;
   };
 
   type SaveComparativeDraftPayload = {
@@ -835,6 +916,7 @@ export default function QuotationComparative() {
           payment_terms: payment_terms ? payment_terms : null,
           delivery_time: delivery_time ? delivery_time : null,
           warrenty_garantee: warrenty_garantee ? warrenty_garantee : null,
+          price_basis: String((m.priceBasis as any)?.[v.id] ?? '').trim() || null,
         } satisfies SaveComparativeDraftQuoter;
       })
       .filter(Boolean) as SaveComparativeDraftQuoter[];
@@ -1252,7 +1334,9 @@ export default function QuotationComparative() {
 
             <tr className="bg-muted/40">
               <th className="border border-border px-2 py-1 w-[60px]">Sr.No</th>
-              <th className="border border-border px-2 py-1">Item</th>
+              <th className="border border-border px-2 py-1">
+                Item / Part Name
+              </th>
               <th className="border border-border px-2 py-1 w-[80px]">QTY</th>
               <th className="border border-border px-2 py-1 w-[80px]">UOM</th>
               {vendorOrder.map((v) => (

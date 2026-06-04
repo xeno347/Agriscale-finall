@@ -40,6 +40,7 @@ import FinanceAdminOpsIndent from "./pages/FinanceAdminOpsIndent";
 import PurchaseRequisition from "./pages/PurchaseRequisition";
 import VendorDirectory from "./pages/VendorDirectory";
 import QuotationComparative from "./pages/QuotationComparative";
+import SprQuotationComparative from "./pages/SprQuotationComparative";
 import HOInbox from "@/pages/HOInbox";
 import HO from "@/pages/HO";
 import PurchaseFlow from "@/pages/PurchaseFlow";
@@ -54,6 +55,11 @@ import DirectorAssetsLiabilities from "./pages/DirectorAssetsLiabilities";
 import HRMS from "./pages/HRMS";
 import OnDemandTask from "./pages/OnDemandTask";
 import FarmDirectory from "./pages/FarmDirectory";
+import FuelsAndConsumables from "./pages/FuelsAndConsumables";
+import AdminOpsFuelRequest from "./pages/AdminOpsFuelRequest";
+import DirectorFuelRequest from "./pages/DirectorFuelRequest";
+import WorkOrder from "./pages/WorkOrder";
+import ScopeOfWork from "./pages/ScopeOfWork";
 
 const queryClient = new QueryClient();
 
@@ -89,8 +95,13 @@ const App = () => (
           <Route path="/weighment" element={<AppLayout><WeighmentQC /></AppLayout>} />
 
           {/* Management */}
+          <Route path="/work-order" element={<AppLayout><WorkOrder /></AppLayout>} />
+          <Route path="/scope-of-work" element={<AppLayout><ScopeOfWork /></AppLayout>} />
           <Route path="/inventory" element={<AppLayout><Inventory /></AppLayout>} />
           <Route path="/inventory-indents" element={<AppLayout><InventoryIndent /></AppLayout>} />
+          <Route path="/fuels-and-consumables" element={<AppLayout><FuelsAndConsumables /></AppLayout>} />
+          <Route path="/admin-ops-fuel-requests" element={<AppLayout><AdminOpsFuelRequest /></AppLayout>} />
+          <Route path="/director-fuel-requests" element={<AppLayout><DirectorFuelRequest /></AppLayout>} />
           <Route path="/admin-ops-indents" element={<AppLayout><AdminOpsIndent /></AppLayout>} />
           <Route path="/on-demand-task" element={<AppLayout><OnDemandTask /></AppLayout>} />
           <Route path="/finance-admin-ops-indents" element={<AppLayout><FinanceAdminOpsIndent /></AppLayout>} />
@@ -132,11 +143,21 @@ const App = () => (
           <Route path="/tools/khasra_records" element={<KhasraFinder />} />
           <Route path="/khasra-finder" element={<Navigate to="/tools/khasra_records" replace />} />
 
+          {/* PR quotation */}
           <Route
-            path="/purchase-requisition/:indentId/quotation"
+            path="/purchase-requisition/PR/:indentId/quotation"
             element={
               <AppLayout>
                 <QuotationComparative />
+              </AppLayout>
+            }
+          />
+          {/* SPR quotation — separate page with Service/Qty/StartDate/Duration/OEM columns */}
+          <Route
+            path="/purchase-requisition/SPR/:indentId/quotation"
+            element={
+              <AppLayout>
+                <SprQuotationComparative />
               </AppLayout>
             }
           />

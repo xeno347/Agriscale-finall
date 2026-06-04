@@ -8,6 +8,7 @@ import {
   UserPlus,
   Truck,
   Car,
+  Fuel,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -33,6 +34,7 @@ import {
   TrendingUp,
   HandCoins,
   Scale as BalanceScale,
+  Link2,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -307,6 +309,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavGroup label="Indents and Request" isSidebarCollapsed={isCollapsed}>
             <NavItem to="/admin-request" icon={ClipboardCheck} label="Admin Ops Request" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/admin-ops-indents" icon={FileText} label="Admin Ops Indents" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/admin-ops-fuel-requests" icon={Fuel} label="Fuel Requests" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/on-demand-task" icon={ClipboardCheck} label="On Demand Task" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/admin-mrf-approvals" icon={FileText} label="Admin MRF Approvals" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
@@ -348,6 +351,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavGroup label="Inventory Management" isSidebarCollapsed={isCollapsed}>
             <NavItem to="/inventory" icon={Box} label="Inventory" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/inventory-indents" icon={FileText} label="Inventory Indents" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/fuels-and-consumables" icon={Fuel} label="Fuels & Consumables" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
 
           {/* Group 3: Purchase And Procurement */}
@@ -357,6 +361,8 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             <NavItem to="/vendor-directory" icon={FileText} label="Vendor Directory" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/ho" icon={FileText} label="HO Module" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/purchase-flow" icon={FileText} label="Purchase Flow" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/work-order" icon={ClipboardCheck} label="Work Order" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/scope-of-work" icon={Link2} label="Scope of Work" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
         </div>
 
@@ -457,6 +463,10 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
               </p>
             </div>
           )}
+
+          <NavGroup label="Approvals" isSidebarCollapsed={isCollapsed}>
+            <NavItem to="/director-fuel-requests" icon={Fuel} label="Fuel Requests" isSidebarCollapsed={isCollapsed} />
+          </NavGroup>
 
           <NavGroup label="Budgets" isSidebarCollapsed={isCollapsed}>
             <div className={cn(!isCollapsed && "mx-1") }>

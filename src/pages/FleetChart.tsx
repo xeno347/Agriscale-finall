@@ -500,15 +500,11 @@ const FleetChart = () => {
     );
   };
 
-  // Helper function to get cell background color based on lock status and completion
+  // Helper function to get cell background color
+  // Grey = no task assigned, Orange = task assigned (in progress), Green = all tasks completed
   const getCellBackgroundColor = (dayData: DaySchedule | undefined) => {
-    if (!dayData || !dayData.tasks?.length) return 'bg-white';
-    
-    const isComplete = isDataComplete(dayData);
-    
-    if (dayData.isLocked) {
-      return isComplete ? 'bg-green-200' : 'bg-red-200';
-    }
+    if (!dayData || !dayData.tasks?.length) return 'bg-gray-100';
+    if (dayData.tasksStatus === 'completed') return 'bg-green-200';
     return 'bg-orange-200';
   };
 
@@ -1194,12 +1190,12 @@ const FleetChart = () => {
                             "border-r border-gray-100 p-1 h-32 relative align-top min-w-[12rem]",
                             getCellBackgroundColor(dayData)
                           )}>
-                            {hasTasks ? (
-                              <div className="w-full h-full flex flex-col gap-1">
-                                {/* Task Info */}
+                            <div className="w-full h-full flex flex-col gap-1">
+                              {/* Task buttons — only when tasks are assigned */}
+                              {hasTasks && (
                                 <div className="flex-1">
                                   {tasks.map((task, tIdx) => (
-                                    <button 
+                                    <button
                                       key={task.id}
                                       onClick={() => setSelectedCell({ ...task, vehicle: vName, date: dateKey })}
                                       className={cn(
@@ -1226,38 +1222,43 @@ const FleetChart = () => {
                                     </button>
                                   ))}
                                 </div>
-                                
-                                {/* Additional Data */}
-                                <div className="bg-gray-50 rounded p-1 text-[9px] space-y-0.5">
-                                  {/* Engine Hours */}
+                              )}
+
+                              {/* Engine hours / distance / damage — always shown for every cell */}
+                              <div className={cn(
+                                "rounded p-1 text-[9px] space-y-0.5",
+                                hasTasks ? "bg-gray-50" : "bg-white/60 mt-auto"
+                              )}>
+                                {/* Engine Hours */}
+                                <div className="flex items-center gap-1 text-gray-600">
+                                  <Clock className="w-3 h-3" />
+                                  <span>Start: {dayData?.initialEngineHours || 0}h</span>
+                                  <span className="text-gray-400">|</span>
+                                  <span>End: {dayData?.finalEngineHours || 0}h</span>
+                                </div>
+
+                                {/* Distance & (task status badge only when tasks exist) */}
+                                <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-1 text-gray-600">
-                                    <Clock className="w-3 h-3" />
-                                    <span>Start: {dayData?.initialEngineHours || 0}h</span>
-                                    <span className="text-gray-400">|</span>
-                                    <span>End: {dayData?.finalEngineHours || 0}h</span>
+                                    <Route className="w-3 h-3" />
+                                    <input
+                                      type="number"
+                                      value={dayData?.totalDistance || ''}
+                                      onChange={(e) => {
+                                        const value = parseInt(e.target.value) || 0;
+                                        updateScheduleData(vId, dateKey, 'totalDistance', value);
+                                      }}
+                                      disabled={dayData?.isLocked}
+                                      className={cn(
+                                        "w-12 px-1 border border-gray-300 rounded text-[9px] text-center",
+                                        dayData?.isLocked ? "bg-gray-100 cursor-not-allowed" : "bg-white"
+                                      )}
+                                      placeholder="km"
+                                    />
+                                    <span>km</span>
                                   </div>
-                                  
-                                  {/* Distance & Status */}
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-1 text-gray-600">
-                                      <Route className="w-3 h-3" />
-                                      <input 
-                                        type="number"
-                                        value={dayData?.totalDistance || ''}
-                                        onChange={(e) => {
-                                          const value = parseInt(e.target.value) || 0;
-                                          updateScheduleData(vId, dateKey, 'totalDistance', value);
-                                        }}
-                                        disabled={dayData?.isLocked}
-                                        className={cn(
-                                          "w-12 px-1 border border-gray-300 rounded text-[9px] text-center",
-                                          dayData?.isLocked ? "bg-gray-100 cursor-not-allowed" : "bg-white"
-                                        )}
-                                        placeholder="km"
-                                      />
-                                      <span>km</span>
-                                    </div>
-                                    <div className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1">
+                                    {hasTasks && (
                                       <span className={cn(
                                         "px-1 py-0.5 rounded text-[8px] font-bold uppercase",
                                         dayData?.tasksStatus === 'completed' ? "bg-green-100 text-green-700" :
@@ -1266,76 +1267,73 @@ const FleetChart = () => {
                                       )}>
                                         {dayData?.tasksStatus || 'N/A'}
                                       </span>
-                                      {/* Lock/Unlock Button */}
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          const currentlyLocked = Boolean(dayData?.isLocked);
-
-                                          // Unlock is local-only for now (no API provided).
-                                          if (currentlyLocked) {
-                                            updateScheduleData(vId, dateKey, 'isLocked', false);
-                                            return;
-                                          }
-
-                                          const distanceTraveled = Number(dayData?.totalDistance) || 0;
-                                          const fuelConsumed = Number(dayData?.fuel?.consumed) || 0;
-                                          const damageNotes = String(dayData?.damageChecklist ?? '');
-
-                                          lockFleetCard({
-                                            vehicle_id: vId,
-                                            date: dateKey,
-                                            distance_traveled: distanceTraveled,
-                                            fuel_consumed: fuelConsumed,
-                                            damage_notes: damageNotes,
-                                          })
-                                            .then(() => {
-                                              updateScheduleData(vId, dateKey, 'isLocked', true);
-                                              toast.success('Fleet card locked');
-                                            })
-                                            .catch((err) => {
-                                              toast.error(err instanceof Error ? err.message : 'Failed to lock fleet card');
-                                            });
-                                        }}
-                                        className={cn(
-                                          "p-0.5 rounded transition-colors",
-                                          dayData?.isLocked ? "text-red-600 hover:bg-red-100" : "text-gray-500 hover:bg-gray-100"
-                                        )}
-                                        title={dayData?.isLocked ? "Unlock" : "Lock"}
-                                      >
-                                        {dayData?.isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-                                      </button>
-                                    </div>
-                                  </div>
-                                  
-                                  {/* Damage Input */}
-                                  {dayData?.damageChecklist && (
-                                    <div className="flex items-center gap-1 text-orange-600">
-                                      <AlertTriangle className="w-3 h-3" />
-                                      <span className="truncate flex-1">{dayData.damageChecklist}</span>
-                                    </div>
-                                  )}
-                                  <input 
-                                    type="text"
-                                    value={dayData?.damageChecklist || ''}
-                                    onChange={(e) => {
-                                      updateScheduleData(vId, dateKey, 'damageChecklist', e.target.value);
-                                      if (!dayData?.damageChecklistTouched) {
-                                        updateScheduleData(vId, dateKey, 'damageChecklistTouched', true);
-                                      }
-                                    }}
-                                    disabled={dayData?.isLocked}
-                                    className={cn(
-                                      "w-full px-1 py-0.5 border border-gray-300 rounded text-[9px]",
-                                      dayData?.isLocked ? "bg-gray-100 cursor-not-allowed" : "bg-white"
                                     )}
-                                    placeholder="Damage notes..."
-                                  />
+                                    {/* Lock/Unlock Button */}
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const currentlyLocked = Boolean(dayData?.isLocked);
+
+                                        if (currentlyLocked) {
+                                          updateScheduleData(vId, dateKey, 'isLocked', false);
+                                          return;
+                                        }
+
+                                        const distanceTraveled = Number(dayData?.totalDistance) || 0;
+                                        const fuelConsumed = Number(dayData?.fuel?.consumed) || 0;
+                                        const damageNotes = String(dayData?.damageChecklist ?? '');
+
+                                        lockFleetCard({
+                                          vehicle_id: vId,
+                                          date: dateKey,
+                                          distance_traveled: distanceTraveled,
+                                          fuel_consumed: fuelConsumed,
+                                          damage_notes: damageNotes,
+                                        })
+                                          .then(() => {
+                                            updateScheduleData(vId, dateKey, 'isLocked', true);
+                                            toast.success('Fleet card locked');
+                                          })
+                                          .catch((err) => {
+                                            toast.error(err instanceof Error ? err.message : 'Failed to lock fleet card');
+                                          });
+                                      }}
+                                      className={cn(
+                                        "p-0.5 rounded transition-colors",
+                                        dayData?.isLocked ? "text-red-600 hover:bg-red-100" : "text-gray-500 hover:bg-gray-100"
+                                      )}
+                                      title={dayData?.isLocked ? "Unlock" : "Lock"}
+                                    >
+                                      {dayData?.isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                                    </button>
+                                  </div>
                                 </div>
+
+                                {/* Damage Notes */}
+                                {dayData?.damageChecklist && (
+                                  <div className="flex items-center gap-1 text-orange-600">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    <span className="truncate flex-1">{dayData.damageChecklist}</span>
+                                  </div>
+                                )}
+                                <input
+                                  type="text"
+                                  value={dayData?.damageChecklist || ''}
+                                  onChange={(e) => {
+                                    updateScheduleData(vId, dateKey, 'damageChecklist', e.target.value);
+                                    if (!dayData?.damageChecklistTouched) {
+                                      updateScheduleData(vId, dateKey, 'damageChecklistTouched', true);
+                                    }
+                                  }}
+                                  disabled={dayData?.isLocked}
+                                  className={cn(
+                                    "w-full px-1 py-0.5 border border-gray-300 rounded text-[9px]",
+                                    dayData?.isLocked ? "bg-gray-100 cursor-not-allowed" : "bg-white"
+                                  )}
+                                  placeholder="Damage notes..."
+                                />
                               </div>
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-gray-200 select-none text-lg">-</div>
-                            )}
+                            </div>
 
                             {showHubConnector && (
                               <button 

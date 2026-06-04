@@ -1,10 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, FileText, Plus, Upload, X } from 'lucide-react';
+import { ArrowRight, Check, ChevronLeft, ChevronRight, FileText, Plus, Receipt, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
 import getBaseUrl from '@/lib/config';
 import { toast } from 'sonner';
+
+type LeftPanelInfo = {
+  pr_number?: string;
+  indent_type?: string;
+  department?: string | null;
+  vendor_details?: {
+    approved_vendor_id?: string;
+    vendor_name?: string;
+    vendor_contact?: string;
+    vendor_address?: string;
+    gst_number?: string;
+  } | null;
+  Order_number?: string;
+};
 
 type ApiPurchaseFlowStageEntry = {
   document?: unknown;
@@ -31,6 +45,7 @@ type PurchaseFlowStep = {
   document: string;
   status: string;
   docLink: string;
+  isLocal?: boolean; // true for user-inserted invoice steps (not from API)
 };
 
 const safeTrim = (v: unknown) => String(v ?? '').trim();
@@ -201,6 +216,96 @@ export default function PurchaseFlow() {
     step: PurchaseFlowStep;
   } | null>(null);
 
+  // Per-flow merged step lists (API steps + locally inserted invoice steps)
+  const [flowStepOverrides, setFlowStepOverrides] = useState<Record<string, PurchaseFlowStep[]>>({});
+  // Which flow's "+ Add Invoice" dropdown is open
+  const [addMenuOpenFor, setAddMenuOpenFor] = useState<string | null>(null);
+
+  const getFlowSteps = (flowId: string, flow: ApiPurchaseFlow): PurchaseFlowStep[] =>
+    flowStepOverrides[flowId] ?? parseSteps((flow as any)?.purchase_flow_stage);
+
+  const toggleLocalStepDone = (flowId: string, flow: ApiPurchaseFlow, stepKey: string) => {
+    const current = getFlowSteps(flowId, flow);
+    setFlowStepOverrides((prev) => ({
+      ...prev,
+      [flowId]: current.map((s) =>
+        s.key === stepKey ? { ...s, status: s.status === 'completed' ? 'empty' : 'completed' } : s
+      ),
+    }));
+  };
+
+  const addInvoiceStep = (flowId: string, flow: ApiPurchaseFlow, docType: 'Proforma Invoice' | 'Invoice' | 'PRR (for payment)' | 'PRR (for accounting)') => {
+    const current = getFlowSteps(flowId, flow);
+    const newStep: PurchaseFlowStep = {
+      key: `local-${Date.now()}`,
+      index: current.length + 1,
+      document: docType,
+      status: 'empty',
+      docLink: '',
+      isLocal: true,
+    };
+    setFlowStepOverrides((prev) => ({ ...prev, [flowId]: [...current, newStep] }));
+    setAddMenuOpenFor(null);
+  };
+
+  const moveStep = (flowId: string, flow: ApiPurchaseFlow, stepKey: string, dir: 'left' | 'right') => {
+    const current = getFlowSteps(flowId, flow);
+    const idx = current.findIndex((s) => s.key === stepKey);
+    if (idx === -1) return;
+    const target = dir === 'left' ? idx - 1 : idx + 1;
+    if (target < 0 || target >= current.length) return;
+    const next = [...current];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    setFlowStepOverrides((prev) => ({ ...prev, [flowId]: next }));
+  };
+
+  const removeLocalStep = (flowId: string, flow: ApiPurchaseFlow, stepKey: string) => {
+    const current = getFlowSteps(flowId, flow);
+    setFlowStepOverrides((prev) => ({ ...prev, [flowId]: current.filter((s) => s.key !== stepKey) }));
+  };
+
+  // Per-flow save loading state
+  const [savingFlows, setSavingFlows] = useState<Record<string, boolean>>({});
+
+  // Left panel enriched data — fetched per-row after the list renders
+  const [leftPanelInfoMap, setLeftPanelInfoMap] = useState<Record<string, LeftPanelInfo>>({});
+  const [leftPanelLoadingSet, setLeftPanelLoadingSet] = useState<Set<string>>(new Set());
+
+  // Converts the current ordered steps array → { step_1: {...}, step_2: {...}, ... }
+  const buildStepJson = (steps: PurchaseFlowStep[]) => {
+    const result: Record<string, { document: string; status: string; doc_link: string }> = {};
+    steps.forEach((s, idx) => {
+      result[`step_${idx + 1}`] = {
+        document: s.document,
+        status: s.status || 'empty',
+        doc_link: s.docLink || '',
+      };
+    });
+    return result;
+  };
+
+  const saveCurrentFlow = async (flowId: string, flow: ApiPurchaseFlow, stepsOverride?: PurchaseFlowStep[]) => {
+    const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
+    if (!baseUrl) return toast.error('Missing API base URL');
+    setSavingFlows((prev) => ({ ...prev, [flowId]: true }));
+    try {
+      const steps = stepsOverride ?? getFlowSteps(flowId, flow);
+      const stepJson = buildStepJson(steps);
+      const res = await fetch(`${baseUrl}/purchase_flow/update_purchase_flow_stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ flow_id: flowId, step_json: stepJson }),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to save flow');
+      toast.success('Purchase flow saved');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save purchase flow');
+    } finally {
+      setSavingFlows((prev) => { const c = { ...prev }; delete c[flowId]; return c; });
+    }
+  };
+
   const openHoInboxView = (prNumberRaw: string, tab: 'po' | 'indent' | 'comparative') => {
     const prNumber = safeTrim(prNumberRaw);
     if (!prNumber) {
@@ -239,13 +344,59 @@ export default function PurchaseFlow() {
     return copy;
   }, [flows]);
 
+  // After all rows are in view, fetch left-panel info row by row (in parallel)
+  useEffect(() => {
+    if (rows.length === 0) return;
+    const ac = new AbortController();
+    const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
+    if (!baseUrl) return;
+
+    rows.forEach(async (flow) => {
+      const prNumber = safeTrim((flow as any)?.pr_number);
+      if (!prNumber) return;
+      const flowId = safeTrim((flow as any)?.flow_id) || safeTrim((flow as any)?.comparison_id) || prNumber;
+
+      setLeftPanelLoadingSet((prev) => new Set([...prev, flowId]));
+      try {
+        const res = await fetch(`${baseUrl}/purchase_flow/get_left_panel_info`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ pr_number: prNumber }),
+          signal: ac.signal,
+        });
+        if (!res.ok) return;
+        const data: LeftPanelInfo = await res.json().catch(() => null);
+        if (data) setLeftPanelInfoMap((prev) => ({ ...prev, [flowId]: data }));
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
+      } finally {
+        setLeftPanelLoadingSet((prev) => { const s = new Set(prev); s.delete(flowId); return s; });
+      }
+    });
+
+    return () => ac.abort();
+  }, [rows]);
+
   const handleUploadStep = async (flow: ApiPurchaseFlow, step: PurchaseFlowStep, file: File) => {
-    // Upload endpoint is backend-defined; once provided, wire it here using multipart/FormData.
-    // For now, keep UX unblocked and explain what is missing.
+    const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
+    if (!baseUrl) throw new Error('Missing API base URL');
+
+    // ── Step 1: upload the file and get back a doc_link ──────────────────────
+    // TODO: replace this block with the real upload endpoint when provided.
+    // Expected: POST multipart/form-data → response { success: true, doc_link: "https://..." }
     void file;
     throw new Error(
-      'Upload API not wired: please share the backend endpoint + payload (flow_id/comparison_id + step key) for uploading purchase flow documents.'
+      'Upload API not wired: share the endpoint + payload (flow_id / step key) for uploading purchase flow documents.'
     );
+
+    // ── Step 2 (runs once the above is replaced): patch local state + save ───
+    // const docLink: string = uploadedUrl; // from upload response
+    // const flowId = safeTrim((flow as any)?.flow_id) || safeTrim((flow as any)?.comparison_id);
+    // const updatedSteps = getFlowSteps(flowId, flow).map((s) =>
+    //   s.key === step.key ? { ...s, docLink, status: 'uploaded', isLocal: false } : s
+    // );
+    // setFlowStepOverrides((prev) => ({ ...prev, [flowId]: updatedSteps }));
+    // await saveCurrentFlow(flowId, flow, updatedSteps);
   };
 
   return (
@@ -285,101 +436,281 @@ export default function PurchaseFlow() {
             const orderNumber = safeTrim((flow as any)?.order_number);
             const comparisonId = safeTrim((flow as any)?.comparison_id);
             const ts = safeTrim((flow as any)?.timestamp);
-            const steps = parseSteps((flow as any)?.purchase_flow_stage);
+            const steps = getFlowSteps(flowId, flow);
+            const isMenuOpen = addMenuOpenFor === flowId;
 
             return (
               <div key={flowId} className="rounded-xl border border-border bg-card overflow-hidden">
                 <div className="flex items-stretch gap-0 flex-wrap">
-                  <div className="w-[260px] shrink-0 border-r border-border px-4 py-4 bg-muted/30 flex flex-col justify-center">
-                    <div className="font-semibold text-sm leading-snug">{prNumber || 'Purchase Requisition'}</div>
-                    <div className="text-xs text-muted-foreground mt-1">PO: {orderNumber || '—'}</div>
-                    <div className="text-[11px] text-muted-foreground mt-1">Comparison: {comparisonId || '—'}</div>
-                    {ts ? (
-                      <div className="text-[11px] text-muted-foreground mt-2">Updated: {formatDateTime(ts)}</div>
+                  {(() => {
+                    const info = leftPanelInfoMap[flowId];
+                    const isLoading = leftPanelLoadingSet.has(flowId);
+                    const displayPr = info?.pr_number || prNumber || '—';
+                    const displayOrder = info?.Order_number || orderNumber || '—';
+                    const indentType = info?.indent_type;
+                    const vendor = info?.vendor_details;
+
+                    return (
+                  <div className="w-[280px] shrink-0 border-r border-border px-4 py-4 bg-muted/30 flex flex-col gap-3">
+
+                    {/* PR number + indent type badge */}
+                    <div>
+                      <div className="flex items-start gap-2">
+                        <span className="font-semibold text-sm leading-snug break-all">{displayPr}</span>
+                        {indentType && (
+                          <span className={`shrink-0 mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                            indentType === 'SPR'
+                              ? 'bg-purple-50 text-purple-700 border-purple-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            {indentType}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1 break-all">{displayOrder}</div>
+                      {info?.department && (
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          <span className="font-medium">Dept:</span> {info.department}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Vendor details */}
+                    {vendor ? (
+                      <div className="rounded-lg border border-border bg-background px-3 py-2.5 space-y-1">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Vendor</div>
+                        {vendor.vendor_name && (
+                          <div className="text-xs font-semibold text-foreground">{vendor.vendor_name}</div>
+                        )}
+                        {vendor.approved_vendor_id && (
+                          <div className="text-[11px] text-muted-foreground">{vendor.approved_vendor_id}</div>
+                        )}
+                        {vendor.vendor_contact && (
+                          <div className="text-[11px] text-muted-foreground">{vendor.vendor_contact}</div>
+                        )}
+                        {vendor.vendor_address && (
+                          <div className="text-[11px] text-muted-foreground">{vendor.vendor_address}</div>
+                        )}
+                        {vendor.gst_number && (
+                          <div className="text-[11px] text-muted-foreground">GST: {vendor.gst_number}</div>
+                        )}
+                      </div>
+                    ) : isLoading ? (
+                      <div className="space-y-2 rounded-lg border border-border bg-background px-3 py-2.5">
+                        <div className="h-2.5 w-2/3 rounded bg-muted animate-pulse" />
+                        <div className="h-2.5 w-1/2 rounded bg-muted animate-pulse" />
+                        <div className="h-2.5 w-3/4 rounded bg-muted animate-pulse" />
+                      </div>
                     ) : null}
 
-                    <div className="mt-3 grid grid-cols-1 gap-2">
+                    {/* Timestamp */}
+                    {ts && (
+                      <div className="text-[11px] text-muted-foreground">Updated: {formatDateTime(ts)}</div>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-2">
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => openHoInboxView(prNumber, 'po')}
-                        disabled={!prNumber}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        disabled={!!savingFlows[flowId]}
+                        onClick={() => saveCurrentFlow(flowId, flow)}
                       >
+                        {savingFlows[flowId] ? 'Saving…' : 'Save Current'}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => openHoInboxView(prNumber, 'po')} disabled={!prNumber}>
                         View PO / WO
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openHoInboxView(prNumber, 'indent')}
-                        disabled={!prNumber}
-                      >
+                      <Button size="sm" variant="outline" onClick={() => openHoInboxView(prNumber, 'indent')} disabled={!prNumber}>
                         View Indent
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openHoInboxView(prNumber, 'comparative')}
-                        disabled={!prNumber}
-                      >
+                      <Button size="sm" variant="outline" onClick={() => openHoInboxView(prNumber, 'comparative')} disabled={!prNumber}>
                         View Comparative Approval
                       </Button>
                     </div>
                   </div>
+                    );
+                  })()}
 
                   <div className="flex-1 px-4 py-4 overflow-x-auto">
                     {steps.length === 0 ? (
                       <div className="text-sm text-muted-foreground">No steps found for this flow.</div>
-                    ) : (
-                      <div className="min-w-max flex items-center gap-3">
-                        {steps.map((s, stepIdx) => {
-                          const uploaded = isUploaded(s);
-                          const canOpen = Boolean(s.docLink);
-                          return (
-                            <div key={s.key} className="flex items-center gap-3">
+                    ) : null}
+
+                    <div className="min-w-max flex items-center gap-3">
+                      {steps.map((s, stepIdx) => {
+                        const uploaded = isUploaded(s);
+                        const canOpen = Boolean(s.docLink);
+                        const isFirst = stepIdx === 0;
+                        const isLast = stepIdx === steps.length - 1;
+
+                        return (
+                          <div key={s.key} className="flex items-center gap-3">
+                            {/* Step node */}
+                            <div className="flex flex-col items-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (canOpen) {
-                                    window.open(s.docLink, '_blank');
-                                    return;
-                                  }
+                                  // Local steps that haven't been ticked yet are not clickable
+                                  if (s.isLocal && s.status !== 'completed') return;
+                                  if (canOpen) { window.open(s.docLink, '_blank'); return; }
                                   setUploadTarget({ flow, step: s });
                                 }}
                                 className="group flex flex-col items-center gap-1"
-                                title={canOpen ? 'Open document' : 'Upload document'}
+                                title={
+                                  s.isLocal && s.status !== 'completed'
+                                    ? s.document
+                                    : canOpen ? 'Open document' : 'Upload document'
+                                }
                               >
-                                <div
-                                  className={
-                                    'w-20 h-20 rounded-full border-2 flex flex-col items-center justify-center transition-colors ' +
-                                    (uploaded
-                                      ? 'border-green-500 bg-green-50'
-                                      : 'border-dashed border-border bg-background hover:bg-muted')
-                                  }
-                                >
+                                <div className={
+                                  'w-20 h-20 rounded-full border-2 flex flex-col items-center justify-center transition-colors ' +
+                                  (uploaded
+                                    ? 'border-green-500 bg-green-50'
+                                    : s.isLocal && s.status !== 'completed'
+                                      ? 'border-blue-400 bg-blue-50'
+                                      : !s.isLocal && !s.docLink && s.status === 'completed'
+                                        ? 'border-green-500 bg-green-50'
+                                        : 'border-dashed border-border bg-background hover:bg-muted')
+                                }>
                                   {uploaded ? (
                                     <FileText className="w-5 h-5 text-green-700" />
+                                  ) : s.isLocal && s.status !== 'completed' ? (
+                                    <Receipt className="w-5 h-5 text-blue-600" />
+                                  ) : !s.isLocal && !s.docLink && s.status === 'completed' ? (
+                                    <Check className="w-5 h-5 text-green-600" />
                                   ) : (
                                     <Plus className="w-7 h-7 text-muted-foreground group-hover:text-foreground" />
                                   )}
                                   <div className="text-[10px] mt-1 font-semibold text-muted-foreground">
-                                    {uploaded ? 'Uploaded' : 'Upload'}
+                                    {uploaded
+                                      ? 'Uploaded'
+                                      : s.isLocal && s.status !== 'completed'
+                                        ? 'New'
+                                        : !s.isLocal && !s.docLink && s.status === 'completed'
+                                          ? 'Done'
+                                          : 'Upload'}
                                   </div>
                                 </div>
-                                <div className="text-[10px] font-medium text-center max-w-[88px] leading-tight">
+                                <div className={
+                                  'text-[10px] font-medium text-center max-w-[88px] leading-tight ' +
+                                  (s.isLocal && s.status !== 'completed'
+                                    ? 'text-blue-700 font-semibold'
+                                    : !s.isLocal && !s.docLink && s.status === 'completed'
+                                      ? 'text-green-700 font-semibold'
+                                      : '')
+                                }>
                                   {s.document}
                                 </div>
                               </button>
 
-                              {stepIdx < steps.length - 1 ? (
-                                <div className="text-muted-foreground">
-                                  <ArrowRight className="w-4 h-4" />
+                              {/* Move + remove controls — shown on any step without a doc_link */}
+                              {!s.docLink && (
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => moveStep(flowId, flow, s.key, 'left')}
+                                    disabled={isFirst}
+                                    title="Move left"
+                                    className="h-5 w-5 rounded flex items-center justify-center border border-gray-200 bg-white text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                  >
+                                    <ChevronLeft className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleLocalStepDone(flowId, flow, s.key)}
+                                    title={s.status === 'completed' ? 'Mark as pending' : 'Mark as done'}
+                                    className={
+                                      'h-5 w-5 rounded flex items-center justify-center border transition-colors ' +
+                                      (s.status === 'completed'
+                                        ? 'border-green-400 bg-green-100 text-green-700 hover:bg-green-50'
+                                        : 'border-gray-200 bg-white text-gray-400 hover:bg-green-50 hover:border-green-300 hover:text-green-600')
+                                    }
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeLocalStep(flowId, flow, s.key)}
+                                    title="Remove"
+                                    className="h-5 w-5 rounded flex items-center justify-center border border-red-200 bg-white text-red-400 hover:bg-red-50 transition-colors"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => moveStep(flowId, flow, s.key, 'right')}
+                                    disabled={isLast}
+                                    title="Move right"
+                                    className="h-5 w-5 rounded flex items-center justify-center border border-gray-200 bg-white text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                  >
+                                    <ChevronRight className="w-3 h-3" />
+                                  </button>
                                 </div>
-                              ) : null}
+                              )}
                             </div>
-                          );
-                        })}
+
+                            {/* Arrow connector */}
+                            {stepIdx < steps.length - 1 ? (
+                              <div className="text-muted-foreground">
+                                <ArrowRight className="w-4 h-4" />
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+
+                      {/* Arrow before add button when steps exist */}
+                      {steps.length > 0 && (
+                        <div className="text-muted-foreground">
+                          <ArrowRight className="w-4 h-4" />
+                        </div>
+                      )}
+
+                      {/* + Add Invoice button with dropdown */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setAddMenuOpenFor(isMenuOpen ? null : flowId)}
+                          className="flex flex-col items-center gap-1 group"
+                          title="Add invoice step"
+                        >
+                          <div className="w-20 h-20 rounded-full border-2 border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-50 flex flex-col items-center justify-center transition-colors">
+                            <Plus className="w-6 h-6 text-blue-500 group-hover:text-blue-700" />
+                            <div className="text-[10px] mt-1 font-semibold text-blue-500 group-hover:text-blue-700">Add</div>
+                          </div>
+                          <div className="text-[10px] font-medium text-blue-600 text-center max-w-[88px] leading-tight">
+                            Invoice Step
+                          </div>
+                        </button>
+
+                        {/* Dropdown */}
+                        {isMenuOpen && (
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-30 w-44 rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+                            <div className="px-3 py-2 border-b border-border bg-muted/30">
+                              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Choose type</p>
+                            </div>
+                            {(['Proforma Invoice', 'Invoice', 'PRR (for payment)', 'PRR (for accounting)'] as const).map((type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => addInvoiceStep(flowId, flow, type)}
+                                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+                              >
+                                <Receipt className="w-4 h-4 text-blue-500 shrink-0" />
+                                {type}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setAddMenuOpenFor(null)}
+                              className="w-full flex items-center justify-center px-3 py-2 text-xs text-muted-foreground hover:bg-muted border-t border-border transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
               </div>
