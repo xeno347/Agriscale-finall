@@ -3,20 +3,14 @@ import {
   Users,
   UserCheck,
   Sprout,
-  Package,
   Calendar,
   UserPlus,
-  Truck,
-  Car,
   Fuel,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   Layers,
-  CheckSquare,
   Box,
-  Scale,
-  Tractor,
   FileText,
   Map,
   AlertCircle,
@@ -24,21 +18,16 @@ import {
   MoreHorizontal,
   ClipboardCheck,
   Activity,
-  CreditCard,
-  Settings,
   FolderKanban,
   Landmark,
-  IndianRupee,
-  Wallet,
-  PieChart,
-  TrendingUp,
-  HandCoins,
-  Scale as BalanceScale,
   Link2,
+  LayoutDashboard,
+  BookOpen,
+  CreditCard,
+  Receipt,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { fetchLatestProjectFile } from "@/services/projectData";
 
 /* ---------------- NAV ITEM COMPONENT ---------------- */
 
@@ -178,45 +167,10 @@ interface AppSidebarProps {
 
 const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [budgetState, setBudgetState] = useState({
-    hasCapex: false,
-    hasOpex: false,
-    hasAmortization: false,
-  });
   const navigate = useNavigate();
 
   useEffect(() => {
     document.title = "SBR | Farm-connect";
-  }, []);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadBudgetState = async () => {
-      try {
-        const { data } = await fetchLatestProjectFile();
-        if (!isMounted) return;
-
-        setBudgetState({
-          hasCapex: Boolean(data.step3_capex?.lineItems?.length),
-          hasOpex: Boolean((data as any).step4_opex?.lineItems?.length),
-          hasAmortization: Boolean(data.step6_amortizationAndViability?.amortizationBalanceSheet?.length),
-        });
-      } catch {
-        if (!isMounted) return;
-        setBudgetState({
-          hasCapex: false,
-          hasOpex: false,
-          hasAmortization: false,
-        });
-      }
-    };
-
-    void loadBudgetState();
-
-    return () => {
-      isMounted = false;
-    };
   }, []);
 
   return (
@@ -307,16 +261,16 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           )}
 
           <NavGroup label="Indents and Request" isSidebarCollapsed={isCollapsed}>
-            <NavItem to="/admin-request" icon={ClipboardCheck} label="Admin Ops Request" isSidebarCollapsed={isCollapsed} />
+            {/* <NavItem to="/admin-request" icon={ClipboardCheck} label="Admin Ops Request" isSidebarCollapsed={isCollapsed} /> */}
             <NavItem to="/admin-ops-indents" icon={FileText} label="Admin Ops Indents" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/admin-ops-fuel-requests" icon={Fuel} label="Fuel Requests" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/on-demand-task" icon={ClipboardCheck} label="On Demand Task" isSidebarCollapsed={isCollapsed} />
-            <NavItem to="/admin-mrf-approvals" icon={FileText} label="Admin MRF Approvals" isSidebarCollapsed={isCollapsed} />
+            {/* <NavItem to="/admin-mrf-approvals" icon={FileText} label="Admin MRF Approvals" isSidebarCollapsed={isCollapsed} /> */}
           </NavGroup>
 
           {/* Group 1: Farm Management */}
           <NavGroup label="Farm Management" isSidebarCollapsed={isCollapsed}>
-            <NavItem to="/tasks-beta" icon={CheckSquare} label="Tasks (Beta)" isSidebarCollapsed={isCollapsed} />
+            {/* <NavItem to="/tasks-beta" icon={CheckSquare} label="Tasks (Beta)" isSidebarCollapsed={isCollapsed} /> */}
             <NavItem 
               to="/leads" 
               icon={Users} 
@@ -386,7 +340,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           <NavGroup label="Human Resource" isSidebarCollapsed={isCollapsed}>
             <NavItem to="/hrms" icon={Landmark} label="Payroll & Attendance" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/staff-onboarding" icon={UserPlus} label="Staff Onboarding" isSidebarCollapsed={isCollapsed} />
-            <NavItem to="/man-power-requisition" icon={FileText} label="Man Power Requisition" isSidebarCollapsed={isCollapsed} />
+            {/* <NavItem to="/man-power-requisition" icon={FileText} label="Man Power Requisition" isSidebarCollapsed={isCollapsed} /> */}
           </NavGroup>
         </div>
 
@@ -407,23 +361,23 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           )}
 
           {/* Group 6: Harvest Management */}
-          <NavGroup label="Harvest Management" isSidebarCollapsed={isCollapsed}>
+          {/* <NavGroup label="Harvest Management" isSidebarCollapsed={isCollapsed}>
             <NavItem to="/harvest-planning" icon={Sprout} label="Harvest Planning" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/harvest-orders" icon={Package} label="Harvest Orders" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/harvest-cards" icon={CreditCard} label="Harvest Cards" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/weighment" icon={Scale} label="Weighment & QC" isSidebarCollapsed={isCollapsed} />
-          </NavGroup>
+          </NavGroup> */}
 
           {/* Group 6: Logistics */}
           <NavGroup label="Logistics" isSidebarCollapsed={isCollapsed}>
-            <NavItem 
-              to="/logistics" 
-              icon={Truck} 
-              label="Logistics Request" 
-              isSidebarCollapsed={isCollapsed} 
+            {/* <NavItem
+              to="/logistics"
+              icon={Truck}
+              label="Logistics Request"
+              isSidebarCollapsed={isCollapsed}
               notificationStatus="warning"
-            />
-            <NavItem to="/vehicle-management" icon={Car} label="Vehicle List" isSidebarCollapsed={isCollapsed} />
+            /> */}
+            {/* <NavItem to="/vehicle-management" icon={Car} label="Vehicle List" isSidebarCollapsed={isCollapsed} /> */}
             <NavItem 
               to="/fleet-chart" 
               icon={Map} 
@@ -434,10 +388,10 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           </NavGroup>
 
           {/* Group 7: Lease & Asset Management */}
-          <NavGroup label="Lease & Asset Management" isSidebarCollapsed={isCollapsed}>
+          {/* <NavGroup label="Lease & Asset Management" isSidebarCollapsed={isCollapsed}>
             <NavItem to="/rental-rate-card" icon={Tractor} label="Rental Rate Card" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/service-requests" icon={FileText} label="Service Request" isSidebarCollapsed={isCollapsed} />
-          </NavGroup>
+          </NavGroup> */}
 
           {/* Group 8: Operation */}
           <NavGroup label="Operation" isSidebarCollapsed={isCollapsed}>
@@ -468,7 +422,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             <NavItem to="/director-fuel-requests" icon={Fuel} label="Fuel Requests" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
 
-          <NavGroup label="Budgets" isSidebarCollapsed={isCollapsed}>
+          {/* <NavGroup label="Budgets" isSidebarCollapsed={isCollapsed}>
             <div className={cn(!isCollapsed && "mx-1") }>
               {!isCollapsed && (
                 <div className="mb-2 flex items-center gap-2 px-2">
@@ -500,12 +454,36 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             </div>
 
             <NavItem to="/project-config" icon={Settings} label="Project Config" isSidebarCollapsed={isCollapsed} />
-          </NavGroup>
+          </NavGroup> */}
 
-          <NavGroup label="Analytics" isSidebarCollapsed={isCollapsed}>
+          {/* <NavGroup label="Analytics" isSidebarCollapsed={isCollapsed}>
             <NavItem to="/director/cost-monitoring" icon={TrendingUp} label="Cost Monitoring" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/director/emis-investments" icon={HandCoins} label="EMIs and Investments" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/director/assets-liabilities" icon={BalanceScale} label="Assets and Liabilities" isSidebarCollapsed={isCollapsed} />
+          </NavGroup> */}
+        </div>
+
+        {/* Super Set: ACCOUNTS */}
+        <div className={cn("space-y-2 py-1", !isCollapsed && "border-t border-gray-100 mt-2 pt-3")}>
+          {!isCollapsed && (
+            <div className="mx-1 mb-1 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Receipt className="h-4 w-4 text-slate-700" />
+                <span className="text-[12px] font-extrabold text-slate-800 uppercase tracking-[0.1em]">
+                  ACCOUNTS
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] font-medium text-slate-600">
+                Financial records and payment modules
+              </p>
+            </div>
+          )}
+
+          <NavGroup label="Accounts" isSidebarCollapsed={isCollapsed}>
+            <NavItem to="/accounts/dashboard" icon={LayoutDashboard} label="Dashboard" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/accounts/ledger" icon={BookOpen} label="Ledger" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/accounts/purchase-flow" icon={Link2} label="Purchase Flow Connection" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/accounts/payments" icon={CreditCard} label="Payments" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
         </div>
 
