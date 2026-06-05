@@ -19,7 +19,7 @@ const BASE_URL = getBaseUrl().replace(/\/$/, '');
 // TYPES
 // ─────────────────────────────────────────────────────────────
 type RequestStatus = 'pending' | 'sent_to_admin' | 'approved' | 'rejected';
-type RequestSource = 'driver_app' | 'manual';
+type RequestSource = 'driver_app' | 'manual' | 'vendor';
 
 type StaffDetails = {
   staff_name: string;
@@ -28,12 +28,26 @@ type StaffDetails = {
 };
 
 type VehicleDetails = {
-  owned_by: string;
+  owned_by?: string;
   company: string;
   model: string;
   type: string;
-  last_service_date: string;
+  last_service_date?: string;
   vehicle_number: string;
+};
+
+type VendorDetails = {
+  vendor_name: string;
+  vendor_contact: string;
+  vendor_id: string;
+  order_number: string;
+};
+
+type Vendor = {
+  vendor_id: string;
+  vendor_name: string;
+  vendor_contact: string;
+  order_number: string;
 };
 
 // Matches the API response shape; optional fields are filled for manual / receipt-stage requests
@@ -46,8 +60,9 @@ type FuelRequest = {
   date: string;
   purpose: string;
   fuel_requested: number;
-  staff_details: StaffDetails;
+  staff_details?: StaffDetails;       // absent for vendor-source requests
   vehicle_details: VehicleDetails;
+  vendor_details?: VendorDetails;     // present for vendor-source requests
   // Optional — filled at manual-entry / receipt stage
   receipt_no?: string;
   issue_type?: string;
@@ -275,45 +290,56 @@ const FuelsAndConsumables = () => {
     }
   };
 
-  const handleCreateRequest = (data: NewRequestForm) => {
-    const newReq: FuelRequest = {
-      request_id: genRequestId(),
-      source: data.source,
-      requestor_status: 'pending',
-      admin_ops_status: 'pending',
-      director_status: 'pending',
-      date: new Date().toISOString().split('T')[0],
-      purpose: data.purpose,
+  const [creatingRequest, setCreatingRequest] = useState(false);
+
+  const handleCreateRequest = async (
+    data: NewRequestForm,
+    requestorType: 'staff' | 'vendor',
+    selectedVendor: Vendor | null,
+  ) => {
+    const payload = {
       fuel_requested: data.fuel_requested,
-      staff_details: {
-        staff_name: data.staff_name,
-        staff_contact: data.staff_contact,
-        staff_id: '',
-      },
+      purpose: data.purpose,
+      source: requestorType === 'vendor' ? 'vendor' : 'manual',
+      vendor_details: selectedVendor ?? {},
       vehicle_details: {
-        owned_by: '',
-        company: data.vehicle_company,
-        model: data.vehicle_model,
-        type: data.vehicle_type,
-        last_service_date: '',
         vehicle_number: data.vehicle_number,
+        type: data.vehicle_type,
+        model: data.vehicle_model,
+        company: data.vehicle_company,
       },
-      issue_type: data.issue_type,
-      vendor_name: data.vendor_name,
-      vendor_code: data.vendor_code,
-      vendor_phone: data.vendor_phone,
-      vendor_address: data.vendor_address,
-      location: data.location,
-      rate_per_ltr: data.rate_per_ltr,
-      total_amount: data.total_amount,
-      odometer_reading: data.odometer_reading,
-      remarks: data.remarks,
-      issued_by: data.issued_by,
-      reference_wo: data.reference_wo,
     };
-    setRequests(prev => [newReq, ...prev]);
-    setNewRequestOpen(false);
-    toast.success('Fuel request created');
+
+    setCreatingRequest(true);
+    try {
+      const res = await fetch(`${BASE_URL}/fuels_consumables/create_fuel_request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result: any = await res.json().catch(() => null);
+      if (!res.ok || result?.success === false)
+        throw new Error(result?.message || 'Failed to create request');
+      setNewRequestOpen(false);
+      toast.success('Fuel request created');
+      // Refresh list to include the new request from server
+      setLoading(true);
+      const qs = new URLSearchParams();
+      if (filterDate) qs.set('date', filterDate);
+      if (filterSource !== 'all') qs.set('source', filterSource);
+      fetch(`${BASE_URL}/fuels_consumables/get_all_requests${qs.toString() ? `?${qs}` : ''}`)
+        .then(r => r.json())
+        .then((d: any) => {
+          const list = d?.fuel_requests ?? d?.pending_requests ?? d?.requests ?? d;
+          if (Array.isArray(list)) setRequests(list);
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to create fuel request');
+    } finally {
+      setCreatingRequest(false);
+    }
   };
 
   const totalQty = requests
@@ -539,18 +565,24 @@ const FuelsAndConsumables = () => {
                           'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap',
                           req.source === 'driver_app'
                             ? 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
-                            : 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
+                            : req.source === 'vendor'
+                              ? 'bg-orange-50 text-orange-700 ring-1 ring-orange-200'
+                              : 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
                         )}>
                           {req.source === 'driver_app'
                             ? <><Smartphone className="w-2.5 h-2.5" /> Driver App</>
-                            : <><Edit3 className="w-2.5 h-2.5" /> Manual</>}
+                            : req.source === 'vendor'
+                              ? <><Building2 className="w-2.5 h-2.5" /> Vendor</>
+                              : <><Edit3 className="w-2.5 h-2.5" /> Manual</>}
                         </span>
                       </td>
 
                       {/* Person / Vehicle */}
                       <td className="px-4 py-3">
                         <p className="font-medium text-gray-900 truncate max-w-[150px]">
-                          {req.staff_details?.staff_name || '—'}
+                          {req.source === 'vendor'
+                            ? (req.vendor_details?.vendor_name || '—')
+                            : (req.staff_details?.staff_name || '—')}
                         </p>
                         <p className="text-[11px] text-gray-400 truncate max-w-[150px] mt-0.5">
                           {vehicleLabel || req.vehicle_details?.model || '—'}
@@ -619,6 +651,7 @@ const FuelsAndConsumables = () => {
         open={newRequestOpen}
         onClose={() => setNewRequestOpen(false)}
         onCreate={handleCreateRequest}
+        creating={creatingRequest}
       />
 
       {viewRequest && (
@@ -646,19 +679,65 @@ const FuelsAndConsumables = () => {
 // ─────────────────────────────────────────────────────────────
 // NEW REQUEST MODAL
 // ─────────────────────────────────────────────────────────────
+const genRefNo = () =>
+  `WO-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 99999)).padStart(5, '0')}`;
+
 const NewRequestModal = ({
-  open, onClose, onCreate,
+  open, onClose, onCreate, creating,
 }: {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: NewRequestForm) => void;
+  onCreate: (data: NewRequestForm, requestorType: 'staff' | 'vendor', selectedVendor: Vendor | null) => void;
+  creating: boolean;
 }) => {
   const [form, setForm] = useState<NewRequestForm>(emptyForm());
-
-  useEffect(() => { if (!open) setForm(emptyForm()); }, [open]);
+  const [requestorType, setRequestorType] = useState<'staff' | 'vendor'>('staff');
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [selectedVendorId, setSelectedVendorId] = useState('');
+  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
 
   const set = <K extends keyof NewRequestForm>(k: K, v: NewRequestForm[K]) =>
     setForm(p => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    if (!open) {
+      setForm(emptyForm());
+      setRequestorType('staff');
+      setSelectedVendorId('');
+      setSelectedVendor(null);
+      setVendors([]);
+      return;
+    }
+    // Auto-generate reference number on open
+    setForm(p => ({ ...p, reference_wo: genRefNo() }));
+    // Fetch vendor list
+    fetch(`${BASE_URL}/admin_cultivation/get_active_vendor`)
+      .then(r => r.json())
+      .then((data: any) => {
+        if (Array.isArray(data?.vendors)) setVendors(data.vendors);
+      })
+      .catch(() => {});
+  }, [open]);
+
+  // Populate vendor fields when a vendor+order entry is selected from dropdown
+  // order_number is unique per row — used as the select value
+  useEffect(() => {
+    if (!selectedVendorId) {
+      setSelectedVendor(null);
+      return;
+    }
+    const v = vendors.find(x => x.order_number === selectedVendorId);
+    if (!v) return;
+    setSelectedVendor(v);
+    setForm(p => ({
+      ...p,
+      vendor_name: v.vendor_name,
+      vendor_phone: v.vendor_contact,
+      reference_wo: v.order_number,   // PO/WO auto-populated from vendor order
+      vendor_code: '',
+      vendor_address: '',
+    }));
+  }, [selectedVendorId, vendors]);
 
   // Auto-calc total when qty or rate changes
   useEffect(() => {
@@ -666,11 +745,12 @@ const NewRequestModal = ({
   }, [form.fuel_requested, form.rate_per_ltr]);
 
   const handleCreate = () => {
-    if (!form.staff_name.trim()) return toast.error('Person name is required');
+    if (requestorType === 'vendor' && !selectedVendor) return toast.error('Please select a vendor');
+    if (requestorType === 'staff' && !form.staff_name.trim()) return toast.error('Person name is required');
     if (!form.vehicle_number.trim()) return toast.error('Vehicle number is required');
     if (!form.purpose.trim()) return toast.error('Purpose is required');
     if (!form.fuel_requested || form.fuel_requested <= 0) return toast.error('Quantity must be greater than 0');
-    onCreate(form);
+    onCreate(form, requestorType, selectedVendor);
   };
 
   return (
@@ -684,51 +764,97 @@ const NewRequestModal = ({
         </DialogHeader>
 
         <div className="space-y-5 py-1">
-          {/* Section 1 — Vendor Details */}
-          <FormSection title="Vendor Details" color="orange">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Vendor Name">
-                <Input placeholder="e.g. Patil Petroleum" value={form.vendor_name}
-                  onChange={e => set('vendor_name', e.target.value)} />
-              </Field>
-              <Field label="Vendor Code">
-                <Input placeholder="e.g. VEN-0025" value={form.vendor_code}
-                  onChange={e => set('vendor_code', e.target.value)} />
-              </Field>
-              <Field label="Vendor Phone">
-                <Input placeholder="e.g. 9753146677" value={form.vendor_phone}
-                  onChange={e => set('vendor_phone', e.target.value)} />
-              </Field>
-              <Field label="Address">
-                <Input placeholder="e.g. Main Road, Durg" value={form.vendor_address}
-                  onChange={e => set('vendor_address', e.target.value)} />
-              </Field>
-            </div>
-          </FormSection>
 
-          {/* Section 2 — Issued To */}
-          <FormSection title="Staff Details" color="blue">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Person Name *">
-                <Input placeholder="e.g. Ramesh Yadav" value={form.staff_name}
-                  onChange={e => set('staff_name', e.target.value)} />
-              </Field>
-              <Field label="Contact">
-                <Input placeholder="e.g. 6261122334" value={form.staff_contact}
-                  onChange={e => set('staff_contact', e.target.value)} />
-              </Field>
-              <Field label="Purpose *">
-                <Input placeholder="e.g. Tractor Field Work" value={form.purpose}
-                  onChange={e => set('purpose', e.target.value)} />
-              </Field>
-              <Field label="Location">
-                <Input placeholder="e.g. Farm - North Field" value={form.location}
-                  onChange={e => set('location', e.target.value)} />
-              </Field>
+          {/* ── Staff / Vendor toggle ── */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Request from
+            </span>
+            <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 gap-1">
+              {(['staff', 'vendor'] as const).map(type => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => { setRequestorType(type); setSelectedVendorId(''); }}
+                  className={cn(
+                    'px-5 py-1.5 rounded-lg text-sm font-semibold transition-all',
+                    requestorType === type
+                      ? type === 'vendor'
+                        ? 'bg-orange-500 text-white shadow-sm'
+                        : 'bg-blue-600 text-white shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  )}
+                >
+                  {type === 'staff' ? 'Staff' : 'Vendor'}
+                </button>
+              ))}
             </div>
-          </FormSection>
+          </div>
 
-          {/* Section 2b — Vehicle */}
+          {/* ── Section 1: Vendor Details (dropdown) or Staff Details ── */}
+          {requestorType === 'vendor' ? (
+            <FormSection title="Vendor Details" color="orange">
+              <Field label="Select Vendor *">
+                <select
+                  className="w-full border border-gray-200 rounded-lg px-3 h-10 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  value={selectedVendorId}
+                  onChange={e => setSelectedVendorId(e.target.value)}
+                >
+                  <option value="">— Choose a vendor —</option>
+                  {vendors.map(v => (
+                    <option key={v.order_number} value={v.order_number}>
+                      {v.vendor_name} — {v.order_number}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {vendors.length === 0 && (
+                <p className="text-xs text-amber-600 mt-2">
+                  No vendors loaded — check API connection or add vendors first.
+                </p>
+              )}
+              {selectedVendorId && (
+                <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-orange-200">
+                  <div className="flex items-start gap-2">
+                    <Building2 className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">Vendor Name</p>
+                      <p className="text-sm font-medium text-gray-800">{form.vendor_name || '—'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Phone className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">Contact</p>
+                      <p className="text-sm font-medium text-gray-800">{form.vendor_phone || '—'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <FileText className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">PO / WO No.</p>
+                      <p className="text-sm font-medium text-gray-800">{form.reference_wo || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </FormSection>
+          ) : (
+            <FormSection title="Staff Details" color="blue">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Person Name *">
+                  <Input placeholder="e.g. Ramesh Yadav" value={form.staff_name}
+                    onChange={e => set('staff_name', e.target.value)} />
+                </Field>
+                <Field label="Contact">
+                  <Input placeholder="e.g. 6261122334" value={form.staff_contact}
+                    onChange={e => set('staff_contact', e.target.value)} />
+                </Field>
+              </div>
+            </FormSection>
+          )}
+
+          {/* ── Section 2: Vehicle Details — always manual ── */}
           <FormSection title="Vehicle Details" color="gray">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Vehicle Type">
@@ -750,7 +876,7 @@ const NewRequestModal = ({
             </div>
           </FormSection>
 
-          {/* Section 3 — Fuel Details */}
+          {/* ── Section 3: Fuel Issue Details ── */}
           <FormSection title="Fuel Issue Details" color="green">
             <div className="grid grid-cols-4 gap-3">
               <Field label="Quantity (Ltrs) *">
@@ -777,36 +903,33 @@ const NewRequestModal = ({
             </div>
           </FormSection>
 
-          {/* Section 4 — Additional */}
+          {/* ── Section 4: Additional Information ── */}
           <FormSection title="Additional Information" color="gray">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Issued By">
-                <Input placeholder="e.g. SBR Store Incharge" value={form.issued_by}
-                  onChange={e => set('issued_by', e.target.value)} />
+              {/* Auto-populated PO / WO reference — read-only */}
+              <Field label="PO / WO Reference No.">
+                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 h-10">
+                  <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  <span className="text-sm font-mono text-gray-700">{form.reference_wo || '—'}</span>
+                </div>
               </Field>
-              <Field label="Reference (WO No.)">
-                <Input placeholder="e.g. WO-2025-12-045" value={form.reference_wo}
-                  onChange={e => set('reference_wo', e.target.value)} />
-              </Field>
-            </div>
-            <div className="mt-3">
-              <Field label="Remarks">
-                <textarea
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
-                  rows={2}
-                  placeholder="Any additional remarks…"
-                  value={form.remarks}
-                  onChange={e => set('remarks', e.target.value)}
-                />
+              <Field label="Purpose *">
+                <Input placeholder="e.g. Tractor Field Work" value={form.purpose}
+                  onChange={e => set('purpose', e.target.value)} />
               </Field>
             </div>
           </FormSection>
+
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button className="bg-orange-500 hover:bg-orange-600 text-white" onClick={handleCreate}>
-            Create Request
+          <Button variant="outline" onClick={onClose} disabled={creating}>Cancel</Button>
+          <Button
+            className="bg-orange-500 hover:bg-orange-600 text-white"
+            onClick={handleCreate}
+            disabled={creating}
+          >
+            {creating ? 'Creating…' : 'Create Request'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -863,26 +986,35 @@ const ViewRequestModal = ({
         })()}
 
         {/* Vendor */}
-        {req.vendor_name && (
+        {req.vendor_details && (
           <FormSection title="Vendor Details" color="orange">
             <div className="grid grid-cols-2 gap-2">
-              <DetailRow icon={Building2} label="Vendor Name" value={req.vendor_name} />
-              <DetailRow icon={FileText} label="Vendor Code" value={req.vendor_code ?? ''} />
-              <DetailRow icon={Phone} label="Phone" value={req.vendor_phone ?? ''} />
-              <DetailRow icon={MapPin} label="Address" value={req.vendor_address ?? ''} />
+              <DetailRow icon={Building2} label="Vendor Name" value={req.vendor_details.vendor_name} />
+              <DetailRow icon={FileText}  label="Vendor ID"   value={req.vendor_details.vendor_id} />
+              <DetailRow icon={Phone}     label="Contact"     value={req.vendor_details.vendor_contact} />
+              <DetailRow icon={FileText}  label="PO / WO No." value={req.vendor_details.order_number} />
             </div>
           </FormSection>
         )}
 
-        {/* Staff & Vehicle */}
-        <FormSection title="Issued To" color="blue">
-          <div className="grid grid-cols-2 gap-2">
-            <DetailRow icon={User} label="Person Name" value={req.staff_details?.staff_name ?? '—'} />
-            <DetailRow icon={Phone} label="Contact" value={req.staff_details?.staff_contact ?? '—'} />
-            <DetailRow icon={FileText} label="Purpose" value={req.purpose} />
-            <DetailRow icon={MapPin} label="Location" value={req.location ?? '—'} />
-          </div>
-        </FormSection>
+        {/* Staff (only for non-vendor requests) */}
+        {req.staff_details ? (
+          <FormSection title="Issued To" color="blue">
+            <div className="grid grid-cols-2 gap-2">
+              <DetailRow icon={User}     label="Person Name" value={req.staff_details.staff_name} />
+              <DetailRow icon={Phone}    label="Contact"     value={req.staff_details.staff_contact} />
+              <DetailRow icon={FileText} label="Purpose"     value={req.purpose} />
+              <DetailRow icon={MapPin}   label="Location"    value={req.location ?? '—'} />
+            </div>
+          </FormSection>
+        ) : (
+          <FormSection title="Request Info" color="blue">
+            <div className="grid grid-cols-2 gap-2">
+              <DetailRow icon={FileText} label="Purpose"  value={req.purpose} />
+              {req.location && <DetailRow icon={MapPin} label="Location" value={req.location} />}
+            </div>
+          </FormSection>
+        )}
 
         {/* Vehicle */}
         <FormSection title="Vehicle Details" color="gray">
@@ -1001,11 +1133,10 @@ const ReceiptModal = ({
       <div class="box">
         <div class="box-title">Diesel Vendor Details</div>
         <div class="box-body grid2">
-          <p><b>Vendor Name:</b> ${req.vendor_name || '—'}</p>
-          <p><b>Address:</b> ${req.vendor_address || '—'}</p>
-          <p><b>Vendor Code:</b> ${req.vendor_code || '—'}</p>
-          <p></p>
-          <p><b>Phone:</b> ${req.vendor_phone || '—'}</p>
+          <p><b>Vendor Name:</b> ${req.vendor_details?.vendor_name || req.vendor_name || '—'}</p>
+          <p><b>Vendor ID:</b> ${req.vendor_details?.vendor_id || req.vendor_code || '—'}</p>
+          <p><b>Contact:</b> ${req.vendor_details?.vendor_contact || req.vendor_phone || '—'}</p>
+          <p><b>PO / WO No.:</b> ${req.vendor_details?.order_number || req.reference_wo || '—'}</p>
         </div>
       </div>
       <div class="box">
@@ -1100,11 +1231,10 @@ const ReceiptModal = ({
           {/* Vendor Details */}
           <ReceiptBox title="Diesel Vendor Details">
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Vendor Name:</span> {req.vendor_name || '—'}</p>
-              <p><span className="font-semibold">Address:</span> {req.vendor_address || '—'}</p>
-              <p><span className="font-semibold">Vendor Code:</span> {req.vendor_code || '—'}</p>
-              <div />
-              <p><span className="font-semibold">Phone:</span> {req.vendor_phone || '—'}</p>
+              <p><span className="font-semibold">Vendor Name:</span> {req.vendor_details?.vendor_name || req.vendor_name || '—'}</p>
+              <p><span className="font-semibold">Vendor ID:</span> {req.vendor_details?.vendor_id || req.vendor_code || '—'}</p>
+              <p><span className="font-semibold">Contact:</span> {req.vendor_details?.vendor_contact || req.vendor_phone || '—'}</p>
+              <p><span className="font-semibold">PO / WO No.:</span> {req.vendor_details?.order_number || req.reference_wo || '—'}</p>
             </div>
           </ReceiptBox>
 

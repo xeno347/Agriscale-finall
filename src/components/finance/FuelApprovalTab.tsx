@@ -19,12 +19,16 @@ const BASE_URL = getBaseUrl().replace(/\/$/, '');
 // TYPES
 // ─────────────────────────────────────────────────────────────
 type RequestStatus = 'pending' | 'sent_to_director' | 'approved' | 'rejected';
-type RequestSource = 'driver_app' | 'manual';
+type RequestSource = 'driver_app' | 'manual' | 'vendor';
 
 type StaffDetails  = { staff_name: string; staff_contact: string; staff_id: string };
 type VehicleDetails = {
-  owned_by: string; company: string; model: string;
-  type: string; last_service_date: string; vehicle_number: string;
+  owned_by?: string; company: string; model: string;
+  type: string; last_service_date?: string; vehicle_number: string;
+};
+type VendorDetails = {
+  vendor_name: string; vendor_contact: string;
+  vendor_id: string; order_number: string;
 };
 
 type FuelRequest = {
@@ -36,8 +40,9 @@ type FuelRequest = {
   date: string;
   purpose: string;
   fuel_requested: number;
-  staff_details: StaffDetails;
+  staff_details?: StaffDetails;
   vehicle_details: VehicleDetails;
+  vendor_details?: VendorDetails;
   receipt_no?: string;
   issue_type?: string;
   vendor_name?: string;
@@ -294,13 +299,25 @@ const FuelApprovalTab = () => {
                       <td className="px-4 py-3">
                         <span className={cn(
                           'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap',
-                          req.source === 'driver_app' ? 'bg-violet-50 text-violet-700 ring-1 ring-violet-200' : 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
+                          req.source === 'driver_app'
+                            ? 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
+                            : req.source === 'vendor'
+                              ? 'bg-orange-50 text-orange-700 ring-1 ring-orange-200'
+                              : 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
                         )}>
-                          {req.source === 'driver_app' ? <><Smartphone className="w-2.5 h-2.5" /> Driver App</> : <><Edit3 className="w-2.5 h-2.5" /> Manual</>}
+                          {req.source === 'driver_app'
+                            ? <><Smartphone className="w-2.5 h-2.5" /> Driver App</>
+                            : req.source === 'vendor'
+                              ? <><Building2 className="w-2.5 h-2.5" /> Vendor</>
+                              : <><Edit3 className="w-2.5 h-2.5" /> Manual</>}
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900 truncate max-w-[150px]">{req.staff_details?.staff_name || '—'}</p>
+                        <p className="font-medium text-gray-900 truncate max-w-[150px]">
+                          {req.source === 'vendor'
+                            ? (req.vendor_details?.vendor_name || '—')
+                            : (req.staff_details?.staff_name || '—')}
+                        </p>
                         <p className="text-[11px] text-gray-400 truncate max-w-[150px] mt-0.5">{vehicleLabel || req.vehicle_details?.model || '—'}</p>
                       </td>
                       <td className="px-4 py-3 text-gray-600 truncate max-w-[130px]">{req.purpose || '—'}</td>
@@ -380,25 +397,34 @@ const ViewRequestModal = ({ request: req, onClose, onPrintReceipt }: {
           );
         })()}
 
-        {req.vendor_name && (
+        {req.vendor_details && (
           <Section title="Vendor Details" color="orange">
             <div className="grid grid-cols-2 gap-2">
-              <DetailRow icon={Building2} label="Vendor Name" value={req.vendor_name} />
-              <DetailRow icon={FileText}  label="Vendor Code" value={req.vendor_code ?? ''} />
-              <DetailRow icon={Phone}     label="Phone"       value={req.vendor_phone ?? ''} />
-              <DetailRow icon={MapPin}    label="Address"     value={req.vendor_address ?? ''} />
+              <DetailRow icon={Building2} label="Vendor Name" value={req.vendor_details.vendor_name} />
+              <DetailRow icon={FileText}  label="Vendor ID"   value={req.vendor_details.vendor_id} />
+              <DetailRow icon={Phone}     label="Contact"     value={req.vendor_details.vendor_contact} />
+              <DetailRow icon={FileText}  label="PO / WO No." value={req.vendor_details.order_number} />
             </div>
           </Section>
         )}
 
-        <Section title="Issued To" color="blue">
-          <div className="grid grid-cols-2 gap-2">
-            <DetailRow icon={User}     label="Person Name" value={req.staff_details?.staff_name ?? '—'} />
-            <DetailRow icon={Phone}    label="Contact"     value={req.staff_details?.staff_contact ?? '—'} />
-            <DetailRow icon={FileText} label="Purpose"     value={req.purpose} />
-            <DetailRow icon={MapPin}   label="Location"    value={req.location ?? '—'} />
-          </div>
-        </Section>
+        {req.staff_details ? (
+          <Section title="Issued To" color="blue">
+            <div className="grid grid-cols-2 gap-2">
+              <DetailRow icon={User}     label="Person Name" value={req.staff_details.staff_name} />
+              <DetailRow icon={Phone}    label="Contact"     value={req.staff_details.staff_contact} />
+              <DetailRow icon={FileText} label="Purpose"     value={req.purpose} />
+              <DetailRow icon={MapPin}   label="Location"    value={req.location ?? '—'} />
+            </div>
+          </Section>
+        ) : (
+          <Section title="Request Info" color="blue">
+            <div className="grid grid-cols-2 gap-2">
+              <DetailRow icon={FileText} label="Purpose"  value={req.purpose} />
+              {req.location && <DetailRow icon={MapPin} label="Location" value={req.location} />}
+            </div>
+          </Section>
+        )}
 
         <Section title="Vehicle Details" color="gray">
           <div className="grid grid-cols-2 gap-2">
@@ -496,10 +522,10 @@ const ReceiptModal = ({ request: req, onClose }: { request: FuelRequest; onClose
       <div class="box">
         <div class="box-title">Diesel Vendor Details</div>
         <div class="box-body grid2">
-          <p><b>Vendor Name:</b> ${req.vendor_name || '—'}</p>
-          <p><b>Address:</b> ${req.vendor_address || '—'}</p>
-          <p><b>Vendor Code:</b> ${req.vendor_code || '—'}</p><p></p>
-          <p><b>Phone:</b> ${req.vendor_phone || '—'}</p>
+          <p><b>Vendor Name:</b> ${req.vendor_details?.vendor_name || req.vendor_name || '—'}</p>
+          <p><b>Vendor ID:</b> ${req.vendor_details?.vendor_id || req.vendor_code || '—'}</p>
+          <p><b>Contact:</b> ${req.vendor_details?.vendor_contact || req.vendor_phone || '—'}</p>
+          <p><b>PO / WO No.:</b> ${req.vendor_details?.order_number || req.reference_wo || '—'}</p>
         </div>
       </div>
       <div class="box">
@@ -567,11 +593,10 @@ const ReceiptModal = ({ request: req, onClose }: { request: FuelRequest; onClose
           </div>
           <RBox title="Diesel Vendor Details">
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Vendor Name:</span> {req.vendor_name || '—'}</p>
-              <p><span className="font-semibold">Address:</span> {req.vendor_address || '—'}</p>
-              <p><span className="font-semibold">Vendor Code:</span> {req.vendor_code || '—'}</p>
-              <div />
-              <p><span className="font-semibold">Phone:</span> {req.vendor_phone || '—'}</p>
+              <p><span className="font-semibold">Vendor Name:</span> {req.vendor_details?.vendor_name || req.vendor_name || '—'}</p>
+              <p><span className="font-semibold">Vendor ID:</span> {req.vendor_details?.vendor_id || req.vendor_code || '—'}</p>
+              <p><span className="font-semibold">Contact:</span> {req.vendor_details?.vendor_contact || req.vendor_phone || '—'}</p>
+              <p><span className="font-semibold">PO / WO No.:</span> {req.vendor_details?.order_number || req.reference_wo || '—'}</p>
             </div>
           </RBox>
           <RBox title="Diesel Issued To">
