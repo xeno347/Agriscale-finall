@@ -18,7 +18,7 @@ const BASE_URL = getBaseUrl().replace(/\/$/, '');
 // ─────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────
-type RequestStatus = 'pending' | 'sent_to_director' | 'approved' | 'rejected';
+type RequestStatus = 'pending' | 'approved' | 'rejected';
 type RequestSource = 'driver_app' | 'manual' | 'vendor';
 
 type StaffDetails  = { staff_name: string; staff_contact: string; staff_id: string };
@@ -58,10 +58,10 @@ type FuelRequest = {
   reference_wo?: string;
 };
 
+// From the director's view: pending = needs action, approved = director has approved
 const deriveStatus = (r: FuelRequest): RequestStatus => {
   if (r.admin_ops_status === 'rejected' || r.director_status === 'rejected') return 'rejected';
   if (r.director_status === 'approved' || r.director_status === 'approved_and_forwarded') return 'approved';
-  if (r.admin_ops_status !== 'pending') return 'sent_to_director';
   return 'pending';
 };
 
@@ -71,18 +71,16 @@ type ActiveTab = 'all' | RequestStatus;
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<RequestStatus, { label: string; pill: string; tabActive: string }> = {
-  pending:          { label: 'Pending',           pill: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',   tabActive: 'bg-amber-500 text-white border-amber-500'   },
-  sent_to_director: { label: 'Sent to Director',  pill: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',     tabActive: 'bg-blue-600 text-white border-blue-600'     },
-  approved:         { label: 'Approved',           pill: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200', tabActive: 'bg-emerald-600 text-white border-emerald-600' },
-  rejected:         { label: 'Rejected',           pill: 'bg-red-50 text-red-700 ring-1 ring-red-200',       tabActive: 'bg-red-600 text-white border-red-600'       },
+  pending:  { label: 'Pending',  pill: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',       tabActive: 'bg-amber-500 text-white border-amber-500'   },
+  approved: { label: 'Approved', pill: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200', tabActive: 'bg-emerald-600 text-white border-emerald-600' },
+  rejected: { label: 'Rejected', pill: 'bg-red-50 text-red-700 ring-1 ring-red-200',             tabActive: 'bg-red-600 text-white border-red-600'       },
 };
 
 const TAB_LIST: { key: ActiveTab; label: string; tabActive: string }[] = [
-  { key: 'all',              label: 'All',              tabActive: 'bg-gray-800 text-white border-gray-800' },
-  { key: 'pending',          label: 'Pending',          tabActive: STATUS_CONFIG.pending.tabActive          },
-  { key: 'sent_to_director', label: 'Sent to Director', tabActive: STATUS_CONFIG.sent_to_director.tabActive },
-  { key: 'approved',         label: 'Approved',         tabActive: STATUS_CONFIG.approved.tabActive         },
-  { key: 'rejected',         label: 'Rejected',         tabActive: STATUS_CONFIG.rejected.tabActive         },
+  { key: 'all',      label: 'All',      tabActive: 'bg-gray-800 text-white border-gray-800' },
+  { key: 'pending',  label: 'Pending',  tabActive: STATUS_CONFIG.pending.tabActive  },
+  { key: 'approved', label: 'Approved', tabActive: STATUS_CONFIG.approved.tabActive },
+  { key: 'rejected', label: 'Rejected', tabActive: STATUS_CONFIG.rejected.tabActive },
 ];
 
 const genReceiptNo = () => `DIS-${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}`;
@@ -130,11 +128,12 @@ const FuelApprovalTab = () => {
     const q = search.toLowerCase();
     return requests.filter(r => {
       const matchSearch = !q ||
-        r.request_id.toLowerCase().includes(q) ||
+        (r.request_id ?? '').toLowerCase().includes(q) ||
         (r.staff_details?.staff_name ?? '').toLowerCase().includes(q) ||
+        (r.vendor_details?.vendor_name ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.vehicle_number ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.model ?? '').toLowerCase().includes(q) ||
-        r.purpose.toLowerCase().includes(q);
+        (r.purpose ?? '').toLowerCase().includes(q);
       const matchTab = activeTab === 'all' || deriveStatus(r) === activeTab;
       return matchSearch && matchTab;
     });

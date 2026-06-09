@@ -79,12 +79,27 @@ type FuelRequest = {
   reference_wo?: string;
 };
 
-// Derives a single display status from the three API status fields
+// Derives a tab bucket from the three API status fields
 const deriveStatus = (r: FuelRequest): RequestStatus => {
   if (r.admin_ops_status === 'rejected' || r.director_status === 'rejected') return 'rejected';
-  if (r.director_status === 'approved' || r.admin_ops_status === 'approved') return 'approved';
-  if (r.requestor_status !== 'pending') return 'sent_to_admin';
+  if (r.director_status === 'approved' || r.director_status === 'approved_and_forwarded') return 'approved';
+  if (r.requestor_status === 'approved_and_forwarded') return 'sent_to_admin';
   return 'pending';
+};
+
+type StageInfo = { label: string; pill: string; step: 0 | 1 | 2 | 3 };
+
+// Returns the specific workflow stage for the status column
+const deriveStage = (r: FuelRequest): StageInfo => {
+  if (r.admin_ops_status === 'rejected' || r.director_status === 'rejected')
+    return { label: 'Rejected', pill: 'bg-red-50 text-red-700 ring-1 ring-red-200', step: 0 };
+  if (r.director_status === 'approved' || r.director_status === 'approved_and_forwarded')
+    return { label: 'Fully Approved', pill: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200', step: 3 };
+  if (r.admin_ops_status === 'approved_and_forwarded')
+    return { label: 'With Director', pill: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200', step: 2 };
+  if (r.requestor_status === 'approved_and_forwarded')
+    return { label: 'With Admin Ops', pill: 'bg-sky-50 text-sky-700 ring-1 ring-sky-200', step: 1 };
+  return { label: 'With Requestor', pill: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200', step: 0 };
 };
 
 type NewRequestForm = {
@@ -213,12 +228,13 @@ const FuelsAndConsumables = () => {
     const q = search.toLowerCase();
     return requests.filter(r => {
       const matchSearch = !q ||
-        r.request_id.toLowerCase().includes(q) ||
+        (r.request_id ?? '').toLowerCase().includes(q) ||
         (r.staff_details?.staff_name ?? '').toLowerCase().includes(q) ||
+        (r.vendor_details?.vendor_name ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.vehicle_number ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.model ?? '').toLowerCase().includes(q) ||
         (r.location ?? '').toLowerCase().includes(q) ||
-        r.purpose.toLowerCase().includes(q);
+        (r.purpose ?? '').toLowerCase().includes(q);
       const matchTab    = activeTab === 'all' || deriveStatus(r) === activeTab;
       const matchDate   = !filterDate || r.date === filterDate;
       const matchSource = filterSource === 'all' || r.source === filterSource;
@@ -606,14 +622,40 @@ const FuelsAndConsumables = () => {
                         {fmtDate(req.date)}
                       </td>
 
-                      {/* Status */}
+                      {/* Status — stage pill + 3-step progress dots */}
                       <td className="px-4 py-3">
-                        <span className={cn(
-                          'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap',
-                          STATUS_CONFIG[status].pill
-                        )}>
-                          {STATUS_CONFIG[status].label}
-                        </span>
+                        {(() => {
+                          const stage = deriveStage(req);
+                          const steps = [
+                            { label: 'R', title: 'Requestor', done: stage.step >= 1 || status === 'approved' },
+                            { label: 'A', title: 'Admin Ops', done: stage.step >= 2 || status === 'approved' },
+                            { label: 'D', title: 'Director',  done: stage.step >= 3 || status === 'approved' },
+                          ];
+                          return (
+                            <div className="flex flex-col gap-1.5">
+                              <span className={cn(
+                                'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap',
+                                stage.pill
+                              )}>
+                                {stage.label}
+                              </span>
+                              <div className="flex items-center gap-1 pl-1">
+                                {steps.map((s, i) => (
+                                  <div key={i} className="flex items-center gap-1">
+                                    <div
+                                      title={s.title}
+                                      className={cn(
+                                        'w-2 h-2 rounded-full',
+                                        s.done ? 'bg-emerald-500' : 'bg-gray-200'
+                                      )}
+                                    />
+                                    {i < 2 && <div className={cn('w-3 h-px', s.done ? 'bg-emerald-300' : 'bg-gray-200')} />}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* Actions */}
@@ -1085,13 +1127,31 @@ const ReceiptModal = ({
   onClose: () => void;
 }) => {
   const receiptNo = req.receipt_no || genReceiptNo();
-  const printRef = useRef<HTMLDivElement>(null);
+  const printRef  = useRef<HTMLDivElement>(null);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [selectedVendorId, setSelectedVendorId] = useState(
+    req.vendor_details?.order_number ?? ''
+  );
 
-  const handlePrint = () => {
-    const el = printRef.current;
-    if (!el) return;
+  useEffect(() => {
+    fetch(`${BASE_URL}/admin_cultivation/get_active_vendor`)
+      .then(r => r.json())
+      .then((data: any) => { if (Array.isArray(data?.vendors)) setVendors(data.vendors); })
+      .catch(() => {});
+  }, []);
+
+  const selectedVendor = vendors.find(v => v.order_number === selectedVendorId) ?? null;
+
+  // Vendor values: selected from dropdown → request vendor_details → legacy flat fields → '—'
+  const vName    = selectedVendor?.vendor_name    || req.vendor_details?.vendor_name    || req.vendor_name  || '—';
+  const vContact = selectedVendor?.vendor_contact || req.vendor_details?.vendor_contact || req.vendor_phone || '—';
+  const vId      = selectedVendor?.vendor_id      || req.vendor_details?.vendor_id      || req.vendor_code  || '—';
+  const vOrderNo = selectedVendor?.order_number   || req.vendor_details?.order_number   || req.reference_wo || '—';
+
+  const handleDownload = () => {
+    if (!selectedVendorId) { toast.error('Please select a vendor before downloading'); return; }
     const win = window.open('', '_blank', 'width=820,height=1000');
-    if (!win) { toast.error('Pop-up blocked — please allow pop-ups to print'); return; }
+    if (!win) { toast.error('Pop-up blocked — please allow pop-ups'); return; }
     win.document.write(`<!DOCTYPE html><html><head>
       <title>Diesel Issue Receipt — ${receiptNo}</title>
       <style>
@@ -1099,7 +1159,6 @@ const ReceiptModal = ({
         body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:28px;max-width:780px;margin:0 auto}
         h1{font-size:22px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em}
         .subtitle{font-size:12px;color:#666;margin-top:4px}
-        .hr{border:none;border-top:2px solid #111;margin:12px 0}
         .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:12px}
         .box{border:1px solid #ccc;border-radius:6px;margin-bottom:12px;overflow:hidden}
         .box-title{background:#f3f4f6;border-bottom:1px solid #ccc;padding:8px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em}
@@ -1133,18 +1192,18 @@ const ReceiptModal = ({
       <div class="box">
         <div class="box-title">Diesel Vendor Details</div>
         <div class="box-body grid2">
-          <p><b>Vendor Name:</b> ${req.vendor_details?.vendor_name || req.vendor_name || '—'}</p>
-          <p><b>Vendor ID:</b> ${req.vendor_details?.vendor_id || req.vendor_code || '—'}</p>
-          <p><b>Contact:</b> ${req.vendor_details?.vendor_contact || req.vendor_phone || '—'}</p>
-          <p><b>PO / WO No.:</b> ${req.vendor_details?.order_number || req.reference_wo || '—'}</p>
+          <p><b>Vendor Name:</b> ${vName}</p>
+          <p><b>Vendor ID:</b> ${vId}</p>
+          <p><b>Contact:</b> ${vContact}</p>
+          <p><b>PO / WO No.:</b> ${vOrderNo}</p>
         </div>
       </div>
       <div class="box">
         <div class="box-title">Diesel Issued To</div>
         <div class="box-body grid2">
-          <p><b>Person Name:</b> ${req.staff_details?.staff_name || '—'}</p>
+          <p><b>Person Name:</b> ${req.staff_details?.staff_name || req.vendor_details?.vendor_name || '—'}</p>
           <p><b>Purpose (For What):</b> ${req.purpose || '—'}</p>
-          <p><b>Contact:</b> ${req.staff_details?.staff_contact || '—'}</p>
+          <p><b>Contact:</b> ${req.staff_details?.staff_contact || req.vendor_details?.vendor_contact || '—'}</p>
           <p><b>Vehicle:</b> ${[req.vehicle_details?.type, req.vehicle_details?.vehicle_number].filter(Boolean).join(' · ') || '—'}</p>
           <p><b>Model:</b> ${req.vehicle_details?.model || '—'}</p>
           <p><b>Location:</b> ${req.location || '—'}</p>
@@ -1153,37 +1212,21 @@ const ReceiptModal = ({
       <div class="box">
         <div class="box-title">Diesel Issue Details</div>
         <div class="grid4">
-          <div class="grid4-cell">
-            <p class="label">Diesel Quantity</p>
-            <p class="val-big">${req.fuel_requested.toFixed(2)} Ltr</p>
-          </div>
-          <div class="grid4-cell">
-            <p class="label">Rate (Per Ltr)</p>
-            <p class="val-med">${(req.rate_per_ltr ?? 0) > 0 ? fmtCurrency(req.rate_per_ltr!) : '—'}</p>
-          </div>
-          <div class="grid4-cell">
-            <p class="label">Total Amount</p>
-            <p class="val-med">${(req.total_amount ?? 0) > 0 ? fmtCurrency(req.total_amount!) : '—'}</p>
-          </div>
-          <div class="grid4-cell">
-            <p class="label">Odometer/Hour Reading</p>
-            <p class="val-med">${req.odometer_reading || '—'}</p>
-          </div>
+          <div class="grid4-cell"><p class="label">Diesel Quantity</p><p class="val-big">${req.fuel_requested.toFixed(2)} Ltr</p></div>
+          <div class="grid4-cell"><p class="label">Rate (Per Ltr)</p><p class="val-med">${(req.rate_per_ltr ?? 0) > 0 ? fmtCurrency(req.rate_per_ltr!) : '—'}</p></div>
+          <div class="grid4-cell"><p class="label">Total Amount</p><p class="val-med">${(req.total_amount ?? 0) > 0 ? fmtCurrency(req.total_amount!) : '—'}</p></div>
+          <div class="grid4-cell"><p class="label">Odometer/Hour Reading</p><p class="val-med">${req.odometer_reading || '—'}</p></div>
         </div>
       </div>
       <div class="box">
         <div class="box-title">Additional Information</div>
         <div class="box-body grid2">
-          <p><b>Remarks:</b> ${req.remarks || '—'}</p>
+          <p><b>Purpose:</b> ${req.purpose || '—'}</p>
           <p><b>Issue Date &amp; Time:</b> ${fmtDate(req.date)}</p>
-          <p><b>Issued By:</b> ${req.issued_by || '—'}</p>
-          <p><b>Reference:</b> ${req.reference_wo || '—'}</p>
+          <p><b>Reference:</b> ${vOrderNo}</p>
         </div>
       </div>
-      <div class="sig">
-        <p>Received By (Name &amp; Signature)</p>
-        <p class="sig-line">— — — — — — — — — — — — — — —</p>
-      </div>
+      <div class="sig"><p>Received By (Name &amp; Signature)</p><p class="sig-line">— — — — — — — — — — — — — — —</p></div>
       <div class="footer">
         <p>This is a computer-generated receipt and does not require a signature.</p>
         <p>For queries, contact: support@sbragri.com</p>
@@ -1204,12 +1247,60 @@ const ReceiptModal = ({
           </DialogTitle>
         </DialogHeader>
 
-        {/* Receipt preview */}
+        {/* ── Vendor selector (not in print area) ── */}
+        <div className="rounded-xl border border-orange-200 bg-orange-50/40 p-4">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-orange-700 mb-2">
+            Select Fuel Vendor
+          </p>
+          <select
+            className="w-full border border-gray-200 rounded-lg px-3 h-10 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400"
+            value={selectedVendorId}
+            onChange={e => setSelectedVendorId(e.target.value)}
+          >
+            <option value="">— Choose a vendor —</option>
+            {vendors.map(v => (
+              <option key={v.order_number} value={v.order_number}>
+                {v.vendor_name} — {v.order_number}
+              </option>
+            ))}
+          </select>
+
+          {vendors.length === 0 && (
+            <p className="text-xs text-amber-600 mt-2">No vendors loaded — check API connection.</p>
+          )}
+
+          {selectedVendor && (
+            <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-orange-200">
+              <div className="flex items-start gap-2">
+                <Building2 className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">Vendor Name</p>
+                  <p className="text-sm font-medium text-gray-800">{vName}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Phone className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">Contact</p>
+                  <p className="text-sm font-medium text-gray-800">{vContact}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <FileText className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">PO / WO No.</p>
+                  <p className="text-sm font-medium text-gray-800">{vOrderNo}</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Receipt preview (printable area) ── */}
         <div
           ref={printRef}
           className="bg-white border border-gray-200 rounded-xl p-6 space-y-4 text-sm font-sans"
         >
-          {/* Title */}
           <div className="text-center pb-4 border-b-2 border-gray-800">
             <h2 className="text-2xl font-black tracking-wide uppercase text-gray-900">
               Diesel Issue Receipt
@@ -1217,7 +1308,6 @@ const ReceiptModal = ({
             <p className="text-xs text-gray-500 mt-1">SBR Agri Management System</p>
           </div>
 
-          {/* Receipt Meta */}
           <div className="flex justify-between text-sm">
             <div className="space-y-1">
               <p><span className="font-bold">Receipt No:</span> {receiptNo}</p>
@@ -1228,29 +1318,27 @@ const ReceiptModal = ({
             </div>
           </div>
 
-          {/* Vendor Details */}
+          {/* Vendor Details — populated from dropdown selection */}
           <ReceiptBox title="Diesel Vendor Details">
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Vendor Name:</span> {req.vendor_details?.vendor_name || req.vendor_name || '—'}</p>
-              <p><span className="font-semibold">Vendor ID:</span> {req.vendor_details?.vendor_id || req.vendor_code || '—'}</p>
-              <p><span className="font-semibold">Contact:</span> {req.vendor_details?.vendor_contact || req.vendor_phone || '—'}</p>
-              <p><span className="font-semibold">PO / WO No.:</span> {req.vendor_details?.order_number || req.reference_wo || '—'}</p>
+              <p><span className="font-semibold">Vendor Name:</span> {vName}</p>
+              <p><span className="font-semibold">Vendor ID:</span> {vId}</p>
+              <p><span className="font-semibold">Contact:</span> {vContact}</p>
+              <p><span className="font-semibold">PO / WO No.:</span> {vOrderNo}</p>
             </div>
           </ReceiptBox>
 
-          {/* Issued To */}
           <ReceiptBox title="Diesel Issued To">
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Person Name:</span> {req.staff_details?.staff_name || '—'}</p>
+              <p><span className="font-semibold">Person / Vendor:</span> {req.staff_details?.staff_name || req.vendor_details?.vendor_name || '—'}</p>
               <p><span className="font-semibold">Purpose (For What):</span> {req.purpose || '—'}</p>
-              <p><span className="font-semibold">Contact:</span> {req.staff_details?.staff_contact || '—'}</p>
+              <p><span className="font-semibold">Contact:</span> {req.staff_details?.staff_contact || req.vendor_details?.vendor_contact || '—'}</p>
               <p><span className="font-semibold">Vehicle:</span> {[req.vehicle_details?.type, req.vehicle_details?.vehicle_number].filter(Boolean).join(' · ') || '—'}</p>
               <p><span className="font-semibold">Model:</span> {req.vehicle_details?.model || '—'}</p>
               <p><span className="font-semibold">Location:</span> {req.location || '—'}</p>
             </div>
           </ReceiptBox>
 
-          {/* Issue Details */}
           <ReceiptBox title="Diesel Issue Details">
             <div className="grid grid-cols-4 divide-x divide-gray-200">
               <div className="px-3 py-3 text-center">
@@ -1280,17 +1368,14 @@ const ReceiptModal = ({
             </div>
           </ReceiptBox>
 
-          {/* Additional Info */}
           <ReceiptBox title="Additional Information">
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Remarks:</span> {req.remarks || '—'}</p>
+              <p><span className="font-semibold">Purpose:</span> {req.purpose || '—'}</p>
               <p><span className="font-semibold">Issue Date &amp; Time:</span> {fmtDate(req.date)}</p>
-              <p><span className="font-semibold">Issued By:</span> {req.issued_by || '—'}</p>
-              <p><span className="font-semibold">Reference:</span> {req.reference_wo || '—'}</p>
+              <p><span className="font-semibold">Reference:</span> {vOrderNo}</p>
             </div>
           </ReceiptBox>
 
-          {/* Signature */}
           <div className="flex justify-end pt-2">
             <div className="text-right text-sm">
               <p className="text-gray-500 text-xs">Received By (Name &amp; Signature)</p>
@@ -1300,7 +1385,6 @@ const ReceiptModal = ({
             </div>
           </div>
 
-          {/* Footer */}
           <div className="text-center text-[11px] text-gray-400 border-t border-gray-200 pt-3">
             <p>This is a computer-generated receipt and does not require a signature.</p>
             <p>For queries, contact: support@sbragri.com</p>
@@ -1309,8 +1393,19 @@ const ReceiptModal = ({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Close</Button>
-          <Button className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2" onClick={handlePrint}>
-            <Printer className="w-4 h-4" /> Print Receipt
+          <Button
+            className={cn(
+              'gap-2 text-white',
+              selectedVendorId
+                ? 'bg-emerald-600 hover:bg-emerald-700'
+                : 'bg-gray-300 cursor-not-allowed'
+            )}
+            onClick={handleDownload}
+            disabled={!selectedVendorId}
+            title={!selectedVendorId ? 'Select a vendor to download' : 'Download as PDF'}
+          >
+            <Printer className="w-4 h-4" />
+            {selectedVendorId ? 'Download Receipt' : 'Select Vendor First'}
           </Button>
         </DialogFooter>
       </DialogContent>

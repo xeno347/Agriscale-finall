@@ -74,7 +74,7 @@ type FuelRequest = {
 // 'sent_to_admin' key is reused here to mean "Sent to Director"
 const deriveStatus = (r: FuelRequest): RequestStatus => {
   if (r.admin_ops_status === 'rejected' || r.director_status === 'rejected') return 'rejected';
-  if (r.director_status === 'approved') return 'approved';
+  if (r.director_status === 'approved' || r.director_status === 'approved_and_forwarded') return 'approved';
   if (r.admin_ops_status !== 'pending') return 'sent_to_admin';
   return 'pending';
 };
@@ -168,12 +168,13 @@ const AdminOpsFuelRequest = () => {
     const q = search.toLowerCase();
     return requests.filter(r => {
       const matchSearch = !q ||
-        r.request_id.toLowerCase().includes(q) ||
+        (r.request_id ?? '').toLowerCase().includes(q) ||
         (r.staff_details?.staff_name ?? '').toLowerCase().includes(q) ||
+        (r.vendor_details?.vendor_name ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.vehicle_number ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.model ?? '').toLowerCase().includes(q) ||
         (r.location ?? '').toLowerCase().includes(q) ||
-        r.purpose.toLowerCase().includes(q);
+        (r.purpose ?? '').toLowerCase().includes(q);
       const matchTab    = activeTab === 'all' || deriveStatus(r) === activeTab;
       const matchDate   = !filterDate || r.date === filterDate;
       const matchSource = filterSource === 'all' || r.source === filterSource;

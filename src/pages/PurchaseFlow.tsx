@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Check, ChevronLeft, ChevronRight, FileText, Plus, Receipt, Upload, X } from 'lucide-react';
+import { ArrowRight, Check, ChevronLeft, ChevronRight, FileText, Lock, Plus, Receipt, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
@@ -257,6 +257,8 @@ export default function PurchaseFlow() {
     const next = [...current];
     [next[idx], next[target]] = [next[target], next[idx]];
     setFlowStepOverrides((prev) => ({ ...prev, [flowId]: next }));
+    // Mark this flow as having an unsaved reorder — blocks uploads until saved
+    setPendingReorderSet((prev) => new Set([...prev, flowId]));
   };
 
   const removeLocalStep = (flowId: string, flow: ApiPurchaseFlow, stepKey: string) => {
@@ -266,6 +268,10 @@ export default function PurchaseFlow() {
 
   // Per-flow save loading state
   const [savingFlows, setSavingFlows] = useState<Record<string, boolean>>({});
+
+  // Tracks flows whose steps have been reordered but not yet saved.
+  // Upload is blocked for these flows until the user saves.
+  const [pendingReorderSet, setPendingReorderSet] = useState<Set<string>>(new Set());
 
   // Left panel enriched data — fetched per-row after the list renders
   const [leftPanelInfoMap, setLeftPanelInfoMap] = useState<Record<string, LeftPanelInfo>>({});
@@ -298,6 +304,8 @@ export default function PurchaseFlow() {
       });
       const data: any = await res.json().catch(() => null);
       if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to save flow');
+      // Clear the pending-reorder flag so uploads are unblocked
+      setPendingReorderSet((prev) => { const s = new Set(prev); s.delete(flowId); return s; });
       toast.success('Purchase flow saved');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to save purchase flow');
@@ -381,22 +389,51 @@ export default function PurchaseFlow() {
     const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
     if (!baseUrl) throw new Error('Missing API base URL');
 
-    // ── Step 1: upload the file and get back a doc_link ──────────────────────
-    // TODO: replace this block with the real upload endpoint when provided.
-    // Expected: POST multipart/form-data → response { success: true, doc_link: "https://..." }
-    void file;
-    throw new Error(
-      'Upload API not wired: share the endpoint + payload (flow_id / step key) for uploading purchase flow documents.'
-    );
+    const orderNumber = safeTrim((flow as any)?.order_number);
+    if (!orderNumber) throw new Error('Missing order number on this flow');
 
-    // ── Step 2 (runs once the above is replaced): patch local state + save ───
-    // const docLink: string = uploadedUrl; // from upload response
-    // const flowId = safeTrim((flow as any)?.flow_id) || safeTrim((flow as any)?.comparison_id);
-    // const updatedSteps = getFlowSteps(flowId, flow).map((s) =>
-    //   s.key === step.key ? { ...s, docLink, status: 'uploaded', isLocal: false } : s
-    // );
-    // setFlowStepOverrides((prev) => ({ ...prev, [flowId]: updatedSteps }));
-    // await saveCurrentFlow(flowId, flow, updatedSteps);
+    const flowId = safeTrim((flow as any)?.flow_id) || safeTrim((flow as any)?.comparison_id);
+    if (!flowId) throw new Error('Missing flow ID');
+
+    // ── API 1: upload file, receive file_url ─────────────────────────────────
+    const formData = new FormData();
+    formData.append('document', file);
+
+    const uploadRes = await fetch(
+      `${baseUrl}/purchase_flow/upload_purchase_flow_document?order_number=${encodeURIComponent(orderNumber)}`,
+      { method: 'POST', body: formData }
+    );
+    const uploadData: any = await uploadRes.json().catch(() => null);
+    if (!uploadRes.ok || !uploadData?.success)
+      throw new Error(uploadData?.message || 'File upload failed');
+
+    const fileUrl: string = safeTrim(uploadData.file_url);
+    if (!fileUrl) throw new Error('Upload succeeded but no file URL was returned');
+
+    // ── API 2: link file_url to the correct step ─────────────────────────────
+    // Local steps (added via "+ Add Invoice") don't have a server-side step key.
+    // Only call API 2 for steps that came from the server (key matches step_N).
+    if (!step.isLocal) {
+      const linkRes = await fetch(`${baseUrl}/purchase_flow/update_doc_link_for_step`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          flow_id: flowId,
+          document_url: fileUrl,
+          step: step.key,          // e.g. "step_1", "step_2", …
+        }),
+      });
+      const linkData: any = await linkRes.json().catch(() => null);
+      if (!linkRes.ok || !linkData?.success)
+        throw new Error(linkData?.message || 'Failed to link document to step');
+    }
+
+    // ── Update local state so the step shows as uploaded immediately ─────────
+    const updatedSteps = getFlowSteps(flowId, flow).map((s) =>
+      s.key === step.key ? { ...s, docLink: fileUrl, status: 'uploaded' } : s
+    );
+    setFlowStepOverrides((prev) => ({ ...prev, [flowId]: updatedSteps }));
+    toast.success('Document uploaded successfully');
   };
 
   return (
@@ -536,12 +573,42 @@ export default function PurchaseFlow() {
                       <div className="text-sm text-muted-foreground">No steps found for this flow.</div>
                     ) : null}
 
+                    {/* Warning banner when step order has been changed but not saved */}
+                    {pendingReorderSet.has(flowId) && (
+                      <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 font-medium">
+                        <Lock className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                        Step order changed — save first before uploading any documents.
+                      </div>
+                    )}
+
                     <div className="min-w-max flex items-center gap-3">
-                      {steps.map((s, stepIdx) => {
+                      {(() => {
+                        const hasReorderPending = pendingReorderSet.has(flowId);
+                        // Index of the first step that is eligible to be uploaded next
+                        // (not yet uploaded AND all previous steps are uploaded)
+                        const firstUploadableIdx = steps.findIndex(
+                          (st, i) => !isUploaded(st) && steps.slice(0, i).every(prev => isUploaded(prev))
+                        );
+                        return steps.map((s, stepIdx) => {
                         const uploaded = isUploaded(s);
                         const canOpen = Boolean(s.docLink);
                         const isFirst = stepIdx === 0;
                         const isLast = stepIdx === steps.length - 1;
+
+                        // A step is blocked for upload when:
+                        // 1. The order was changed and not saved yet, OR
+                        // 2. A previous step hasn't been uploaded yet
+                        const blocked = !uploaded && (
+                          hasReorderPending ||
+                          (firstUploadableIdx !== -1 && stepIdx > firstUploadableIdx)
+                        );
+
+                        const blockReason = hasReorderPending
+                          ? 'Save the current order before uploading'
+                          : (() => {
+                              const blocking = steps.slice(0, stepIdx).find(prev => !isUploaded(prev));
+                              return blocking ? `Upload "${blocking.document}" first` : '';
+                            })();
 
                         return (
                           <div key={s.key} className="flex items-center gap-3">
@@ -550,30 +617,36 @@ export default function PurchaseFlow() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  // Local steps that haven't been ticked yet are not clickable
                                   if (s.isLocal && s.status !== 'completed') return;
                                   if (canOpen) { window.open(s.docLink, '_blank'); return; }
+                                  if (blocked) { toast.error(blockReason); return; }
                                   setUploadTarget({ flow, step: s });
                                 }}
-                                className="group flex flex-col items-center gap-1"
+                                className={`group flex flex-col items-center gap-1 ${blocked ? 'cursor-not-allowed' : ''}`}
                                 title={
-                                  s.isLocal && s.status !== 'completed'
-                                    ? s.document
-                                    : canOpen ? 'Open document' : 'Upload document'
+                                  blocked
+                                    ? blockReason
+                                    : s.isLocal && s.status !== 'completed'
+                                      ? s.document
+                                      : canOpen ? 'Open document' : 'Upload document'
                                 }
                               >
                                 <div className={
                                   'w-20 h-20 rounded-full border-2 flex flex-col items-center justify-center transition-colors ' +
                                   (uploaded
                                     ? 'border-green-500 bg-green-50'
-                                    : s.isLocal && s.status !== 'completed'
-                                      ? 'border-blue-400 bg-blue-50'
-                                      : !s.isLocal && !s.docLink && s.status === 'completed'
-                                        ? 'border-green-500 bg-green-50'
-                                        : 'border-dashed border-border bg-background hover:bg-muted')
+                                    : blocked
+                                      ? 'border-gray-200 bg-gray-50 opacity-50'
+                                      : s.isLocal && s.status !== 'completed'
+                                        ? 'border-blue-400 bg-blue-50'
+                                        : !s.isLocal && !s.docLink && s.status === 'completed'
+                                          ? 'border-green-500 bg-green-50'
+                                          : 'border-dashed border-border bg-background hover:bg-muted')
                                 }>
                                   {uploaded ? (
                                     <FileText className="w-5 h-5 text-green-700" />
+                                  ) : blocked ? (
+                                    <Lock className="w-5 h-5 text-gray-400" />
                                   ) : s.isLocal && s.status !== 'completed' ? (
                                     <Receipt className="w-5 h-5 text-blue-600" />
                                   ) : !s.isLocal && !s.docLink && s.status === 'completed' ? (
@@ -584,20 +657,24 @@ export default function PurchaseFlow() {
                                   <div className="text-[10px] mt-1 font-semibold text-muted-foreground">
                                     {uploaded
                                       ? 'Uploaded'
-                                      : s.isLocal && s.status !== 'completed'
-                                        ? 'New'
-                                        : !s.isLocal && !s.docLink && s.status === 'completed'
-                                          ? 'Done'
-                                          : 'Upload'}
+                                      : blocked
+                                        ? 'Locked'
+                                        : s.isLocal && s.status !== 'completed'
+                                          ? 'New'
+                                          : !s.isLocal && !s.docLink && s.status === 'completed'
+                                            ? 'Done'
+                                            : 'Upload'}
                                   </div>
                                 </div>
                                 <div className={
                                   'text-[10px] font-medium text-center max-w-[88px] leading-tight ' +
-                                  (s.isLocal && s.status !== 'completed'
-                                    ? 'text-blue-700 font-semibold'
-                                    : !s.isLocal && !s.docLink && s.status === 'completed'
-                                      ? 'text-green-700 font-semibold'
-                                      : '')
+                                  (blocked
+                                    ? 'text-gray-400'
+                                    : s.isLocal && s.status !== 'completed'
+                                      ? 'text-blue-700 font-semibold'
+                                      : !s.isLocal && !s.docLink && s.status === 'completed'
+                                        ? 'text-green-700 font-semibold'
+                                        : '')
                                 }>
                                   {s.document}
                                 </div>
@@ -657,7 +734,8 @@ export default function PurchaseFlow() {
                             ) : null}
                           </div>
                         );
-                      })}
+                      });
+                    })()}
 
                       {/* Arrow before add button when steps exist */}
                       {steps.length > 0 && (

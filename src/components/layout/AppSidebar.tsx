@@ -25,6 +25,7 @@ import {
   BookOpen,
   CreditCard,
   Receipt,
+  Car
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -377,7 +378,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
               isSidebarCollapsed={isCollapsed}
               notificationStatus="warning"
             /> */}
-            {/* <NavItem to="/vehicle-management" icon={Car} label="Vehicle List" isSidebarCollapsed={isCollapsed} /> */}
+            <NavItem to="/vehicle-management" icon={Car} label="Vehicle List" isSidebarCollapsed={isCollapsed} />
             <NavItem 
               to="/fleet-chart" 
               icon={Map} 
@@ -399,6 +400,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             <NavItem to="/cultivation-master" icon={Sprout} label="Cultivation Master" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/cultivation-plan" icon={Layers} label="Cultivation Plan" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/field-monitoring" icon={Activity} label="Field Monitoring" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/field-visit-analytics" icon={Map} label="Field Visit Analytics" isSidebarCollapsed={isCollapsed} />
           </NavGroup>
         </div>
 

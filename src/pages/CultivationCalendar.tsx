@@ -17,9 +17,12 @@ Wrench,
 Minus,
 Hash,
 MapPin,
+Eye,
+Monitor,
 User,
 FileText,
-Image as ImageIcon
+Image as ImageIcon,
+Map as MapIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
@@ -28,8 +31,16 @@ import { toast } from 'sonner';
 // ✅ Import the Sidebar
 import { TaskSidebar, SidebarTask } from '@/components/cultivation/TaskSidebar';
 import { InlineTimeline } from '@/components/cultivation/InlineTimeline';
+import TaskMonitorModal, { MonitorTask } from '@/components/cultivation/TaskMonitorModal';
+import PlotMapViewModal, { MapViewTask } from '@/components/cultivation/PlotMapViewModal';
 
 // --- Types ---
+interface PlotItem {
+plot_id: string;
+plot_name: string;
+plot_area: number;
+}
+
 interface ApiActivity {
 index: number;
 activity: string;
@@ -39,6 +50,8 @@ field_assignment: {
 farm_id: string;
 assigned_area: number;
 status?: string;
+plot?: PlotItem[];
+task_id?: string;
 }>;
 };
 }
@@ -87,6 +100,8 @@ assignments: Array<{
 farm_id: string;
 assigned_area: number;
 status?: string;
+plot?: PlotItem[];
+task_id?: string;
 }>;
 }
 
@@ -294,32 +309,46 @@ const normalizedAssignments = Array.isArray(assignments)
 farm_id: String(a?.farm_id || '').trim(),
 assigned_area: Number(a?.assigned_area) || 0,
 status: normalizeAssignmentStatus(a?.status),
+task_id: a?.task_id ? String(a.task_id) : undefined,
+plot: Array.isArray(a?.plot)
+? (a.plot as any[]).map((p) => ({
+plot_id: String(p?.plot_id || ''),
+plot_name: String(p?.plot_name || ''),
+plot_area: Number(p?.plot_area) || 0,
+}))
+: [] as PlotItem[],
 }))
 .filter((a) => !!a.farm_id)
 : [];
 
-const byFarm = new Map<string, { farm_id: string; assigned_area: number; status: string }>();
+const byFarm = new Map<string, { farm_id: string; assigned_area: number; status: string; plot: PlotItem[]; task_id?: string }>();
 for (const a of normalizedAssignments) {
-const existing = byFarm.get(a.farm_id);
+const mapKey = `${a.farm_id}__${normalizeAssignmentStatus(a.status)}`;
+const existing = byFarm.get(mapKey);
 if (!existing) {
-byFarm.set(a.farm_id, {
+byFarm.set(mapKey, {
 farm_id: a.farm_id,
 assigned_area: Number(a.assigned_area) || 0,
 status: normalizeAssignmentStatus(a.status),
+plot: a.plot,
+task_id: a.task_id,
 });
 continue;
 }
 const nextArea = (Number(existing.assigned_area) || 0) + (Number(a.assigned_area) || 0);
-const nextStatus = combineAssignmentStatus(existing.status, a.status);
-byFarm.set(a.farm_id, {
+const existingPlotIds = new Set(existing.plot.map((p) => p.plot_id));
+const mergedPlots = [...existing.plot, ...a.plot.filter((p) => !existingPlotIds.has(p.plot_id))];
+byFarm.set(mapKey, {
 farm_id: existing.farm_id,
 assigned_area: nextArea,
-status: nextStatus,
+status: existing.status,
+plot: mergedPlots,
+task_id: existing.task_id ?? a.task_id,
 });
 }
 
 for (const farm of byFarm.values()) {
-const rowKey = `${planKey}__${plan.plan_id}__${plan.block_id}__${activity.index}__${activity.activity}__${farm.farm_id}`;
+const rowKey = `${planKey}__${plan.plan_id}__${plan.block_id}__${activity.index}__${activity.activity}__${farm.farm_id}__${farm.status}`;
 calendarByDate[dateStr].set(rowKey, {
 index: activity.index,
 activity: activity.activity,
@@ -617,6 +646,14 @@ const [pendingByDate, setPendingByDate] = useState<PendingByDate>({});
 const [dateSwapTaskKey, setDateSwapTaskKey] = useState<string | null>(null);
 const [dateSwapValue, setDateSwapValue] = useState<string>('');
 const [dateSwapPopupPos, setDateSwapPopupPos] = useState<{ top: number; left: number } | null>(null);
+const [viewPlotsTaskKey, setViewPlotsTaskKey] = useState<string | null>(null);
+const [monitorTask, setMonitorTask] = useState<MonitorTask | null>(null);
+const [mapViewTask, setMapViewTask] = useState<MapViewTask | null>(null);
+const [contactsById, setContactsById] = useState<Record<string, {
+supervisorName: string;
+supervisorContact: string;
+fieldManagers: { name: string; contact: string }[];
+}>>({});
 const [loading, setLoading] = useState(true);
 const [error, setError] = useState<string | null>(null);
 const taskModalRef = useRef<HTMLDivElement | null>(null);
@@ -731,6 +768,40 @@ setLoading(false);
 });
 }, []);
 
+// Fetch supervisor + field manager whenever the day popup opens
+useEffect(() => {
+if (!isModalOpen || !selectedDate) return;
+const activities = activitiesData[selectedDate] ?? [];
+const farmIds = [...new Set(activities.map((a) => a.farm_id).filter(Boolean))];
+if (farmIds.length === 0) return;
+setContactsById({});
+Promise.allSettled(
+farmIds.map((farmId) =>
+fetch(`${BASE_URL}/farmer_managment/get_assigned_supervisor_and_field_manager/${farmId}`)
+.then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+.then((data) => ({ farmId, data }))
+.catch(() => ({ farmId, data: null }))
+)
+).then((results) => {
+const next: Record<string, { supervisorName: string; supervisorContact: string; fieldManagers: { name: string; contact: string }[] }> = {};
+for (const r of results) {
+if (r.status === 'fulfilled' && r.value?.data?.success) {
+const { farmId, data } = r.value;
+const sup = data.assigned_supervisor;
+const fms = Array.isArray(data.assigned_field_manager)
+? data.assigned_field_manager
+: data.assigned_field_manager ? [data.assigned_field_manager] : [];
+next[farmId] = {
+supervisorName:    sup?.supervisor_name ?? '',
+supervisorContact: sup?.suervisor_contact ?? sup?.supervisor_contact ?? '',
+fieldManagers:     fms.map((fm: any) => ({ name: fm.name ?? '', contact: fm.contact ?? '' })),
+};
+}
+}
+setContactsById(next);
+});
+}, [isModalOpen, selectedDate]);
+
 // --- Logic to Populate Sidebar Data (from API or Mock) ---
 const { pendingToday, carryForward, earlyCompletion } = useMemo(() => {
 const today = new Date();
@@ -794,6 +865,7 @@ setVendorEquipment({ name: '', contact: '', notes: '' });
 setDateSwapTaskKey(null);
 setDateSwapValue('');
 setDateSwapPopupPos(null);
+setViewPlotsTaskKey(null);
 };
 
 const closeAssignmentModal = () => {
@@ -841,7 +913,7 @@ return list.some((a) => isOverdueAssignmentStatus(a?.status));
 };
 
 const isTaskAssignable = (task: CalendarActivity) =>
-!isTaskPending(task) && !isTaskCompleted(task) && !isTaskContractFarm(task);
+!isTaskPending(task) && !isTaskCompleted(task) && !isTaskContractFarm(task) && !isTaskOverdue(task);
 
 const getInventoryItemId = (item: ApiInventoryItem): string => {
 return String(item?.id || item?.Invent_id || item?.item || '');
@@ -956,7 +1028,8 @@ setIsLoadingVehiclesForAssignment(false);
 };
 
 const getTaskKey = (task: CalendarActivity) => {
-return `${task.calander_id}__${task.plan_id}__${task.block_id}__${task.index}__${task.activity}__${task.farm_id}`;
+const status = normalizeAssignmentStatus(Array.isArray(task.assignments) ? task.assignments[0]?.status : undefined);
+return `${task.calander_id}__${task.plan_id}__${task.block_id}__${task.index}__${task.activity}__${task.farm_id}__${status}`;
 };
 
 useEffect(() => {
@@ -1058,18 +1131,21 @@ const newList = Array.isArray(next[dateSwapValue]) ? [...next[dateSwapValue]] : 
 const existingIdx = newList.findIndex((t) => getTaskKey(t) === getTaskKey(movingTask));
 if (existingIdx >= 0) {
 const existing = newList[existingIdx];
-const mergedByFarm = new Map<string, { farm_id: string; assigned_area: number; status?: string }>();
+const mergedByFarm = new Map<string, { farm_id: string; assigned_area: number; status?: string; plot?: PlotItem[] }>();
 for (const a of [...(existing.assignments || []), ...(movingTask.assignments || [])]) {
 const fid = String(a?.farm_id || '');
 if (!fid) continue;
 const old = mergedByFarm.get(fid);
 if (!old) {
-mergedByFarm.set(fid, { farm_id: fid, assigned_area: Number(a?.assigned_area) || 0, status: a?.status });
+mergedByFarm.set(fid, { farm_id: fid, assigned_area: Number(a?.assigned_area) || 0, status: a?.status, plot: a?.plot || [] });
 } else {
+const oldPlotIds = new Set((old.plot || []).map((p) => p.plot_id));
+const mergedPlots = [...(old.plot || []), ...(a?.plot || []).filter((p) => !oldPlotIds.has(p.plot_id))];
 mergedByFarm.set(fid, {
 farm_id: fid,
 assigned_area: (Number(old.assigned_area) || 0) + (Number(a?.assigned_area) || 0),
 status: combineAssignmentStatus(old.status, a?.status),
+plot: mergedPlots,
 });
 }
 }
@@ -1240,8 +1316,19 @@ quantity: Math.max(0, Math.floor(Number(qty) || 0))
 })
 : [];
 
+const seenPlotIds = new Set<string>();
+const plots = selectedTasks
+.flatMap((t) => t.assignments.flatMap((a) => a.plot ?? []))
+.filter((p) => {
+if (!p.plot_id || seenPlotIds.has(p.plot_id)) return false;
+seenPlotIds.add(p.plot_id);
+return true;
+})
+.map((p) => ({ plot_id: p.plot_id, plot_name: p.plot_name, plot_area: p.plot_area }));
+
 const payload: Record<string, any> = {
 feild_id: feildIds,
+plot: plots,
 assigned_acres: assignedAcres,
 calander_id: calanderId,
 ...(step1Mode === 'vehicle' && { vehicles }),
@@ -1609,13 +1696,13 @@ showPending={false}
 </div>
 </div>
 
-{/* ✅ MODIFIED: Removed Status Column & Chevron Column from Grid */}
-<div className="grid grid-cols-[40px_1.5fr_1fr_1fr_88px] gap-2 px-5 py-3 border-b border-border bg-gray-50/50 text-[11px] font-bold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
+<div className="grid grid-cols-[40px_1.5fr_1fr_0.7fr_0.9fr_200px] gap-x-4 px-5 py-3 border-b border-border bg-gray-50/50 text-[11px] font-bold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
 <div className="flex justify-center"><input type="checkbox" className="h-4 w-4" checked={allSelected} onChange={toggleSelectAll} disabled={true} title="Only single selection supported" /></div>
 <div>Activity</div>
-<div>Farm ID</div>
-<div>Assigned Acres</div>
-<div>Action</div>
+<div>Owner</div>
+<div>Plots</div>
+<div>Acres</div>
+<div className="flex justify-center">Action</div>
 </div>
 
 <div className="overflow-y-auto flex-1">
@@ -1634,9 +1721,8 @@ const fmApproved = Array.isArray(act.assignments) ? act.assignments.some((a) => 
 const totalArea = Array.isArray(act.assignments) ? act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0) : 0;
 return (
 <div key={idx} className={cn("group transition-colors", completedTask ? "bg-green-50 hover:bg-green-50/80" : overdueTask ? "bg-red-50 hover:bg-red-50/80" : "bg-white hover:bg-gray-50/50")}>
-{/* ✅ MODIFIED: Removed Status Column & Chevron Column */}
-<div className="grid grid-cols-[40px_1.5fr_1fr_1fr_88px] gap-2 px-5 py-4 items-center">
-<div className="flex justify-center"><input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer" checked={!!selectedTaskKeys[taskKey]} disabled={pendingTask || completedTask || contractTask} onChange={(e) => { if (e.target.checked) { setSelectedTaskKeys({ [taskKey]: true }); } else { setSelectedTaskKeys({}); } }} /></div>
+<div className="grid grid-cols-[40px_1.5fr_1fr_0.7fr_0.9fr_200px] gap-x-4 px-5 py-4 items-center">
+<div className="flex justify-center pt-0.5"><input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600 cursor-pointer" checked={!!selectedTaskKeys[taskKey]} disabled={pendingTask || completedTask || contractTask || overdueTask} onChange={(e) => { if (e.target.checked) { setSelectedTaskKeys({ [taskKey]: true }); } else { setSelectedTaskKeys({}); } }} /></div>
 <div className="flex items-center gap-2.5 min-w-0">
 <div className="p-1.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 shrink-0">{getActivityIcon(act.activity)}</div>
 <div className="min-w-0 flex flex-wrap items-center gap-2">
@@ -1666,10 +1752,61 @@ FM: {fmApproved ? 'Done' : 'Pending'}
 )}
 </div>
 </div>
-<div><span className={cn("inline-flex items-center px-2 py-1 rounded text-[11px] font-bold border", completedTask ? "bg-green-100 text-green-800 border-green-200" : overdueTask ? "bg-red-100 text-red-800 border-red-200" : "bg-gray-50 text-gray-700 border-gray-200")}>
-{farmerNames[act.farm_id] || act.farm_id || '—'}</span></div>
+<div>
+<span className={cn("inline-flex items-center px-2 py-1 rounded text-[11px] font-bold border", completedTask ? "bg-green-100 text-green-800 border-green-200" : overdueTask ? "bg-red-100 text-red-800 border-red-200" : "bg-gray-50 text-gray-700 border-gray-200")}>
+{farmerNames[act.farm_id] || act.farm_id || '—'}
+</span>
+</div>
+{/* Assigned Plots column */}
+{(() => {
+const plots = act.assignments.flatMap((a) => a.plot || []);
+const isViewing = viewPlotsTaskKey === taskKey;
+return (
+<div className="relative">
+{plots.length > 0 ? (
+<button
+type="button"
+onClick={() => setViewPlotsTaskKey(isViewing ? null : taskKey)}
+className={cn(
+"inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] font-semibold transition-colors",
+isViewing
+? "bg-blue-600 text-white border-blue-600"
+: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+)}
+>
+<MapPin className="w-3 h-3 shrink-0" />
+{plots.length} {plots.length === 1 ? 'Plot' : 'Plots'}
+<Eye className="w-3 h-3 shrink-0" />
+</button>
+) : (
+<span className="text-[11px] text-muted-foreground">—</span>
+)}
+{isViewing && plots.length > 0 && (
+<div className="absolute top-full left-0 mt-1.5 z-[80] w-52 rounded-lg border border-blue-100 bg-white shadow-xl">
+<div className="flex items-center justify-between px-3 py-2 border-b border-blue-50 bg-blue-50/60 rounded-t-lg">
+<span className="text-[11px] font-bold text-blue-800 uppercase tracking-wide flex items-center gap-1">
+<MapPin className="w-3 h-3" /> Assigned Plots
+</span>
+<button type="button" onClick={() => setViewPlotsTaskKey(null)} className="text-blue-400 hover:text-blue-700">
+<X className="w-3.5 h-3.5" />
+</button>
+</div>
+<div className="py-1.5 max-h-48 overflow-y-auto">
+{plots.map((p, pi) => (
+<div key={p.plot_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-gray-50">
+<span className="text-[11px] font-medium text-gray-800">{pi + 1}. {p.plot_name}</span>
+<span className="text-[10px] text-gray-500 font-mono">{p.plot_area} ac</span>
+</div>
+))}
+</div>
+</div>
+)}
+</div>
+);
+})()}
 <div className="text-sm font-medium text-foreground">{totalArea.toFixed(2)} <span className="text-xs text-muted-foreground">Acres</span></div>
-<div className="relative flex flex-col items-center justify-start gap-1 self-start pt-0.5">
+<div className="flex items-end justify-center gap-4">
+<div className="flex flex-col items-center gap-1">
 <button
 type="button"
 onClick={(e) => {
@@ -1697,7 +1834,75 @@ title="Prepone / Postpone"
 </button>
 <span className="text-[10px] font-semibold text-blue-700 leading-none">Swap Date</span>
 </div>
+{normalizeAssignmentStatus(act.assignments[0]?.status) !== 'unassigned' && (
+<div className="flex flex-col items-center gap-1">
+<button
+type="button"
+onClick={() => setMonitorTask({
+activity:   act.activity,
+date:       selectedDate!,
+farm_id:    act.farm_id,
+farmerName: farmerNames[act.farm_id] || act.farm_id,
+block_id:   act.block_id,
+totalArea,
+assignments: act.assignments,
+task_id:    act.assignments.find(a => a.task_id)?.task_id,
+})}
+className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors"
+title="Monitor task progress"
+>
+<Monitor className="w-4 h-4" />
+</button>
+<span className="text-[10px] font-semibold text-violet-700 leading-none">Monitor</span>
 </div>
+)}
+<div className="flex flex-col items-center gap-1">
+<button
+type="button"
+onClick={() => setMapViewTask({
+activity:   act.activity,
+date:       selectedDate!,
+farm_id:    act.farm_id,
+farmerName: farmerNames[act.farm_id] || act.farm_id,
+plots:      act.assignments.flatMap((a) => (a.plot ?? []).map((p) => ({
+plot_id:   p.plot_id,
+plot_name: p.plot_name,
+plot_area: p.plot_area,
+}))),
+})}
+className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+title="View plot map"
+>
+<MapIcon className="w-4 h-4" />
+</button>
+<span className="text-[10px] font-semibold text-emerald-700 leading-none">Map View</span>
+</div>
+</div>
+</div>
+{/* ── Contacts strip ── */}
+{(() => {
+const contact = contactsById[act.farm_id];
+const supText = contact?.supervisorName
+? [contact.supervisorName, contact.supervisorContact].filter(Boolean).join(', ')
+: '—';
+const fmText = contact?.fieldManagers.length
+? contact.fieldManagers.map(fm => [fm.name, fm.contact].filter(Boolean).join(', ')).join(' | ')
+: '—';
+return (
+<div className="px-5 py-2 border-t border-dashed border-gray-100 bg-gray-50/40 flex items-center gap-6 text-[11px]">
+<div className="flex items-center gap-1.5 min-w-0">
+<User className="w-3 h-3 text-blue-400 shrink-0" />
+<span className="text-gray-400 font-medium shrink-0">Supervisor:</span>
+<span className="text-gray-600 font-semibold truncate">{supText}</span>
+</div>
+<div className="flex items-center gap-1.5 min-w-0">
+<User className="w-3 h-3 text-violet-400 shrink-0" />
+<span className="text-gray-400 font-medium shrink-0">Field Manager:</span>
+<span className="text-gray-600 font-semibold truncate">{fmText}</span>
+</div>
+</div>
+);
+})()}
 </div>
 );
 })}
@@ -1994,6 +2199,22 @@ isSelected ? "border-indigo-400 bg-indigo-50 ring-1 ring-indigo-300" : "border-g
 </div>
 </div>
 </div>
+)}
+
+{/* Task Monitor Modal */}
+{monitorTask && (
+<TaskMonitorModal
+task={monitorTask}
+onClose={() => setMonitorTask(null)}
+/>
+)}
+
+{/* Plot Map View Modal */}
+{mapViewTask && (
+<PlotMapViewModal
+task={mapViewTask}
+onClose={() => setMapViewTask(null)}
+/>
 )}
 </div>
 );

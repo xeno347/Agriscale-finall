@@ -18,6 +18,7 @@ import CultivationMaster from "./pages/CultivationMaster";
 import CultivationPlan from "./pages/CultivationPlan";
 import CreateCultivationPlan from "./pages/CreateCultivationPlan";
 import CultivationCalendar from "./pages/CultivationCalendar";
+import FieldVisitAnalytics from "./pages/FieldVisitAnalytics";
 import HarvestOrders from "./pages/HarvestOrders";
 import HarvestCards from "./pages/HarvestCards";
 import StaffOnboarding from "./pages/StaffOnboarding";
@@ -87,6 +88,7 @@ const App = () => (
           <Route path="/cultivation-plan" element={<AppLayout><CultivationPlan /></AppLayout>} />
           <Route path="/cultivation-plan/create" element={<AppLayout><CreateCultivationPlan /></AppLayout>} />
           <Route path="/field-monitoring" element={<AppLayout><FieldMonitoring /></AppLayout>} />
+          <Route path="/field-visit-analytics" element={<AppLayout><FieldVisitAnalytics /></AppLayout>} />
 
           {/* Harvest & Weighment */}
           <Route path="/harvest-planning" element={<AppLayout><HarvestPlanning /></AppLayout>} />

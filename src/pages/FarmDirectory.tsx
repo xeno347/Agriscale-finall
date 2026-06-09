@@ -1,218 +1,250 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
-  Search,
-  Filter,
-  MapPin,
-  Map,
-  Sprout,
-  Wheat,
-  Leaf,
-  Wallet,
-  NotebookText,
-  LayoutGrid,
-  Layers,
-  TreePine,
-  TrendingUp,
+  Search, MapPin, Map, Sprout, Wheat, Leaf,
+  Wallet, NotebookText, LayoutGrid, Layers,
+  TreePine, RefreshCw, Shovel, Video, Crosshair,
 } from 'lucide-react';
+import { MapContainer, TileLayer, Polygon, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+import getBaseUrl from '@/lib/config';
+import PlotMarkingModal from '@/components/farm/PlotMarkingModal';
+import FarmActivityModal, { FarmActivityEntry } from '@/components/farm/FarmActivityModal';
 
-type CropType = 'napier' | 'paddy' | 'ragi' | '';
+const BASE_URL = getBaseUrl().replace(/\/$/, '');
 
-type LandCard = {
-  id: string;
-  farmName: string;
-  location: string;
-  village: string;
-  district: string;
-  state: string;
-  block: string;
-  cropType: CropType;
-  acres: number;
-  leaseStart: string;
-  leaseEnd: string;
-  leaseAmount: number;
-  status: 'Active' | 'Expired' | 'Pending';
-  images: string[];
-  video: string;
-  coordinates: [number, number][];
-  farmerName: string;
+// ─────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────
+type VendorScope = {
+  start_date: string;
+  end_date: string;
+  activities: string[];
+  vendor_details: { vendor_name: string; vendor_contact: string };
 };
 
-const MOCK_LANDS: LandCard[] = [
-  {
-    id: 'FLD-001',
-    farmName: 'Rampur North Block',
-    location: 'Rampur, Bilaspur, Chhattisgarh',
-    village: 'Rampur',
-    district: 'Bilaspur',
-    state: 'Chhattisgarh',
-    block: 'Block A',
-    cropType: 'napier',
-    acres: 12.5,
-    leaseStart: '2023-04-01',
-    leaseEnd: '2026-03-31',
-    leaseAmount: 18000,
-    status: 'Active',
-    images: [],
-    video: '',
-    coordinates: [],
-    farmerName: 'Ramnath Patel',
-  },
-  {
-    id: 'FLD-002',
-    farmName: 'Seoni East Farm',
-    location: 'Seoni, Seoni, Madhya Pradesh',
-    village: 'Seoni',
-    district: 'Seoni',
-    state: 'Madhya Pradesh',
-    block: 'Block B',
-    cropType: 'paddy',
-    acres: 8.0,
-    leaseStart: '2022-06-15',
-    leaseEnd: '2025-06-14',
-    leaseAmount: 14500,
-    status: 'Active',
-    images: [],
-    video: '',
-    coordinates: [],
-    farmerName: 'Shyam Verma',
-  },
-  {
-    id: 'FLD-003',
-    farmName: 'Durg South Plot',
-    location: 'Durg, Durg, Chhattisgarh',
-    village: 'Durg',
-    district: 'Durg',
-    state: 'Chhattisgarh',
-    block: 'Block C',
-    cropType: 'ragi',
-    acres: 6.75,
-    leaseStart: '2021-01-10',
-    leaseEnd: '2024-01-09',
-    leaseAmount: 12000,
-    status: 'Expired',
-    images: [],
-    video: '',
-    coordinates: [],
-    farmerName: 'Lalita Bai',
-  },
-  {
-    id: 'FLD-004',
-    farmName: 'Korba West Field',
-    location: 'Korba, Korba, Chhattisgarh',
-    village: 'Korba',
-    district: 'Korba',
-    state: 'Chhattisgarh',
-    block: 'Block A',
-    cropType: 'napier',
-    acres: 15.0,
-    leaseStart: '2024-03-01',
-    leaseEnd: '2027-02-28',
-    leaseAmount: 22000,
-    status: 'Active',
-    images: [],
-    video: '',
-    coordinates: [],
-    farmerName: 'Mohan Singh',
-  },
-  {
-    id: 'FLD-005',
-    farmName: 'Jagdalpur Central',
-    location: 'Jagdalpur, Bastar, Chhattisgarh',
-    village: 'Jagdalpur',
-    district: 'Bastar',
-    state: 'Chhattisgarh',
-    block: 'Block D',
-    cropType: 'paddy',
-    acres: 10.25,
-    leaseStart: '2024-07-01',
-    leaseEnd: '2027-06-30',
-    leaseAmount: 16500,
-    status: 'Pending',
-    images: [],
-    video: '',
-    coordinates: [],
-    farmerName: 'Geeta Yadav',
-  },
-  {
-    id: 'FLD-006',
-    farmName: 'Raipur Outer Ring',
-    location: 'Raipur, Raipur, Chhattisgarh',
-    village: 'Raipur',
-    district: 'Raipur',
-    state: 'Chhattisgarh',
-    block: 'Block B',
-    cropType: 'napier',
-    acres: 9.5,
-    leaseStart: '2023-09-15',
-    leaseEnd: '2026-09-14',
-    leaseAmount: 19000,
-    status: 'Active',
-    images: [],
-    video: '',
-    coordinates: [],
-    farmerName: 'Suresh Kumar',
-  },
-];
-
-const cropMeta: Record<Exclude<CropType, ''>, { label: string; Icon: React.ComponentType<{ className?: string }>; color: string }> = {
-  napier: { label: 'Napier', Icon: Leaf, color: 'text-green-700 bg-green-50 ring-green-100' },
-  paddy: { label: 'Paddy', Icon: Wheat, color: 'text-yellow-700 bg-yellow-50 ring-yellow-100' },
-  ragi: { label: 'Ragi', Icon: Sprout, color: 'text-orange-700 bg-orange-50 ring-orange-100' },
+type LandPlot = {
+  plot_name:        string;
+  plot_area:        number;
+  plot_coordinates: [number, number][];
+  created_at?:      string;
 };
 
-const statusMeta: Record<LandCard['status'], { color: string }> = {
-  Active: { color: 'text-emerald-700 bg-emerald-50 ring-emerald-100' },
-  Expired: { color: 'text-red-700 bg-red-50 ring-red-100' },
-  Pending: { color: 'text-amber-700 bg-amber-50 ring-amber-100' },
+type Farm = {
+  farm_id: string;
+  farmer_id: string;
+  block_id: string;
+  crop_type: string;
+  area: number;
+  priority: number;
+  created_at: string;
+  activities?: FarmActivityEntry[];
+  land_data: {
+    land_coordinates: [number, number][];
+    farming_option: string;
+    state: string;
+    village: string;
+    district: string;
+    land_media: { images: string[]; video: string };
+  };
+  land_plots?: LandPlot[];
+  scope_of_work?: Record<string, VendorScope>;
+  harvest_log: Record<string, unknown>;
+  payment_log: Record<string, unknown>;
 };
 
-const FarmDirectory = () => {
-  const [search, setSearch] = useState('');
+// ─────────────────────────────────────────────────────────────
+// MINI MAP — Leaflet satellite with land boundary + plots
+// ─────────────────────────────────────────────────────────────
+const PLOT_COLORS = ['#f59e0b','#a855f7','#06b6d4','#ec4899','#f97316','#14b8a6','#6366f1','#84cc16'];
 
-  const filtered = MOCK_LANDS.filter((land) => {
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
+const FitBounds = ({ coords }: { coords: [number, number][] }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (coords.length > 0) {
+      map.fitBounds(L.latLngBounds(coords as L.LatLngTuple[]), { padding: [14, 14] });
+    }
+  }, [map]);
+  return null;
+};
+
+const FarmMiniMap = ({
+  landCoords,
+  plots,
+}: {
+  landCoords: [number, number][];
+  plots?: LandPlot[];
+}) => {
+  const hasPlots = (plots?.length ?? 0) > 0;
+  const allCoords: [number, number][] = hasPlots
+    ? [...landCoords, ...plots!.flatMap(p => p.plot_coordinates)]
+    : landCoords;
+  const center: [number, number] = allCoords.length > 0
+    ? [allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length,
+       allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length]
+    : [20.5937, 78.9629];
+
+  if (landCoords.length === 0) {
     return (
-      land.farmName.toLowerCase().includes(q) ||
-      land.village.toLowerCase().includes(q) ||
-      land.district.toLowerCase().includes(q) ||
-      land.farmerName.toLowerCase().includes(q) ||
-      land.block.toLowerCase().includes(q)
+      <div className="h-full w-full flex flex-col items-center justify-center bg-gray-900 gap-1">
+        <Map className="h-8 w-8 text-gray-600" />
+        <span className="text-[10px] text-gray-500">No coordinates</span>
+      </div>
     );
-  });
+  }
 
-  const totalArea = MOCK_LANDS.reduce((sum, l) => sum + l.acres, 0);
-  const totalActive = MOCK_LANDS.filter((l) => l.status === 'Active').length;
-  const totalBlocks = new Set(MOCK_LANDS.map((l) => l.block)).size;
-  const totalLeaseValue = MOCK_LANDS.filter((l) => l.status === 'Active').reduce((sum, l) => sum + l.leaseAmount, 0);
+  return (
+    <MapContainer
+      key={`${landCoords[0]?.[0]}-${landCoords[0]?.[1]}`}
+      center={center}
+      zoom={14}
+      style={{ height: '100%', width: '100%' }}
+      zoomControl={false}
+      dragging={false}
+      scrollWheelZoom={false}
+      doubleClickZoom={false}
+      touchZoom={false}
+      attributionControl={false}
+    >
+      <TileLayer
+        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        maxZoom={19}
+      />
+      {/* Land boundary */}
+      {landCoords.length >= 3 && (
+        <Polygon
+          positions={landCoords}
+          pathOptions={{
+            color: '#22c55e',
+            fillColor: '#22c55e',
+            fillOpacity: hasPlots ? 0.08 : 0.22,
+            weight: 2.5,
+          }}
+        />
+      )}
+      {/* Plot polygons */}
+      {hasPlots && plots!.map((plot, i) =>
+        plot.plot_coordinates.length >= 3 ? (
+          <Polygon
+            key={i}
+            positions={plot.plot_coordinates}
+            pathOptions={{
+              color: PLOT_COLORS[i % PLOT_COLORS.length],
+              fillColor: PLOT_COLORS[i % PLOT_COLORS.length],
+              fillOpacity: 0.35,
+              weight: 2,
+            }}
+          />
+        ) : null
+      )}
+      <FitBounds coords={allCoords} />
+    </MapContainer>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────────────────────
+type KnownCrop = 'napier' | 'paddy' | 'ragi';
+
+const cropMeta: Record<KnownCrop, { label: string; Icon: React.ComponentType<{ className?: string }>; color: string }> = {
+  napier: { label: 'Napier', Icon: Leaf,   color: 'text-green-700 bg-green-50 ring-green-100'    },
+  paddy:  { label: 'Paddy',  Icon: Wheat,  color: 'text-yellow-700 bg-yellow-50 ring-yellow-100' },
+  ragi:   { label: 'Ragi',   Icon: Sprout, color: 'text-orange-700 bg-orange-50 ring-orange-100' },
+};
+
+const farmingOptionMeta: Record<string, { color: string }> = {
+  'Lease Farming':    { color: 'text-blue-700 bg-blue-50 ring-blue-200'       },
+  'Contract Farming': { color: 'text-purple-700 bg-purple-50 ring-purple-200' },
+};
+
+const shortId = (id: string) => id.slice(0, 8).toUpperCase();
+
+const fmtDate = (iso: string) => {
+  try {
+    return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch { return iso; }
+};
+
+const fmtShortDate = (iso: string) => {
+  try {
+    return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  } catch { return iso; }
+};
+
+const recentActivities = (farm: Farm): FarmActivityEntry[] =>
+  [...(farm.activities ?? [])]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 2);
+
+// ─────────────────────────────────────────────────────────────
+// MAIN PAGE
+// ─────────────────────────────────────────────────────────────
+const FarmDirectory = () => {
+  const [farms, setFarms]     = useState<Farm[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  const [search, setSearch]   = useState('');
+  const [plotMarkingFarm, setPlotMarkingFarm]       = useState<Farm | null>(null);
+  const [activityModalFarm, setActivityModalFarm] = useState<Farm | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    fetch(`${BASE_URL}/farmer_managment/get_farms`)
+      .then(r => r.json())
+      .then((data: any) => {
+        if (Array.isArray(data?.farms)) setFarms(data.farms);
+        else throw new Error(data?.message || 'Unexpected response format');
+      })
+      .catch((e: any) => {
+        const msg = e?.message || 'Failed to load farms';
+        setError(msg);
+        toast.error(msg);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return farms;
+    return farms.filter(f =>
+      f.farm_id.toLowerCase().includes(q) ||
+      (f.land_data?.village ?? '').toLowerCase().includes(q) ||
+      (f.land_data?.district ?? '').toLowerCase().includes(q) ||
+      (f.land_data?.state ?? '').toLowerCase().includes(q) ||
+      (f.crop_type ?? '').toLowerCase().includes(q) ||
+      (f.land_data?.farming_option ?? '').toLowerCase().includes(q)
+    );
+  }, [farms, search]);
+
+  // KPIs
+  const totalArea     = farms.reduce((s, f) => s + (f.area ?? 0), 0);
+  const uniqueBlocks  = new Set(farms.map(f => f.block_id)).size;
+  const leaseFarms    = farms.filter(f => f.land_data?.farming_option === 'Lease Farming').length;
+  const contractFarms = farms.filter(f => f.land_data?.farming_option === 'Contract Farming').length;
 
   const kpis = [
-    { label: 'Total Farms', value: MOCK_LANDS.length, icon: LayoutGrid, color: 'text-primary' },
-    { label: 'Total Area', value: `${totalArea.toLocaleString('en-IN')} acres`, icon: Layers, color: 'text-blue-600' },
-    { label: 'Active Leases', value: totalActive, icon: TreePine, color: 'text-emerald-600' },
-    { label: 'Total Blocks', value: totalBlocks, icon: Map, color: 'text-violet-600' },
-    { label: 'Annual Lease Value', value: `₹${totalLeaseValue.toLocaleString('en-IN')}`, icon: TrendingUp, color: 'text-orange-600' },
+    { label: 'Total Farms',        value: farms.length,                      icon: LayoutGrid, color: 'text-gray-800'    },
+    { label: 'Total Area (Acres)',  value: totalArea.toLocaleString('en-IN'), icon: Layers,     color: 'text-blue-600'    },
+    { label: 'Unique Blocks',       value: uniqueBlocks,                      icon: Map,        color: 'text-violet-600'  },
+    { label: 'Lease Farming',       value: leaseFarms,                        icon: TreePine,   color: 'text-emerald-600' },
+    { label: 'Contract Farming',    value: contractFarms,                     icon: Shovel,     color: 'text-orange-600'  },
   ];
 
   return (
     <div className="p-8 space-y-6">
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-display font-bold">Farm Directory</h1>
-          <p className="text-muted-foreground mt-1">All registered land parcels and their details</p>
-        </div>
-        <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
-          <span className="text-base leading-none">+</span>
-          Add Land
-        </Button>
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-display font-bold">Farm Directory</h1>
+        <p className="text-muted-foreground mt-1">All registered farm parcels and their details</p>
       </div>
 
-      {/* ── KPIs ── */}
+      {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        {kpis.map((kpi) => (
+        {kpis.map(kpi => (
           <div key={kpi.label} className="bg-white rounded-xl p-5 shadow-sm border border-border">
             <div className="flex items-center gap-2 mb-1">
               <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
@@ -223,176 +255,340 @@ const FarmDirectory = () => {
         ))}
       </div>
 
-      {/* ── Search & Filter ── */}
-      <div className="flex gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by farm name, village, farmer..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-        <Button className="gap-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700">
-          <Filter className="w-4 h-4" />
-          Filter
-        </Button>
+      {/* Search */}
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          placeholder="Search by village, district, crop, farm ID…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pl-10"
+        />
       </div>
 
-      {/* ── Land Cards Grid ── */}
-      <div className="flex flex-wrap gap-5">
-        {filtered.map((land) => {
-          const now = Date.now();
-          const startMs = new Date(land.leaseStart).getTime();
-          const endMs = new Date(land.leaseEnd).getTime();
-          const hasRange = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
-          const progressPct = hasRange
-            ? Math.max(0, Math.min(100, ((now - startMs) / (endMs - startMs)) * 100))
-            : 0;
+      {/* Content */}
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-24 gap-3 text-gray-400">
+          <RefreshCw className="w-8 h-8 animate-spin opacity-40" />
+          <p className="text-sm">Loading farms…</p>
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center justify-center py-24 gap-2 text-red-400">
+          <p className="text-sm font-medium">{error}</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24 text-gray-400">
+          <p className="text-sm">No farms found.</p>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-5">
+          {filtered.map(farm => {
+            const ld           = farm.land_data;
+            const coords       = ld.land_coordinates ?? [];
+            const images       = ld.land_media?.images ?? [];
+            const video        = ld.land_media?.video ?? '';
+            const cropKey      = (farm.crop_type ?? '').toLowerCase() as KnownCrop;
+            const crop         = cropMeta[cropKey] ?? null;
+            const optionMeta   = farmingOptionMeta[ld.farming_option ?? ''] ?? { color: 'text-gray-600 bg-gray-50 ring-gray-200' };
+            const location     = [ld.village, ld.district, ld.state].filter(Boolean).join(', ');
+            const scopeEntries = Object.entries(farm.scope_of_work ?? {});
 
-          const crop = land.cropType ? cropMeta[land.cropType] : null;
-          const statusStyle = statusMeta[land.status];
+            // Separate SBR self-scope entries from external vendor entries
+            const isSelfScope = (s: VendorScope) =>
+              (s.vendor_details?.vendor_name ?? '').toLowerCase().includes('sai') ||
+              (s.vendor_details?.vendor_name ?? '').toLowerCase().includes('sbr');
 
-          return (
-            <div
-              key={land.id}
-              className="w-[340px] rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden transition hover:-translate-y-0.5 hover:shadow-md shrink-0"
-            >
-              {/* Map / Media area */}
-              <div className="h-[140px] w-full bg-gray-100 relative overflow-hidden flex items-center justify-center">
-                <Map className="h-10 w-10 text-gray-300" />
-                <div className="absolute top-2 right-2 rounded bg-black/60 text-white text-[10px] px-2 py-1 inline-flex items-center gap-1">
-                  <Map className="h-3 w-3" />
-                  Land Mapping
-                </div>
-                {/* Status badge */}
-                <div className={`absolute top-2 left-2 inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusStyle.color}`}>
-                  {land.status}
-                </div>
-              </div>
+            const selfScopeEntries   = scopeEntries.filter(([k, s]) => k === 'self' || isSelfScope(s));
+            const vendorScopeEntries = scopeEntries.filter(([k, s]) => k !== 'self' && !isSelfScope(s));
+            const hasSelfScope   = selfScopeEntries.length > 0;
+            const hasVendorScope = vendorScopeEntries.length > 0;
+            const hasScope       = scopeEntries.length > 0;
 
-              {/* Card body */}
-              <div className="p-4 space-y-3">
-                {/* Farm name + block */}
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="font-semibold text-sm text-gray-950 leading-5">{land.farmName}</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground font-medium">{land.id}</div>
-                  </div>
-                  <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
-                    {land.block}
+
+            return (
+              <div
+                key={farm.farm_id}
+                className="w-[340px] rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden transition hover:-translate-y-0.5 hover:shadow-md shrink-0 flex flex-col"
+              >
+                {/* ── Header: Leaflet satellite map ── */}
+                <div className="h-[220px] w-full relative overflow-hidden">
+                  <FarmMiniMap landCoords={coords} plots={farm.land_plots} />
+
+                  {/* Farming option badge */}
+                  <span className={`absolute top-2 left-2 z-[1000] inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 backdrop-blur-sm bg-white/90 ${optionMeta.color}`}>
+                    {ld.farming_option || 'Unknown'}
                   </span>
-                </div>
 
-                {/* Location */}
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <MapPin className="h-4 w-4 shrink-0 text-gray-500" />
-                  <span className="truncate">{land.location}</span>
-                </div>
+                  {/* Priority badge */}
+                  {(farm.priority ?? 0) > 0 && (
+                    <span className="absolute top-2 right-2 z-[1000] rounded-full bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5">
+                      P{farm.priority}
+                    </span>
+                  )}
 
-                {/* Farmer + Crop row */}
-                <div className="flex items-center justify-between">
-                  <div className="text-xs text-muted-foreground">
-                    Farmer: <span className="font-semibold text-gray-800">{land.farmerName}</span>
-                  </div>
-                  {crop && (
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${crop.color}`}>
-                      <crop.Icon className="h-3 w-3" />
-                      {crop.label}
+                  {/* Plot count badge */}
+                  {(farm.land_plots?.length ?? 0) > 0 && (
+                    <span className="absolute bottom-2 right-2 z-[1000] rounded bg-black/60 text-white text-[9px] px-1.5 py-0.5">
+                      {farm.land_plots!.length} plots
                     </span>
                   )}
                 </div>
 
-                {/* Stats row */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-                    <div className="text-[11px] text-muted-foreground">Acres</div>
-                    <div className="text-sm font-bold text-gray-950">{land.acres.toLocaleString('en-IN')}</div>
-                  </div>
-                  <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
-                    <div className="text-[11px] text-emerald-700">Lease / Annum</div>
-                    <div className="text-sm font-bold text-emerald-800">₹{land.leaseAmount.toLocaleString('en-IN')}</div>
-                  </div>
-                </div>
+                {/* ── Card body ── */}
+                <div className="p-4 space-y-3 flex-1 flex flex-col">
 
-                {/* Lease timeline */}
-                <div>
-                  <div className="mb-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                    Lease Tenure Timeline
+                  {/* Farm ID + Block + Date */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-sm text-gray-950 font-mono leading-5">
+                        {shortId(farm.farm_id)}…
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-muted-foreground">
+                        {fmtDate(farm.created_at)}
+                      </div>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-mono font-semibold text-slate-600 ring-1 ring-slate-200 max-w-[120px] truncate">
+                      {shortId(farm.block_id)}…
+                    </span>
                   </div>
-                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-500 transition-all"
-                      style={{ width: `${progressPct}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] mt-1 text-muted-foreground">
-                    <span>{land.leaseStart}</span>
-                    <span>{Math.round(progressPct)}%</span>
-                    <span>{land.leaseEnd}</span>
-                  </div>
-                </div>
 
-                {/* Land Media */}
-                <div>
-                  <div className="mb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                    Land Media
+                  {/* Location */}
+                  <div className="flex items-start gap-2 text-muted-foreground">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-gray-400 mt-0.5" />
+                    <span className="text-xs line-clamp-2">{location || '—'}</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {[0, 1, 2].map((idx) => (
-                      <div
-                        key={idx}
-                        className="h-14 rounded-md border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden"
-                      >
-                        {land.images[idx] ? (
-                          <img src={land.images[idx]} alt={`Land ${idx + 1}`} className="h-full w-full object-cover" />
-                        ) : (
-                          <span className="text-[10px] text-muted-foreground">No image</span>
+
+                  {/* Crop + Area */}
+                  <div className="flex items-center justify-between">
+                    {crop ? (
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${crop.color}`}>
+                        <crop.Icon className="h-3 w-3" />
+                        {crop.label}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 bg-gray-50 text-gray-600 ring-gray-200 capitalize">
+                        {farm.crop_type || 'Unknown'}
+                      </span>
+                    )}
+                    <div className="text-right">
+                      <div className="text-[10px] text-muted-foreground">Area</div>
+                      <div className="text-sm font-bold text-gray-900">
+                        {(farm.area ?? 0).toLocaleString('en-IN')} acres
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Scope of Work ── */}
+
+                  {/* SBR self-scope (from scope_of_work or fallback) */}
+                  {(hasSelfScope || !hasScope) && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 space-y-1.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Scope of Work</div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] font-semibold text-gray-800">Sai BioResources</div>
+                        <span className="text-[10px] font-mono text-emerald-600 bg-emerald-100 rounded px-1.5 py-0.5">self</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {hasSelfScope
+                          ? (selfScopeEntries[0][1].activities ?? []).slice(0, 4).map(act => (
+                              <span key={act} className="rounded-full bg-white border border-emerald-200 text-[10px] px-1.5 py-0.5 text-emerald-700">
+                                {act}
+                              </span>
+                            ))
+                          : (
+                            <span className="rounded-full bg-white border border-emerald-200 text-[10px] px-2 py-0.5 text-emerald-700 font-medium">
+                              All Activities
+                            </span>
+                          )
+                        }
+                        {hasSelfScope && (selfScopeEntries[0][1].activities ?? []).length > 4 && (
+                          <span className="text-[10px] text-muted-foreground">
+                            +{selfScopeEntries[0][1].activities.length - 4} more
+                          </span>
                         )}
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
+                  )}
 
-                {/* Footer actions */}
-                <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
-                  >
-                    <Wallet className="h-3.5 w-3.5" />
-                    Payments
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
-                  >
-                    <NotebookText className="h-3.5 w-3.5" />
-                    Harvest
-                  </button>
-                  <button
-                    type="button"
-                    className="ml-auto inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50"
-                  >
-                    Investments
-                  </button>
+                  {/* External vendor scope */}
+                  {hasVendorScope && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2 space-y-1.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Vendor Scope</div>
+                      {vendorScopeEntries.map(([vendorId, scope]) => (
+                        <div key={vendorId} className="space-y-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="text-[11px] font-semibold text-gray-800 truncate">
+                              {scope.vendor_details?.vendor_name}
+                            </div>
+                            <span className="shrink-0 text-[10px] font-mono text-muted-foreground">{vendorId}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {(scope.activities ?? []).slice(0, 4).map(act => (
+                              <span key={act} className="rounded-full bg-white border border-blue-200 text-[10px] px-1.5 py-0.5 text-blue-700">
+                                {act}
+                              </span>
+                            ))}
+                            {(scope.activities ?? []).length > 4 && (
+                              <span className="text-[10px] text-muted-foreground">
+                                +{scope.activities.length - 4} more
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+
+                  {/* ── Land Media ── */}
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Land Media
+                    </div>
+
+                    {/* 3 image thumbnails */}
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[0, 1, 2].map(idx => (
+                        <div
+                          key={idx}
+                          className="h-14 rounded-md border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden"
+                        >
+                          {images[idx] ? (
+                            <img
+                              src={images[idx]}
+                              alt={`Farm ${idx + 1}`}
+                              className="h-full w-full object-cover cursor-pointer"
+                              onClick={() => window.open(images[idx], '_blank')}
+                            />
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">No image</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Video — full width spanning all 3 columns */}
+                    {video ? (
+                      <div className="mt-1.5 rounded-md border border-gray-200 overflow-hidden bg-black">
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-900">
+                          <Video className="w-3 h-3 text-gray-400" />
+                          <span className="text-[10px] text-gray-400 font-medium">Land Video</span>
+                        </div>
+                        <video
+                          src={video}
+                          controls
+                          className="w-full"
+                          style={{ maxHeight: '120px', display: 'block' }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="mt-1.5 h-10 rounded-md border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center gap-1.5">
+                        <Video className="w-3.5 h-3.5 text-gray-300" />
+                        <span className="text-[10px] text-muted-foreground">No video</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Footer actions ── */}
+                  <div className="flex items-center gap-2 pt-1 border-t border-gray-100 mt-auto">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      <Wallet className="h-3.5 w-3.5" />
+                      Payments
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      <NotebookText className="h-3.5 w-3.5" />
+                      Harvest
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPlotMarkingFarm(farm)}
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100"
+                    >
+                      <Crosshair className="h-3.5 w-3.5" />
+                      Plot Marking
+                    </button>
+                  </div>
+
+                  {/* ── Recent Activity timeline ── */}
+                  {(() => {
+                    const acts = recentActivities(farm);
+                    const total = (farm.activities ?? []).length;
+                    if (total === 0) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setActivityModalFarm(farm)}
+                        className="w-full text-left border-t border-gray-100 pt-3 group/act"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Recent Activity
+                          </span>
+                          <span className="text-[10px] text-emerald-600 font-semibold group-hover/act:underline">
+                            View all {total} →
+                          </span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {acts.map((act, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                              <span className="text-[11px] font-medium text-gray-700 truncate flex-1">
+                                {act.activity}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                {fmtShortDate(act.date)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+      )}
 
-        {/* Add New Land placeholder card */}
-        <button
-          type="button"
-          className="w-[340px] min-h-[430px] rounded-xl border-2 border-dashed border-gray-300 bg-white hover:bg-gray-50 transition flex flex-col items-center justify-center gap-3 shrink-0"
-        >
-          <div className="h-14 w-14 rounded-full border border-gray-300 flex items-center justify-center text-3xl text-gray-400">+</div>
-          <div className="text-sm font-medium text-gray-600">Add New Land</div>
-          <div className="text-xs text-muted-foreground">Click to register a new land parcel</div>
-        </button>
-      </div>
+      {/* Activity Modal */}
+      {activityModalFarm && (
+        <FarmActivityModal
+          farmId={activityModalFarm.farm_id}
+          location={[
+            activityModalFarm.land_data?.village,
+            activityModalFarm.land_data?.district,
+            activityModalFarm.land_data?.state,
+          ].filter(Boolean).join(', ')}
+          activities={activityModalFarm.activities ?? []}
+          onClose={() => setActivityModalFarm(null)}
+        />
+      )}
+
+      {/* Plot Marking Modal */}
+      {plotMarkingFarm && (
+        <PlotMarkingModal
+          farmId={plotMarkingFarm.farm_id}
+          farmTotalAcres={plotMarkingFarm.area}
+          farmLabel={[
+            plotMarkingFarm.land_data?.village,
+            plotMarkingFarm.land_data?.district,
+            plotMarkingFarm.land_data?.state,
+          ].filter(Boolean).join(', ')}
+          initialCoordinates={plotMarkingFarm.land_data?.land_coordinates ?? []}
+          initialPlots={plotMarkingFarm.land_plots ?? []}
+          onClose={() => setPlotMarkingFarm(null)}
+          onSave={(plot) => {
+            toast.success(`Plot "${plot.plot_number}" saved — ${plot.coordinates.length} points · ${plot.acres} acres`);
+          }}
+        />
+      )}
     </div>
   );
 };
