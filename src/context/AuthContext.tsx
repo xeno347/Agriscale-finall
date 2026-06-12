@@ -14,6 +14,7 @@ type AuthUser = {
   username?: string;
   department?: string;
   designation?: string;
+  notification_permissions?: boolean;
 };
 
 type AuthContextValue = {
@@ -146,6 +147,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       name: data?.staff_name ?? data?.staffName ?? '',
       department: data?.staff_department ?? data?.staffDepartment ?? '',
       designation: data?.staff_designation ?? data?.staffDesignation ?? '',
+      notification_permissions: data?.notification_permissions === true,
     };
 
     return { expired: false as const, user: nextUser };

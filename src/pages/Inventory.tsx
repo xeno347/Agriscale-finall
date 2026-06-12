@@ -4,6 +4,8 @@ import {
   Search,
   Edit3,
   ArrowLeftRight,
+  ArrowDownToLine,
+  ArrowUpFromLine,
   PackageCheck,
   History,
   Boxes,
@@ -41,6 +43,7 @@ type StockTransaction = {
   date: string;
   note: string;
   by: string;
+  costPerUnit?: number;
 };
 
 type StockItem = {
@@ -307,6 +310,7 @@ const Inventory = () => {
   const [outgoingItem, setOutgoingItem] = useState<StockItem | null>(null);
   const [issuedItem, setIssuedItem] = useState<StockItem | null>(null);
   const [historyItem, setHistoryItem] = useState<StockItem | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'incoming' | 'outgoing'>('all');
   const [deleteItem, setDeleteItem] = useState<StockItem | null>(null);
 
   useEffect(() => {
@@ -318,22 +322,45 @@ const Inventory = () => {
           throw new Error(data?.message || 'Failed to fetch inventory items');
         }
 
-        const mapped: StockItem[] = data.items.map((it: any, idx: number) => ({
-          id: String(it?.Invent_id || it?.new_item_code || `inv_${idx}`),
-          name: String(it?.item_name || ''),
-          category: String(it?.category || 'Others'),
-          sku: String(it?.new_item_code || ''),
-          unit: String(it?.unit || ''),
-          currentStock: Number(it?.stock) || 0,
-          stockInPipeline: Number(it?.stock_in_pipeline || it?.pipeline_stock || 0),
-          minStock: Number(it?.threshold) || 0,
-          imageUrl: String(it?.item_image_url || ''),
-          location: String(it?.location || ''),
-          description: String(it?.description || ''),
-          vendors: [],
-          seriesNumber: '',
-          transactions: [],
-        }));
+        const mapped: StockItem[] = data.items.map((it: any, idx: number) => {
+          const stockHistory: StockTransaction[] = Array.isArray(it?.stock_history)
+            ? it.stock_history.map((entry: any) => {
+                const ts = String(entry?.timestamp ?? '');
+                const date = ts.includes('T') ? ts.split('T')[0] : ts || today();
+                const po = String(entry?.po_number ?? '');
+                const cost = entry?.per_unit_cost != null
+                  ? `₹${Number(entry.per_unit_cost).toLocaleString('en-IN')}/unit`
+                  : null;
+                const note = [po ? `PO: ${po}` : '', cost].filter(Boolean).join(' · ');
+                return {
+                  id: `sh-${po}-${ts}`,
+                  type: 'incoming' as const,
+                  qty: Number(entry?.stock) || 0,
+                  date,
+                  note,
+                  by: '',
+                  costPerUnit: entry?.per_unit_cost != null ? Number(entry.per_unit_cost) : undefined,
+                };
+              })
+            : [];
+
+          return {
+            id: String(it?.Invent_id || it?.new_item_code || `inv_${idx}`),
+            name: String(it?.item_name || ''),
+            category: String(it?.category || 'Others'),
+            sku: String(it?.new_item_code || ''),
+            unit: String(it?.unit || ''),
+            currentStock: Number(it?.stock) || 0,
+            stockInPipeline: Number(it?.stock_in_pipeline || it?.pipeline_stock || 0),
+            minStock: Number(it?.threshold) || 0,
+            imageUrl: String(it?.item_image_url || ''),
+            location: String(it?.location || ''),
+            description: String(it?.description || ''),
+            vendors: [],
+            seriesNumber: '',
+            transactions: stockHistory,
+          };
+        });
 
         setItems(mapped);
       } catch (e: any) {
@@ -581,8 +608,9 @@ const Inventory = () => {
                 setRequestStockOpen(true);
               }}
               onTransferStock={() => setUpdateStockItem(item)}
-              onIssued={() => setIssuedItem(item)}
-              onHistory={() => setHistoryItem(item)}
+              onIncomingHistory={() => { setHistoryItem(item); setHistoryFilter('incoming'); }}
+              onOutgoingHistory={() => { setHistoryItem(item); setHistoryFilter('outgoing'); }}
+              onHistory={() => { setHistoryItem(item); setHistoryFilter('all'); }}
               onDelete={() => setDeleteItem(item)}
             />
           ))}
@@ -597,7 +625,7 @@ const Inventory = () => {
       <AddStockModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        onSave={async (data, imageFile) => {
+        onSave={async (data, imageFile, openingStocks) => {
           try {
             let itemImageUrl = '';
             if (imageFile) {
@@ -614,7 +642,9 @@ const Inventory = () => {
               itemImageUrl = String(uploadData.public_url);
             }
 
-            const createPayload = {
+            const validEntries = openingStocks.filter((e) => Number(e.quantity) > 0);
+
+            const createPayload: Record<string, unknown> = {
               item_name: data.name,
               new_item_code: data.sku,
               category: data.category,
@@ -624,6 +654,16 @@ const Inventory = () => {
               item_image_url: itemImageUrl,
               description: data.description || '',
             };
+
+            if (validEntries.length > 0) {
+              const fifoList = validEntries.map((e) => ({
+                stock: Number(e.quantity),
+                per_unit_cost: Number(e.costPerUnit) || 0,
+                po_number: e.poNumber || '',
+              }));
+              createPayload.total_opening_stock = fifoList.reduce((sum, e) => sum + e.stock, 0);
+              createPayload.fifo_list = fifoList;
+            }
 
             const createRes = await fetch(`${BASE_URL}/inventory/create_new_item`, {
               method: 'POST',
@@ -774,7 +814,11 @@ const Inventory = () => {
 
       {/* History */}
       {historyItem && (
-        <HistoryModal item={historyItem} onClose={() => setHistoryItem(null)} />
+        <HistoryModal
+          item={historyItem}
+          filterType={historyFilter}
+          onClose={() => { setHistoryItem(null); setHistoryFilter('all'); }}
+        />
       )}
 
       {/* Delete Confirm */}
@@ -808,7 +852,8 @@ interface CardProps {
   onEdit: () => void;
   onUpdateStock: () => void;
   onTransferStock: () => void;
-  onIssued: () => void;
+  onIncomingHistory: () => void;
+  onOutgoingHistory: () => void;
   onHistory: () => void;
   onDelete: () => void;
 }
@@ -818,7 +863,8 @@ const InventoryCard = ({
   onEdit,
   onUpdateStock,
   onTransferStock,
-  onIssued,
+  onIncomingHistory,
+  onOutgoingHistory,
   onHistory,
   onDelete,
 }: CardProps) => {
@@ -900,20 +946,27 @@ const InventoryCard = ({
         </div>
 
         {/* Secondary action row */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            onClick={onIncomingHistory}
+            className="flex flex-col items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg py-2 transition-colors"
+          >
+            <ArrowDownToLine className="w-4 h-4" />
+            Incoming
+          </button>
+          <button
+            onClick={onOutgoingHistory}
+            className="flex flex-col items-center gap-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg py-2 transition-colors"
+          >
+            <ArrowUpFromLine className="w-4 h-4" />
+            Outgoing
+          </button>
           <button
             onClick={onTransferStock}
             className="flex flex-col items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg py-2 transition-colors"
           >
             <ArrowLeftRight className="w-4 h-4" />
-            Transfer Stock
-          </button>
-          <button
-            onClick={onIssued}
-            className="flex flex-col items-center gap-1 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg py-2 transition-colors"
-          >
-            <PackageCheck className="w-4 h-4" />
-            Issue
+            Transfer
           </button>
         </div>
 
@@ -941,6 +994,13 @@ const InventoryCard = ({
 // ─────────────────────────────────────────────────────────────
 // ADD STOCK MODAL
 // ─────────────────────────────────────────────────────────────
+type OpeningStockEntry = {
+  id: string;
+  quantity: string;
+  costPerUnit: string;
+  poNumber: string;
+};
+
 type AddStockForm = Omit<StockItem, 'id' | 'transactions'>;
 const emptyForm = (): AddStockForm => ({
   name: '',
@@ -963,15 +1023,25 @@ const AddStockModal = ({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (data: AddStockForm, imageFile: File | null) => Promise<void> | void;
+  onSave: (data: AddStockForm, imageFile: File | null, openingStocks: OpeningStockEntry[]) => Promise<void> | void;
 }) => {
   const [form, setForm] = useState<AddStockForm>(emptyForm());
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [codeLoading, setCodeLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [openingStocks, setOpeningStocks] = useState<OpeningStockEntry[]>([]);
 
   const set = (k: keyof AddStockForm, v: string | number) =>
     setForm((p) => ({ ...p, [k]: v }));
+
+  const addOpeningStock = () =>
+    setOpeningStocks((prev) => [...prev, { id: genId(), quantity: '', costPerUnit: '', poNumber: '' }]);
+
+  const removeOpeningStock = (id: string) =>
+    setOpeningStocks((prev) => prev.filter((e) => e.id !== id));
+
+  const updateOpeningStock = (id: string, field: keyof Omit<OpeningStockEntry, 'id'>, value: string) =>
+    setOpeningStocks((prev) => prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)));
 
   const generatedItemCode = useMemo(() => {
     const code = getCategoryCode(form.category);
@@ -1009,9 +1079,10 @@ const AddStockModal = ({
         sku: form.sku || generatedItemCode,
         seriesNumber: `SBR/INV/${getCategoryCode(form.category)}/`,
         vendors: [],
-      }, imageFile);
+      }, imageFile, openingStocks);
       setForm(emptyForm());
       setImageFile(null);
+      setOpeningStocks([]);
     } catch {
       // Error is already handled by parent onSave with toast.
     } finally {
@@ -1057,13 +1128,80 @@ const AddStockModal = ({
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Opening Stock">
-              <Input type="number" min={0} value={0} readOnly disabled className="bg-gray-50 text-gray-500 cursor-not-allowed" />
-            </Field>
-            <Field label="Threshold Quantity">
-              <Input type="number" min={0} value={form.minStock} onChange={(e) => set('minStock', Number(e.target.value))} />
-            </Field>
+          <Field label="Threshold Quantity">
+            <Input type="number" min={0} value={form.minStock} onChange={(e) => set('minStock', Number(e.target.value))} />
+          </Field>
+
+          {/* ── Opening Stock ── */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-gray-700">Opening Stock</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">Add one or more opening stock entries</p>
+              </div>
+              <button
+                type="button"
+                onClick={addOpeningStock}
+                className="flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg px-2.5 py-1.5 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Entry
+              </button>
+            </div>
+
+            {openingStocks.length === 0 ? (
+              <p className="text-center text-xs text-gray-400 py-3">No entries yet — click "Add Entry" to begin.</p>
+            ) : (
+              <div className="space-y-2">
+                {openingStocks.map((entry, idx) => (
+                  <div key={entry.id} className="rounded-lg bg-white border border-gray-200 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Entry {idx + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeOpeningStock(entry.id)}
+                        className="text-red-400 hover:text-red-600 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Field label={`Stock Qty (${form.unit || 'units'})`}>
+                        <Input
+                          type="number"
+                          min={0}
+                          placeholder="0"
+                          value={entry.quantity}
+                          onChange={(e) => updateOpeningStock(entry.id, 'quantity', e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Cost / Unit (₹)">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          placeholder="0.00"
+                          value={entry.costPerUnit}
+                          onChange={(e) => updateOpeningStock(entry.id, 'costPerUnit', e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Supporting PO No.">
+                        <Input
+                          placeholder="PO-…"
+                          value={entry.poNumber}
+                          onChange={(e) => updateOpeningStock(entry.id, 'poNumber', e.target.value)}
+                        />
+                      </Field>
+                    </div>
+                    {entry.quantity && entry.costPerUnit && Number(entry.quantity) > 0 && Number(entry.costPerUnit) > 0 && (
+                      <p className="text-[11px] text-green-700 font-medium">
+                        Total value: ₹{(Number(entry.quantity) * Number(entry.costPerUnit)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <Field label="Product Media (1 image)">
@@ -1213,10 +1351,13 @@ const TransactionModal = ({
 
   // Issue-specific state
   const [issueTo, setIssueTo] = useState('');
+  const [issueFarm, setIssueFarm] = useState('');
   const [issueStartDate, setIssueStartDate] = useState('');
   const [issueEndDate, setIssueEndDate] = useState('');
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; designation: string }>>([]);
   const [staffLoading, setStaffLoading] = useState(false);
+  const [farmList, setFarmList] = useState<Array<{ id: string; label: string }>>([]);
+  const [farmLoading, setFarmLoading] = useState(false);
 
   useEffect(() => {
     if (txType !== 'issued') return;
@@ -1240,7 +1381,29 @@ const TransactionModal = ({
         setStaffLoading(false);
       }
     };
+    const fetchFarms = async () => {
+      setFarmLoading(true);
+      try {
+        const res = await fetch(`${BASE_URL}/farmer_managment/get_farms`);
+        const data: any = await res.json().catch(() => null);
+        if (res.ok && Array.isArray(data?.farms)) {
+          setFarmList(
+            data.farms.map((f: any) => ({
+              id: String(f?.farm_id ?? ''),
+              label: f?.land_data?.village
+                ? `${f.farm_id} — ${f.land_data.village}`
+                : String(f?.farm_id ?? ''),
+            }))
+          );
+        }
+      } catch {
+        // farm list stays empty
+      } finally {
+        setFarmLoading(false);
+      }
+    };
     fetchStaff();
+    fetchFarms();
   }, [txType]);
 
   const colorMap: Record<StockTransaction['type'], string> = {
@@ -1260,9 +1423,10 @@ const TransactionModal = ({
     if (!qty || qty <= 0) return toast.error('Quantity must be greater than 0');
     if (txType === 'issued') {
       if (!issueTo) return toast.error('Please select a staff member');
+      if (!issueFarm) return toast.error('Please select a farm');
       if (!issueStartDate || !issueEndDate) return toast.error('Please fill both issue dates');
       if (issueEndDate < issueStartDate) return toast.error('End date must be after start date');
-      onSave({ type: txType, qty, date: issueStartDate, note: `${issueStartDate} → ${issueEndDate}`, by: issueTo });
+      onSave({ type: txType, qty, date: issueStartDate, note: `${issueStartDate} → ${issueEndDate} | Farm: ${issueFarm}`, by: issueTo });
     } else {
       onSave({ type: txType, qty, date: today(), note, by });
     }
@@ -1303,7 +1467,7 @@ const TransactionModal = ({
 
           {txType === 'issued' ? (
             <>
-              <Field label="Issue To">
+              <Field label="Issue To (Staff)">
                 <div className="relative">
                   <select
                     className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 pr-8 disabled:bg-gray-50 disabled:text-gray-400"
@@ -1316,6 +1480,23 @@ const TransactionModal = ({
                       <option key={s.id} value={s.name}>
                         {s.name}{s.designation ? ` — ${s.designation}` : ''}
                       </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                </div>
+              </Field>
+
+              <Field label="Issued for Farm">
+                <div className="relative">
+                  <select
+                    className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 pr-8 disabled:bg-gray-50 disabled:text-gray-400"
+                    value={issueFarm}
+                    onChange={(e) => setIssueFarm(e.target.value)}
+                    disabled={farmLoading}
+                  >
+                    <option value="">{farmLoading ? 'Loading farms…' : 'Select farm'}</option>
+                    {farmList.map((f) => (
+                      <option key={f.id} value={f.id}>{f.label}</option>
                     ))}
                   </select>
                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -1838,21 +2019,173 @@ const EquipmentAllocationModal = ({
 // ─────────────────────────────────────────────────────────────
 // HISTORY MODAL
 // ─────────────────────────────────────────────────────────────
-const HistoryModal = ({ item, onClose }: { item: StockItem; onClose: () => void }) => (
+const HistoryModal = ({
+  item,
+  filterType = 'all',
+  onClose,
+}: {
+  item: StockItem;
+  filterType?: 'all' | 'incoming' | 'outgoing';
+  onClose: () => void;
+}) => {
+  const [dateMode, setDateMode] = useState<'all' | 'custom'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  const filtered = filterType === 'all'
+    ? item.transactions
+    : item.transactions.filter((tx) => tx.type === filterType);
+
+  // Apply date range only for incoming custom mode
+  const dateFiltered = (filterType === 'incoming' && dateMode === 'custom')
+    ? filtered.filter((tx) => {
+        if (startDate && tx.date < startDate) return false;
+        if (endDate && tx.date > endDate) return false;
+        return true;
+      })
+    : filtered;
+
+  const titleSuffix =
+    filterType === 'incoming' ? ' — Incoming'
+    : filterType === 'outgoing' ? ' — Outgoing'
+    : '';
+
+  // ── Incoming: totals + group by date (newest first) ──────
+  const totalQty   = dateFiltered.reduce((sum, tx) => sum + tx.qty, 0);
+  const totalValue = dateFiltered.reduce((sum, tx) => sum + tx.qty * (tx.costPerUnit ?? 0), 0);
+
+  const byDate: [string, StockTransaction[]][] = (() => {
+    if (filterType !== 'incoming') return [];
+    const map = new Map<string, StockTransaction[]>();
+    dateFiltered.forEach((tx) => {
+      const list = map.get(tx.date) ?? [];
+      list.push(tx);
+      map.set(tx.date, list);
+    });
+    return Array.from(map.entries()).sort(([a], [b]) => b.localeCompare(a));
+  })();
+
+  return (
   <Dialog open onOpenChange={onClose}>
-    <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <History className="w-5 h-5 text-gray-600" />
-          Stock History – {item.name}
+          Stock History – {item.name}{titleSuffix}
         </DialogTitle>
       </DialogHeader>
 
-      {item.transactions.length === 0 ? (
-        <p className="text-sm text-gray-400 text-center py-8">No transactions recorded yet.</p>
+      {filtered.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-8">
+          {filterType === 'all' ? 'No transactions recorded yet.' : `No ${filterType} transactions recorded yet.`}
+        </p>
+      ) : filterType === 'incoming' ? (
+        <div className="space-y-4 py-2">
+
+          {/* ── Date range filter ── */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setDateMode('all'); setStartDate(''); setEndDate(''); }}
+                className={cn(
+                  'flex-1 rounded-lg py-1.5 text-xs font-semibold border transition-colors',
+                  dateMode === 'all'
+                    ? 'bg-green-600 text-white border-green-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-green-400',
+                )}
+              >
+                All Time
+              </button>
+              <button
+                onClick={() => setDateMode('custom')}
+                className={cn(
+                  'flex-1 rounded-lg py-1.5 text-xs font-semibold border transition-colors',
+                  dateMode === 'custom'
+                    ? 'bg-green-600 text-white border-green-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-green-400',
+                )}
+              >
+                Custom Range
+              </button>
+            </div>
+            {dateMode === 'custom' && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-medium text-gray-500">From</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    max={endDate || undefined}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-medium text-gray-500">To</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    min={startDate || undefined}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Summary card ── */}
+          <div className="flex items-center justify-between rounded-xl bg-green-50 border border-green-100 px-4 py-3">
+            <div>
+              <p className="text-xs text-green-600 font-medium">Total Incoming Stock</p>
+              <p className="text-2xl font-bold text-green-700">
+                {totalQty.toLocaleString('en-IN')}
+                <span className="text-sm font-normal text-green-500 ml-1">{item.unit}</span>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-green-600 font-medium">Total Value</p>
+              <p className="text-2xl font-bold text-green-700">
+                ₹{totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+          </div>
+
+          {/* ── Grouped rows or empty ── */}
+          {byDate.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No entries in the selected range.</p>
+          ) : byDate.map(([date, txs]) => (
+            <div key={date}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                  {new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </span>
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-[11px] text-gray-400 whitespace-nowrap">
+                  {txs.reduce((s, t) => s + t.qty, 0).toLocaleString('en-IN')} {item.unit}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {txs.map((tx) => (
+                  <div key={tx.id} className="flex items-center gap-3 rounded-lg border border-green-100 bg-green-50/40 px-3 py-2.5">
+                    <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                      <ArrowDownToLine className="w-4 h-4 text-green-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800">
+                        +{tx.qty.toLocaleString('en-IN')} {item.unit}
+                      </p>
+                      {tx.note && <p className="text-xs text-gray-500 truncate mt-0.5">{tx.note}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="space-y-2 py-2">
-          {item.transactions.map((tx) => (
+          {filtered.map((tx) => (
             <div
               key={tx.id}
               className="flex items-start gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50"
@@ -1867,7 +2200,6 @@ const HistoryModal = ({ item, onClose }: { item: StockItem; onClose: () => void 
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-800">
-                  {tx.qty > 0 && tx.type !== 'outgoing' && tx.type !== 'issued' ? '+' : ''}
                   {tx.type === 'outgoing' || tx.type === 'issued' ? '-' : '+'}
                   {tx.qty} {item.unit}
                 </p>
@@ -1885,7 +2217,8 @@ const HistoryModal = ({ item, onClose }: { item: StockItem; onClose: () => void 
       </DialogFooter>
     </DialogContent>
   </Dialog>
-);
+  );
+};
 
 // ─────────────────────────────────────────────────────────────
 // DELETE CONFIRM

@@ -171,6 +171,7 @@ const createIndentApi = async (payload: {
   pr_number: string;
   notes: string;
   department: string;
+  indent_type: string;
 }) => {
   const BASE_URL = getBaseUrl().replace(/\/$/, '');
   const res = await fetch(`${BASE_URL}/purchase_flow/create_indent`, {
@@ -744,6 +745,7 @@ const AddIndentModal = ({
           pr_number: prNo.trim(),
           notes: remarksNotes,
           department: 'INVENTORY',
+          indent_type: 'PR',
         });
       } catch (err: any) {
         toast.error(err?.message || 'Failed to create indent');

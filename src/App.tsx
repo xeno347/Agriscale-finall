@@ -61,6 +61,7 @@ import AdminOpsFuelRequest from "./pages/AdminOpsFuelRequest";
 import DirectorFuelRequest from "./pages/DirectorFuelRequest";
 import WorkOrder from "./pages/WorkOrder";
 import ScopeOfWork from "./pages/ScopeOfWork";
+import WebApp from "./pages/webapp/WebApp";
 
 const queryClient = new QueryClient();
 
@@ -206,6 +207,9 @@ const App = () => (
           <Route path="/director/cost-monitoring" element={<AppLayout><DirectorCostMonitoring /></AppLayout>} />
           <Route path="/director/emis-investments" element={<AppLayout><DirectorEmisInvestments /></AppLayout>} />
           <Route path="/director/assets-liabilities" element={<AppLayout><DirectorAssetsLiabilities /></AppLayout>} />
+
+          {/* Standalone Webapp — no ERP sidebar */}
+          <Route path="/approval/webapp/*" element={<WebApp />} />
 
           <Route path="*" element={<NotFound />} />
         </Routes>

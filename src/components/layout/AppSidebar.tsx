@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import NotificationBell from "@/components/NotificationBell";
 
 /* ---------------- NAV ITEM COMPONENT ---------------- */
 
@@ -265,7 +266,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             {/* <NavItem to="/admin-request" icon={ClipboardCheck} label="Admin Ops Request" isSidebarCollapsed={isCollapsed} /> */}
             <NavItem to="/admin-ops-indents" icon={FileText} label="Admin Ops Indents" isSidebarCollapsed={isCollapsed} />
             <NavItem to="/admin-ops-fuel-requests" icon={Fuel} label="Fuel Requests" isSidebarCollapsed={isCollapsed} />
-            <NavItem to="/on-demand-task" icon={ClipboardCheck} label="On Demand Task" isSidebarCollapsed={isCollapsed} />
+            <NavItem to="/on-demand-task" icon={ClipboardCheck} label="On Demand Task & Allocation" isSidebarCollapsed={isCollapsed} />
             {/* <NavItem to="/admin-mrf-approvals" icon={FileText} label="Admin MRF Approvals" isSidebarCollapsed={isCollapsed} /> */}
           </NavGroup>
 
@@ -520,12 +521,14 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           )}
         </div>
 
+        <NotificationBell collapsed={isCollapsed} />
+
         <button
           type="button"
           onClick={() => navigate("/tools/khasra_records")}
           title={isCollapsed ? "More" : undefined}
           className={cn(
-            "mt-3 w-full rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors",
+            "mt-2 w-full rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors",
             isCollapsed
               ? "mx-auto flex h-10 w-10 items-center justify-center p-0"
               : "flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold"

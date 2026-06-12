@@ -524,6 +524,7 @@ const StaffOnboarding = () => {
                       <option value="Manager">Manager</option>
                       <option value="Operator">Operator</option>
                       <option value="Supervisor">Supervisor</option>
+                      <option value="Director">Director</option>
                     </select>
                     <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                   </div>

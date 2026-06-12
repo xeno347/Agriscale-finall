@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Check, ChevronLeft, ChevronRight, FileText, Lock, Plus, Receipt, Upload, X } from 'lucide-react';
+import { ArrowRight, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Lock, Plus, Receipt, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
@@ -206,6 +206,175 @@ function UploadStepDocPopup({
   );
 }
 
+function AddToInventoryPopup({
+  poNumber,
+  onClose,
+}: {
+  poNumber: string;
+  onClose: () => void;
+}) {
+  const [items, setItems] = useState<Array<{ id: string; name: string; sku: string; unit: string }>>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [pricePerUnit, setPricePerUnit] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      setLoadingItems(true);
+      try {
+        const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
+        const res = await fetch(`${baseUrl}/inventory/get_all_item`);
+        const data: any = await res.json().catch(() => null);
+        if (res.ok && data?.success && Array.isArray(data?.items)) {
+          setItems(
+            data.items.map((it: any) => ({
+              id: String(it?.Invent_id || it?.new_item_code || ''),
+              name: String(it?.item_name || ''),
+              sku: String(it?.new_item_code || ''),
+              unit: String(it?.unit || ''),
+            }))
+          );
+        }
+      } catch {
+        // stay empty
+      } finally {
+        setLoadingItems(false);
+      }
+    };
+    fetchItems();
+  }, []);
+
+  const selectedItem = items.find((it) => it.id === selectedItemId);
+  const totalValue = Number(quantity) > 0 && Number(pricePerUnit) > 0
+    ? Number(quantity) * Number(pricePerUnit)
+    : null;
+
+  const handleSubmit = async () => {
+    if (!selectedItemId) return toast.error('Please select an item');
+    if (!quantity || Number(quantity) <= 0) return toast.error('Enter a valid quantity');
+    if (!pricePerUnit || Number(pricePerUnit) <= 0) return toast.error('Enter a valid price per unit');
+    setSubmitting(true);
+    try {
+      const baseUrl = String(getBaseUrl() ?? '').replace(/\/$/, '');
+      const res = await fetch(`${baseUrl}/purchase_flow/add_item_stock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: selectedItemId,
+          stock_added: Number(quantity),
+          po_number: poNumber,
+          per_unit_cost: Number(pricePerUnit),
+        }),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to add to inventory');
+      toast.success(data?.message || 'Stock updated successfully');
+      onClose();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to add to inventory');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-xl border border-border bg-card shadow-xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Boxes className="w-4 h-4 text-green-600" />
+            <span className="font-semibold text-sm">Add to Inventory</span>
+          </div>
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* PO badge */}
+          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+            <div className="text-xs text-muted-foreground">PO Number</div>
+            <div className="text-sm font-semibold">{poNumber || '—'}</div>
+          </div>
+
+          {/* Item selector */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">Select Item</label>
+            <div className="relative">
+              <select
+                className="w-full appearance-none border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500 pr-8 disabled:opacity-50"
+                value={selectedItemId}
+                onChange={(e) => setSelectedItemId(e.target.value)}
+                disabled={loadingItems}
+              >
+                <option value="">{loadingItems ? 'Loading items…' : 'Select inventory item'}</option>
+                {items.map((it) => (
+                  <option key={it.id} value={it.id}>
+                    {it.name}{it.sku ? ` (${it.sku})` : ''}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Quantity + Price */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Incoming Qty{selectedItem?.unit ? ` (${selectedItem.unit})` : ''}
+              </label>
+              <input
+                type="number"
+                min={1}
+                placeholder="0"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                className="border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Price per Unit (₹)</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="0.00"
+                value={pricePerUnit}
+                onChange={(e) => setPricePerUnit(e.target.value)}
+                className="border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
+          {/* Total value preview */}
+          {totalValue !== null && (
+            <div className="rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-xs text-green-700 font-medium">
+              Total value: ₹{totalValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="bg-green-600 hover:bg-green-700 text-white gap-2"
+          >
+            <Boxes className="w-4 h-4" />
+            {submitting ? 'Adding…' : 'Add to Inventory'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PurchaseFlow() {
   const navigate = useNavigate();
   const [flows, setFlows] = useState<ApiPurchaseFlow[]>([]);
@@ -215,6 +384,7 @@ export default function PurchaseFlow() {
     flow: ApiPurchaseFlow;
     step: PurchaseFlowStep;
   } | null>(null);
+  const [addToInventoryFor, setAddToInventoryFor] = useState<{ poNumber: string } | null>(null);
 
   // Per-flow merged step lists (API steps + locally inserted invoice steps)
   const [flowStepOverrides, setFlowStepOverrides] = useState<Record<string, PurchaseFlowStep[]>>({});
@@ -446,6 +616,13 @@ export default function PurchaseFlow() {
         />
       ) : null}
 
+      {addToInventoryFor ? (
+        <AddToInventoryPopup
+          poNumber={addToInventoryFor.poNumber}
+          onClose={() => setAddToInventoryFor(null)}
+        />
+      ) : null}
+
       <div className="mb-6">
         <div className="text-2xl font-bold">Purchase Flow</div>
         <div className="text-xs text-muted-foreground mt-0.5">
@@ -545,25 +722,43 @@ export default function PurchaseFlow() {
                       <div className="text-[11px] text-muted-foreground">Updated: {formatDateTime(ts)}</div>
                     )}
 
-                    <div className="grid grid-cols-1 gap-2">
-                      <Button
-                        size="sm"
-                        className="bg-green-600 hover:bg-green-700 text-white"
+                    <div className="flex items-stretch gap-2">
+                      <button
                         disabled={!!savingFlows[flowId]}
                         onClick={() => saveCurrentFlow(flowId, flow)}
+                        className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white px-2 py-2.5 text-[11px] font-medium transition-colors"
                       >
+                        <Check className="w-4 h-4" />
                         {savingFlows[flowId] ? 'Saving…' : 'Save Current'}
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => openHoInboxView(prNumber, 'po')} disabled={!prNumber}>
-                        View PO / WO
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => openHoInboxView(prNumber, 'indent')} disabled={!prNumber}>
+                      </button>
+                      <button
+                        disabled={!prNumber}
+                        onClick={() => openHoInboxView(prNumber, 'po')}
+                        className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-700 px-2 py-2.5 text-[11px] font-medium transition-colors"
+                      >
+                        <Receipt className="w-4 h-4" />
+                        View Order
+                      </button>
+                      <button
+                        disabled={!prNumber}
+                        onClick={() => openHoInboxView(prNumber, 'indent')}
+                        className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-700 px-2 py-2.5 text-[11px] font-medium transition-colors"
+                      >
+                        <FileText className="w-4 h-4" />
                         View Indent
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => openHoInboxView(prNumber, 'comparative')} disabled={!prNumber}>
-                        View Comparative Approval
-                      </Button>
+                      </button>
                     </div>
+
+                    {indentType === 'PR' && (
+                      <button
+                        disabled={!prNumber}
+                        onClick={() => setAddToInventoryFor({ poNumber: orderNumber })}
+                        className="mt-2 w-full flex flex-col items-center justify-center gap-1 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 disabled:opacity-40 text-green-700 px-2 py-2.5 text-[11px] font-medium transition-colors"
+                      >
+                        <Boxes className="w-4 h-4" />
+                        Add to Inventory
+                      </button>
+                    )}
                   </div>
                     );
                   })()}
