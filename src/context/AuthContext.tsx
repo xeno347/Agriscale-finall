@@ -15,6 +15,7 @@ type AuthUser = {
   department?: string;
   designation?: string;
   notification_permissions?: boolean;
+  module_access?: string[];
 };
 
 type AuthContextValue = {
@@ -148,6 +149,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       department: data?.staff_department ?? data?.staffDepartment ?? '',
       designation: data?.staff_designation ?? data?.staffDesignation ?? '',
       notification_permissions: data?.notification_permissions === true,
+      module_access: Array.isArray(data?.module_access) ? data.module_access : [],
     };
 
     return { expired: false as const, user: nextUser };

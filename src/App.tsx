@@ -62,6 +62,9 @@ import DirectorFuelRequest from "./pages/DirectorFuelRequest";
 import WorkOrder from "./pages/WorkOrder";
 import ScopeOfWork from "./pages/ScopeOfWork";
 import WebApp from "./pages/webapp/WebApp";
+import Inbox from "./pages/Inbox";
+import LabourManagement from "./pages/LabourManagement";
+import UserManagement from "./pages/UserManagement";
 
 const queryClient = new QueryClient();
 
@@ -89,6 +92,7 @@ const App = () => (
           <Route path="/cultivation-plan" element={<AppLayout><CultivationPlan /></AppLayout>} />
           <Route path="/cultivation-plan/create" element={<AppLayout><CreateCultivationPlan /></AppLayout>} />
           <Route path="/field-monitoring" element={<AppLayout><FieldMonitoring /></AppLayout>} />
+          <Route path="/labour-management" element={<AppLayout><LabourManagement /></AppLayout>} />
           <Route path="/field-visit-analytics" element={<AppLayout><FieldVisitAnalytics /></AppLayout>} />
 
           {/* Harvest & Weighment */}
@@ -130,6 +134,7 @@ const App = () => (
           <Route path="/vehicle-management" element={<AppLayout><VehicleManagement /></AppLayout>} />
           <Route path="/fleet-chart" element={<AppLayout><FleetChart /></AppLayout>} />
           <Route path="/staff-onboarding" element={<AppLayout><StaffOnboarding /></AppLayout>} />
+          <Route path="/user-management" element={<AppLayout><UserManagement /></AppLayout>} />
           <Route path="/man-power-requisition" element={<AppLayout><ManPowerRequisition /></AppLayout>} />
           <Route path="/admin-mrf-approvals" element={<AppLayout><AdminMrfApproval /></AppLayout>} />
                     {/* Human Resources */}
@@ -207,6 +212,13 @@ const App = () => (
           <Route path="/director/cost-monitoring" element={<AppLayout><DirectorCostMonitoring /></AppLayout>} />
           <Route path="/director/emis-investments" element={<AppLayout><DirectorEmisInvestments /></AppLayout>} />
           <Route path="/director/assets-liabilities" element={<AppLayout><DirectorAssetsLiabilities /></AppLayout>} />
+
+          {/* Inbox — per department */}
+          <Route path="/admin/inbox"     element={<AppLayout><Inbox department="Admin" /></AppLayout>} />
+          <Route path="/inventory/inbox" element={<AppLayout><Inbox department="Inventory" /></AppLayout>} />
+          <Route path="/purchase/inbox"  element={<AppLayout><Inbox department="Purchase" /></AppLayout>} />
+          <Route path="/hrms/inbox"      element={<AppLayout><Inbox department="HRMS" /></AppLayout>} />
+          <Route path="/director/inbox"  element={<AppLayout><Inbox department="Director" /></AppLayout>} />
 
           {/* Standalone Webapp — no ERP sidebar */}
           <Route path="/approval/webapp/*" element={<WebApp />} />

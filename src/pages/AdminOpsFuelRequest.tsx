@@ -12,6 +12,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
+import { useAuth } from '@/context/AuthContext';
 
 const BASE_URL = getBaseUrl().replace(/\/$/, '');
 
@@ -22,9 +23,8 @@ type RequestStatus = 'pending' | 'sent_to_admin' | 'approved' | 'rejected';
 type RequestSource = 'driver_app' | 'manual' | 'vendor';
 
 type StaffDetails = {
-  staff_name: string;
-  staff_contact: string;
-  staff_id: string;
+  name: string;
+  contact: string;
 };
 
 type VehicleDetails = {
@@ -134,6 +134,7 @@ const fmtCurrency = (n: number) =>
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────
 const AdminOpsFuelRequest = () => {
+  const { user } = useAuth();
   const [requests, setRequests] = useState<FuelRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -169,7 +170,7 @@ const AdminOpsFuelRequest = () => {
     return requests.filter(r => {
       const matchSearch = !q ||
         (r.request_id ?? '').toLowerCase().includes(q) ||
-        (r.staff_details?.staff_name ?? '').toLowerCase().includes(q) ||
+        (r.staff_details?.name ?? '').toLowerCase().includes(q) ||
         (r.vendor_details?.vendor_name ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.vehicle_number ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.model ?? '').toLowerCase().includes(q) ||
@@ -221,24 +222,26 @@ const AdminOpsFuelRequest = () => {
     if (selectedPendingIds.length === 0) return;
     setSendingToDirector(true);
     try {
+      const now = new Date();
       const res = await fetch(`${BASE_URL}/fuels_consumables/admin_ops_approval`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: selectedPendingIds }),
+        body: JSON.stringify({
+          request_id: selectedPendingIds,
+          approval_details: {
+            approver_name:        user?.name        ?? '',
+            approver_designation: user?.designation ?? '',
+            approved_time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+            approved_date: `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`,
+          },
+        }),
       });
       const data: any = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to send to Director');
-      setRequests(prev =>
-        prev.map(r =>
-          selectedPendingIds.includes(r.request_id)
-            ? { ...r, admin_ops_status: 'forwarded' }
-            : r
-        )
-      );
-      setSelectedIds(new Set());
+      if (!res.ok) throw new Error(data?.message || 'Failed to send to Director');
       toast.success(
         `${selectedPendingIds.length} request${selectedPendingIds.length > 1 ? 's' : ''} sent to Director`
       );
+      window.location.reload();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to send to Director');
     } finally {
@@ -476,7 +479,7 @@ const AdminOpsFuelRequest = () => {
                         <p className="font-medium text-gray-900 truncate max-w-[150px]">
                           {req.source === 'vendor'
                             ? (req.vendor_details?.vendor_name || '—')
-                            : (req.staff_details?.staff_name || '—')}
+                            : (req.staff_details?.name || '—')}
                         </p>
                         <p className="text-[11px] text-gray-400 truncate max-w-[150px] mt-0.5">
                           {vehicleLabel || req.vehicle_details?.model || '—'}
@@ -624,8 +627,8 @@ const ViewRequestModal = ({
         {req.staff_details ? (
           <FormSection title="Issued To" color="blue">
             <div className="grid grid-cols-2 gap-2">
-              <DetailRow icon={User}     label="Person Name" value={req.staff_details.staff_name} />
-              <DetailRow icon={Phone}    label="Contact"     value={req.staff_details.staff_contact} />
+              <DetailRow icon={User}     label="Person Name" value={req.staff_details.name} />
+              <DetailRow icon={Phone}    label="Contact"     value={req.staff_details.contact} />
               <DetailRow icon={FileText} label="Purpose"     value={req.purpose} />
               <DetailRow icon={MapPin}   label="Location"    value={req.location ?? '—'} />
             </div>
@@ -761,9 +764,9 @@ const ReceiptModal = ({
       <div class="box">
         <div class="box-title">Diesel Issued To</div>
         <div class="box-body grid2">
-          <p><b>Person Name:</b> ${req.staff_details?.staff_name || '—'}</p>
+          <p><b>Person Name:</b> ${req.staff_details?.name || '—'}</p>
           <p><b>Purpose (For What):</b> ${req.purpose || '—'}</p>
-          <p><b>Contact:</b> ${req.staff_details?.staff_contact || '—'}</p>
+          <p><b>Contact:</b> ${req.staff_details?.contact || '—'}</p>
           <p><b>Vehicle:</b> ${[req.vehicle_details?.type, req.vehicle_details?.vehicle_number].filter(Boolean).join(' · ') || '—'}</p>
           <p><b>Model:</b> ${req.vehicle_details?.model || '—'}</p>
           <p><b>Location:</b> ${req.location || '—'}</p>
@@ -850,9 +853,9 @@ const ReceiptModal = ({
 
           <ReceiptBox title="Diesel Issued To">
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Person Name:</span> {req.staff_details?.staff_name || '—'}</p>
+              <p><span className="font-semibold">Person Name:</span> {req.staff_details?.name || '—'}</p>
               <p><span className="font-semibold">Purpose (For What):</span> {req.purpose || '—'}</p>
-              <p><span className="font-semibold">Contact:</span> {req.staff_details?.staff_contact || '—'}</p>
+              <p><span className="font-semibold">Contact:</span> {req.staff_details?.contact || '—'}</p>
               <p><span className="font-semibold">Vehicle:</span> {[req.vehicle_details?.type, req.vehicle_details?.vehicle_number].filter(Boolean).join(' · ') || '—'}</p>
               <p><span className="font-semibold">Model:</span> {req.vehicle_details?.model || '—'}</p>
               <p><span className="font-semibold">Location:</span> {req.location || '—'}</p>

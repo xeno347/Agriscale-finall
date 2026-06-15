@@ -3,6 +3,7 @@ import {
   Search, MapPin, Map, Sprout, Wheat, Leaf,
   Wallet, NotebookText, LayoutGrid, Layers,
   TreePine, RefreshCw, Shovel, Video, Crosshair,
+  TrendingUp, BookOpen, X,
 } from 'lucide-react';
 import { MapContainer, TileLayer, Polygon, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -18,6 +19,21 @@ const BASE_URL = getBaseUrl().replace(/\/$/, '');
 // ─────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────
+type FarmInvestmentEntry = {
+  date: string;
+  input: number;
+  amount: number;
+  unit: string;
+  description: string;
+  investment: number;
+  voucher_number: string;
+  item_description: {
+    item_code: string;
+    item_unit: string;
+    item_name: string;
+  };
+};
+
 type VendorScope = {
   start_date: string;
   end_date: string;
@@ -53,6 +69,7 @@ type Farm = {
   scope_of_work?: Record<string, VendorScope>;
   harvest_log: Record<string, unknown>;
   payment_log: Record<string, unknown>;
+  farm_investment_ledger?: FarmInvestmentEntry[];
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -160,7 +177,7 @@ const farmingOptionMeta: Record<string, { color: string }> = {
   'Contract Farming': { color: 'text-purple-700 bg-purple-50 ring-purple-200' },
 };
 
-const shortId = (id: string) => id.slice(0, 8).toUpperCase();
+const shortId = (id: string) => (id ?? '').slice(0, 8).toUpperCase();
 
 const fmtDate = (iso: string) => {
   try {
@@ -187,8 +204,9 @@ const FarmDirectory = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
   const [search, setSearch]   = useState('');
-  const [plotMarkingFarm, setPlotMarkingFarm]       = useState<Farm | null>(null);
+  const [plotMarkingFarm, setPlotMarkingFarm]     = useState<Farm | null>(null);
   const [activityModalFarm, setActivityModalFarm] = useState<Farm | null>(null);
+  const [ledgerFarm, setLedgerFarm]               = useState<Farm | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -221,17 +239,20 @@ const FarmDirectory = () => {
   }, [farms, search]);
 
   // KPIs
-  const totalArea     = farms.reduce((s, f) => s + (f.area ?? 0), 0);
-  const uniqueBlocks  = new Set(farms.map(f => f.block_id)).size;
-  const leaseFarms    = farms.filter(f => f.land_data?.farming_option === 'Lease Farming').length;
-  const contractFarms = farms.filter(f => f.land_data?.farming_option === 'Contract Farming').length;
+  const totalArea      = farms.reduce((s, f) => s + (f.area ?? 0), 0);
+  const uniqueBlocks   = new Set(farms.map(f => f.block_id)).size;
+  const leaseFarms     = farms.filter(f => f.land_data?.farming_option === 'Lease Farming').length;
+  const contractFarms  = farms.filter(f => f.land_data?.farming_option === 'Contract Farming').length;
+  const totalInvestment = farms.reduce((s, f) =>
+    s + (f.farm_investment_ledger ?? []).reduce((si, e) => si + (e.amount ?? 0), 0), 0);
 
   const kpis = [
-    { label: 'Total Farms',        value: farms.length,                      icon: LayoutGrid, color: 'text-gray-800'    },
-    { label: 'Total Area (Acres)',  value: totalArea.toLocaleString('en-IN'), icon: Layers,     color: 'text-blue-600'    },
-    { label: 'Unique Blocks',       value: uniqueBlocks,                      icon: Map,        color: 'text-violet-600'  },
-    { label: 'Lease Farming',       value: leaseFarms,                        icon: TreePine,   color: 'text-emerald-600' },
-    { label: 'Contract Farming',    value: contractFarms,                     icon: Shovel,     color: 'text-orange-600'  },
+    { label: 'Total Farms',        value: farms.length,                                                                   icon: LayoutGrid,  color: 'text-gray-800'    },
+    { label: 'Total Area (Acres)',  value: totalArea.toLocaleString('en-IN'),                                              icon: Layers,      color: 'text-blue-600'    },
+    { label: 'Unique Blocks',       value: uniqueBlocks,                                                                   icon: Map,         color: 'text-violet-600'  },
+    { label: 'Lease Farming',       value: leaseFarms,                                                                     icon: TreePine,    color: 'text-emerald-600' },
+    { label: 'Contract Farming',    value: contractFarms,                                                                  icon: Shovel,      color: 'text-orange-600'  },
+    { label: 'Total Investment',    value: `₹${totalInvestment.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,   icon: TrendingUp,  color: 'text-rose-600'    },
   ];
 
   return (
@@ -243,7 +264,7 @@ const FarmDirectory = () => {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         {kpis.map(kpi => (
           <div key={kpi.label} className="bg-white rounded-xl p-5 shadow-sm border border-border">
             <div className="flex items-center gap-2 mb-1">
@@ -281,7 +302,7 @@ const FarmDirectory = () => {
           <p className="text-sm">No farms found.</p>
         </div>
       ) : (
-        <div className="flex flex-wrap gap-5">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-5 items-start">
           {filtered.map(farm => {
             const ld           = farm.land_data;
             const coords       = ld.land_coordinates ?? [];
@@ -308,7 +329,7 @@ const FarmDirectory = () => {
             return (
               <div
                 key={farm.farm_id}
-                className="w-[340px] rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden transition hover:-translate-y-0.5 hover:shadow-md shrink-0 flex flex-col"
+                className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden transition hover:-translate-y-0.5 hover:shadow-md flex flex-col"
               >
                 {/* ── Header: Leaflet satellite map ── */}
                 <div className="h-[220px] w-full relative overflow-hidden">
@@ -439,6 +460,41 @@ const FarmDirectory = () => {
                     </div>
                   )}
 
+
+                  {/* ── Investment Ledger ── */}
+                  {(() => {
+                    const ledger = farm.farm_investment_ledger ?? [];
+                    if (ledger.length === 0) {
+                      return (
+                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 flex items-center gap-2">
+                          <TrendingUp className="w-3.5 h-3.5 text-gray-300 shrink-0" />
+                          <p className="text-[11px] text-gray-400 italic">Investment not started yet</p>
+                        </div>
+                      );
+                    }
+                    const totalAmt = ledger.reduce((s, e) => s + (e.amount ?? 0), 0);
+                    return (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <TrendingUp className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">Total Investment</p>
+                            <p className="text-base font-extrabold text-rose-700 leading-tight">
+                              ₹{totalAmt.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setLedgerFarm(farm)}
+                          className="shrink-0 inline-flex items-center gap-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold px-2.5 py-1.5 transition-colors"
+                        >
+                          <BookOpen className="w-3 h-3" />
+                          View Ledger
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   {/* ── Land Media ── */}
                   <div>
@@ -589,6 +645,123 @@ const FarmDirectory = () => {
           }}
         />
       )}
+
+      {/* Investment Ledger Modal */}
+      {ledgerFarm && (
+        <FarmInvestmentLedgerModal
+          farm={ledgerFarm}
+          onClose={() => setLedgerFarm(null)}
+        />
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// FARM INVESTMENT LEDGER MODAL
+// ─────────────────────────────────────────────────────────────
+const FarmInvestmentLedgerModal = ({
+  farm,
+  onClose,
+}: {
+  farm: Farm;
+  onClose: () => void;
+}) => {
+  const ledger = farm.farm_investment_ledger ?? [];
+  const totalAmt = ledger.reduce((s, e) => s + (e.amount ?? 0), 0);
+  const location = [farm.land_data?.village, farm.land_data?.district, farm.land_data?.state]
+    .filter(Boolean).join(', ');
+
+  const fmtDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch { return iso; }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4">
+      <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col max-h-[88vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 shrink-0">
+          <div>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-rose-600" />
+              <h2 className="text-lg font-bold text-gray-900">Investment Ledger</h2>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">{location || farm.farm_id}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Total Investment</p>
+              <p className="text-xl font-extrabold text-rose-600">
+                ₹{totalAmt.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 transition-colors">
+              <X className="w-4 h-4 text-gray-400" />
+            </button>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-auto flex-1">
+          {ledger.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+              <TrendingUp className="w-10 h-10 mb-3 opacity-20" />
+              <p className="text-sm font-medium">No investment entries yet</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 min-w-[100px]">Date</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 min-w-[160px]">Item</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 min-w-[90px]">Item Code</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 min-w-[60px]">Unit</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Description</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-rose-600 min-w-[100px]">Amount (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map((entry, idx) => (
+                  <tr key={entry.voucher_number || idx} className="border-b border-gray-100 hover:bg-gray-50/60 transition-colors">
+                    <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">{fmtDate(entry.date)}</td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-semibold text-gray-900">{entry.item_description?.item_name?.trim() || '—'}</p>
+                    </td>
+                    <td className="px-4 py-3 text-xs font-mono text-gray-500">{entry.item_description?.item_code || '—'}</td>
+                    <td className="px-4 py-3 text-center text-xs text-gray-600">{entry.item_description?.item_unit || entry.unit || '—'}</td>
+                    <td className="px-4 py-3 text-xs text-gray-400 max-w-[220px]">
+                      <span className="line-clamp-2" title={entry.description}>{entry.description || '—'}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-bold text-rose-600">
+                      ₹{(entry.amount ?? 0).toLocaleString('en-IN')}
+                    </td>
+                  </tr>
+                ))}
+                {/* Total row */}
+                <tr className="bg-gray-50 border-t-2 border-gray-200">
+                  <td colSpan={5} className="px-4 py-3 text-sm font-bold text-gray-700">Total</td>
+                  <td className="px-4 py-3 text-right font-extrabold text-rose-700">
+                    ₹{totalAmt.toLocaleString('en-IN')}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3 border-t border-gray-100 flex justify-end shrink-0">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

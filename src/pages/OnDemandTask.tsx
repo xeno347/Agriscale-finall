@@ -19,6 +19,7 @@ interface TaskFlowStep {
     title: string;
     notes: string;
     inventoryItems: Record<string, number>;
+    allocationNeeded: boolean;
     vehicleIds: string[];
     inspectionInputType: string;
     inspectionFields: Array<{ id: string; fieldName: string; inputType: string; mandatory: boolean; options: string[] }>;
@@ -102,9 +103,29 @@ type ApiAllocationItem = {
 type ApiAllocationSchema = {
   task_id: string;
   allocation_schema: Record<string, ApiAllocationItem>;
-  create_at: string;
+  created_at: string;
   allocation_schema_status: 'pending' | 'partial' | 'completed';
+  steps_dict?: Record<string, OnDemandTaskStepApi>;
+  staff_id?: string;
 };
+
+type PendingAllocationTask = {
+  task_id: string;
+  staff_id: string;
+  created_at: string;
+  allocation_schema: Record<string, ApiAllocationItem>;
+  allocation_schema_status: 'pending' | 'partial';
+  steps_dict: Record<string, OnDemandTaskStepApi>;
+};
+
+type LockConfirmTarget = {
+  taskId: string;
+  stepsDict: Record<string, OnDemandTaskStepApi>;
+  allocationSchema: Record<string, ApiAllocationItem>;
+  createdAt: string;
+  staffId?: string;
+};
+
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -378,6 +399,7 @@ const OnDemandTask = () => {
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [activeTab, setActiveTab] = useState<'task' | 'allocation'>('task');
 
+
   // Allocation modal state
   const [isAllocationModalOpen, setIsAllocationModalOpen] = useState(false);
   const [allocationAssignment, setAllocationAssignment] = useState<{ designation: string; staffId: string; staffName: string }>({ designation: '', staffId: '', staffName: '' });
@@ -387,6 +409,7 @@ const OnDemandTask = () => {
 
   // API allocation list state
   const [apiAllocations, setApiAllocations] = useState<ApiAllocationSchema[]>([]);
+  const [pendingAllocationTasks, setPendingAllocationTasks] = useState<PendingAllocationTask[]>([]);
   const [apiAllocationsLoading, setApiAllocationsLoading] = useState(false);
   const [apiAllocationsError, setApiAllocationsError] = useState<string | null>(null);
 
@@ -394,6 +417,9 @@ const OnDemandTask = () => {
   const [apiAllocFarms, setApiAllocFarms] = useState<Record<string, string[]>>({});
   const [apiAllocDistribution, setApiAllocDistribution] = useState<Record<string, Record<string, Record<string, string>>>>({});
   const [apiFarmSelectors, setApiFarmSelectors] = useState<Record<string, string>>({});
+
+  // Lock confirmation popup
+  const [lockConfirmTarget, setLockConfirmTarget] = useState<LockConfirmTarget | null>(null);
 
   // ── Fetch shared resources ──────────────────────────────────────────────────
 
@@ -428,7 +454,15 @@ const OnDemandTask = () => {
       const response = await fetch(`${BASE_URL}/admin_all_task/get_all_ondemand_tasks`);
       if (!response.ok) throw new Error(`Failed to load on demand tasks (${response.status})`);
       const data = await response.json().catch(() => null);
-      const list = Array.isArray(data) ? data : [];
+      let list: any[] = [];
+      if (Array.isArray(data)) {
+        list = data;
+      } else if (data?.allocated_tasks !== undefined || data?.pending_allocation_tasks !== undefined) {
+        list = [
+          ...(Array.isArray(data.allocated_tasks) ? data.allocated_tasks : []),
+          ...(Array.isArray(data.pending_allocation_tasks) ? data.pending_allocation_tasks : []),
+        ];
+      }
       setOndemandTasks(list.map(t => normalizeOndemandTask(t as OnDemandTaskApi)));
     } catch (error) {
       setOndemandTasks([]);
@@ -449,15 +483,18 @@ const OnDemandTask = () => {
       const response = await fetch(`${BASE_URL}/admin_ops_requests/get_on_demand_allocation_schema`);
       if (!response.ok) throw new Error(`Failed to load allocations (${response.status})`);
       const data = await response.json().catch(() => null);
-      setApiAllocations(Array.isArray(data?.allocation_schemas) ? data.allocation_schemas : []);
+      setPendingAllocationTasks(Array.isArray(data?.pending_allocations) ? data.pending_allocations : []);
+      setApiAllocations(Array.isArray(data?.completed_allocations) ? data.completed_allocations : []);
     } catch (e) {
       setApiAllocationsError(e instanceof Error ? e.message : 'Failed to load allocations');
       setApiAllocations([]);
+      setPendingAllocationTasks([]);
     } finally {
       setApiAllocationsLoading(false);
     }
   };
 
+  useEffect(() => { fetchAllocations(); }, []);
   useEffect(() => { if (activeTab === 'allocation') fetchAllocations(); }, [activeTab]);
 
   // ── Task builder helpers ────────────────────────────────────────────────────
@@ -467,7 +504,7 @@ const OnDemandTask = () => {
     stepNumber,
     type: '',
     expanded: true,
-    details: { assignee: '', assigneeDesignation: '', title: `Step ${stepNumber}`, notes: '', inventoryItems: {}, vehicleIds: [], inspectionInputType: 'text', inspectionFields: [], landId: '', cultivationTaskType: '', dueDate: '', otherDescription: '' },
+    details: { assignee: '', assigneeDesignation: '', title: `Step ${stepNumber}`, notes: '', inventoryItems: {}, allocationNeeded: false, vehicleIds: [], inspectionInputType: 'text', inspectionFields: [], landId: '', cultivationTaskType: '', dueDate: '', otherDescription: '' },
   });
 
   const openModal = async () => {
@@ -505,7 +542,7 @@ const OnDemandTask = () => {
       if (!step.type) return acc;
       const key = `step_${index + 1}`;
       if (step.type === 'inventory') {
-        acc[key] = { type: 'inventory', status: 'pending', data: Object.entries(step.details.inventoryItems).filter(([, qty]) => Number(qty) > 0).map(([itemId, qty]) => { const item = inventoryItems.find(e => getInventoryItemId(e) === itemId); return { item_name: String(item ? getInventoryItemName(item) : itemId), quantity: Number(qty) || 0, unit: String(item?.unit || '—'), equipment_id: String(getInventoryItemId(item) || itemId) }; }) };
+        acc[key] = { type: 'inventory', status: 'pending', allocation_needed: step.details.allocationNeeded, data: Object.entries(step.details.inventoryItems).filter(([, qty]) => Number(qty) > 0).map(([itemId, qty]) => { const item = inventoryItems.find(e => getInventoryItemId(e) === itemId); return { item_name: String(item ? getInventoryItemName(item) : itemId), quantity: Number(qty) || 0, unit: String(item?.unit || '—'), equipment_id: String(getInventoryItemId(item) || itemId) }; }) };
         return acc;
       }
       if (step.type === 'logistics') {
@@ -584,7 +621,12 @@ const OnDemandTask = () => {
       let payload: any = null;
       try { payload = await response.json(); } catch { payload = null; }
       if (!response.ok) throw new Error(String(payload?.message || payload?.detail || payload?.error || `Request failed (${response.status})`));
-      toast.success('Task created successfully');
+      const isCached = payload?.message === 'Task created and cached successfully';
+      if (isCached) {
+        toast.warning('Task staged on server', { description: 'Awaiting allocation schema — will be committed to database once allocation is done.' });
+      } else {
+        toast.success('Task created successfully');
+      }
       closeModal();
       fetchOnDemandTasks();
     } catch (e) {
@@ -637,26 +679,41 @@ const OnDemandTask = () => {
   const updateAllocationItemField = (id: string, patch: Partial<AllocationItemForm>) =>
     setAllocationItems(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i));
 
-  const handleCreateAllocation = () => {
+  const handleCreateAllocation = async () => {
     if (!allocationAssignment.staffId) { toast.error('Please select a responsible person'); return; }
     const validItems = allocationItems.filter(i => i.inventoryItemId && Number(i.totalQty) > 0);
     if (validItems.length === 0) { toast.error('Please add at least one item with a quantity'); return; }
-    const newRecord: AllocationRecord = {
-      id: mkId(),
-      staffId: allocationAssignment.staffId,
-      staffName: allocationAssignment.staffName,
-      designation: allocationAssignment.designation,
-      items: validItems.map(i => {
+
+    const payload = {
+      staff_id: allocationAssignment.staffId,
+      item_allocation_list: validItems.map(i => {
         const inv = inventoryItems.find(it => getInventoryItemId(it) === i.inventoryItemId);
-        return { id: i.id, inventoryItemId: i.inventoryItemId, itemName: inv ? getInventoryItemName(inv) : i.inventoryItemId, totalQty: Number(i.totalQty) };
+        return {
+          equipment_id: i.inventoryItemId,
+          quantity: Number(i.totalQty),
+          unit: String(inv?.unit || ''),
+          item_name: inv ? getInventoryItemName(inv) : i.inventoryItemId,
+        };
       }),
-      distribution: {},
-      selectedFarms: [],
-      createdAt: new Date().toLocaleString(),
     };
-    setAllocationRecords(prev => [...prev, newRecord]);
-    closeAllocationModal();
-    toast.success('Allocation created — distribute items to farms in the table below.');
+
+    try {
+      const res = await fetch(`${BASE_URL}/admin_ops_requests/create_new_allocation_schema`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        toast.error(err?.message || `Failed to create allocation (${res.status})`);
+        return;
+      }
+      closeAllocationModal();
+      toast.success('Allocation created — distribute items to farms in the table below.');
+      fetchAllocations();
+    } catch {
+      toast.error('Failed to create allocation. Please check your connection.');
+    }
   };
 
   const handleSaveAllocation = async (alloc: ApiAllocationSchema) => {
@@ -758,6 +815,7 @@ const OnDemandTask = () => {
   const designationOptions = Object.keys(staffByDesignation).sort();
   const assigneeOptions = taskAssignment.designation ? (staffByDesignation[taskAssignment.designation] || []) : [];
   const canAddSteps = Boolean(taskAssignment.designation && taskAssignment.staffId);
+  const taskIdsWithAllocation = new Set(apiAllocations.map(a => a.task_id));
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -817,12 +875,13 @@ const OnDemandTask = () => {
             {ondemandTasks.map(task => {
               const pct = task.totalSteps > 0 ? Math.round((task.completedSteps / task.totalSteps) * 100) : 0;
               const isAllDone = task.completedSteps === task.totalSteps && task.totalSteps > 0;
+              const needsAllocation = task.steps.some(s => s.type === 'inventory') && !taskIdsWithAllocation.has(task.taskId);
               return (
-                <div key={task.taskId} className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div key={task.taskId} className={cn('rounded-xl border bg-white shadow-sm overflow-hidden', needsAllocation ? 'border-red-400 animate-pulse' : 'border-slate-200')}>
                   {/* Task header */}
                   <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-100 bg-slate-50/60">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-white text-xs font-bold shrink-0">
+                      <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg text-white text-xs font-bold shrink-0', needsAllocation ? 'bg-red-600' : 'bg-slate-900')}>
                         {task.taskId.replace('TASK-', '')}
                       </div>
                       <div>
@@ -831,7 +890,21 @@ const OnDemandTask = () => {
                           <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border', isAllDone ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200')}>
                             {isAllDone ? 'Completed' : 'In Progress'}
                           </span>
+                          {needsAllocation && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600 border border-red-300">
+                              Allocation Required
+                            </span>
+                          )}
                         </div>
+                        {needsAllocation && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('allocation')}
+                            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 hover:text-red-700 hover:underline"
+                          >
+                            Fill Allocation →
+                          </button>
+                        )}
                         <p className="text-[11px] text-slate-400 mt-0.5">Staff: {task.staffId} · {task.createdAt}</p>
                       </div>
                     </div>
@@ -895,6 +968,153 @@ const OnDemandTask = () => {
       {/* ── On Demand Allocation tab ── */}
       {activeTab === 'allocation' && (
         <div className="space-y-5">
+
+          {/* Pending allocation tasks */}
+          {pendingAllocationTasks.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-amber-200" />
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-amber-500 px-1">Awaiting Farm Distribution</span>
+                <div className="h-px flex-1 bg-amber-200" />
+              </div>
+              {pendingAllocationTasks.map(task => {
+                const items = Object.entries(task.allocation_schema || {});
+                const currentFarms: string[] = apiAllocFarms[task.task_id] ?? (() => {
+                  const s = new Set<string>();
+                  items.forEach(([, it]) => Object.keys(it.farm_allocation || {}).forEach(f => s.add(f)));
+                  return [...s];
+                })();
+                const getFarmLabel = (farmId: string): string => {
+                  const farm = farms.find((f: any) => String(f?.farm_id || '') === farmId);
+                  if (farm) return String((farm as any)?.owner_name || farmId);
+                  for (const [, it] of items) {
+                    if (it.farm_allocation?.[farmId]?.owner_name) return it.farm_allocation[farmId].owner_name;
+                  }
+                  return farmId;
+                };
+                const getCellValue = (productId: string, farmId: string): string => {
+                  const local = apiAllocDistribution[task.task_id]?.[productId]?.[farmId];
+                  if (local !== undefined) return local;
+                  const apiQty = task.allocation_schema[productId]?.farm_allocation?.[farmId]?.quantity;
+                  return apiQty != null ? String(apiQty) : '';
+                };
+                const asSchema: ApiAllocationSchema = { task_id: task.task_id, allocation_schema: task.allocation_schema, created_at: task.created_at, allocation_schema_status: task.allocation_schema_status };
+                return (
+                  <div key={task.task_id} className="bg-white border border-amber-300 rounded-xl shadow-sm overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-amber-50/70 border-b border-amber-200">
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-lg bg-amber-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                          {task.task_id.replace(/^TASK-/i, '').slice(0, 5)}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{task.task_id}</p>
+                          <p className="text-[10px] text-slate-500">{items.length} item{items.length !== 1 ? 's' : ''} · {formatTaskDate(task.created_at)}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveAllocation(asSchema)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
+                        >
+                          <Save className="h-3.5 w-3.5" /> Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLockConfirmTarget({ taskId: task.task_id, stepsDict: task.steps_dict, allocationSchema: task.allocation_schema, createdAt: task.created_at, staffId: task.staff_id })}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-[11px] font-medium text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors shadow-sm"
+                        >
+                          <Lock className="h-3.5 w-3.5" /> Lock
+                        </button>
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border bg-amber-100 text-amber-700 border-amber-300">
+                          Pending
+                        </span>
+                      </div>
+                    </div>
+                    {/* Editable farm distribution matrix */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="sticky left-0 bg-slate-50 z-10 text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 min-w-[160px] border-r border-slate-200">Item / Farm →</th>
+                            {currentFarms.map(farmId => (
+                              <th key={farmId} className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500 min-w-[120px] border-r border-slate-100">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="truncate">{getFarmLabel(farmId)}</span>
+                                  <button type="button" onClick={() => setApiAllocFarms(prev => ({ ...prev, [task.task_id]: currentFarms.filter(f => f !== farmId) }))} className="shrink-0 text-slate-300 hover:text-red-500 transition-colors text-sm font-bold">×</button>
+                                </div>
+                              </th>
+                            ))}
+                            <th className="px-2 py-2 min-w-[180px] border-r border-slate-100">
+                              <div className="flex items-center gap-1">
+                                <select
+                                  value={apiFarmSelectors[task.task_id] || ''}
+                                  onChange={e => setApiFarmSelectors(prev => ({ ...prev, [task.task_id]: e.target.value }))}
+                                  className="flex-1 rounded border border-dashed border-slate-300 bg-white px-2 py-1 text-[10px] text-slate-500 focus:outline-none focus:border-green-500"
+                                >
+                                  <option value="">+ Add farm column</option>
+                                  {farms.filter((f: any) => !currentFarms.includes(String(f?.farm_id || ''))).map((f: any) => (
+                                    <option key={String(f?.farm_id || '')} value={String(f?.farm_id || '')}>
+                                      {f?.owner_name || f?.farm_id}{f?.crop_type ? ` · ${f.crop_type}` : ''}{f?.area ? ` (${f.area}ac)` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                                {apiFarmSelectors[task.task_id] && (
+                                  <button type="button" onClick={() => { const fid = apiFarmSelectors[task.task_id]; setApiAllocFarms(prev => ({ ...prev, [task.task_id]: [...currentFarms, fid] })); setApiFarmSelectors(prev => ({ ...prev, [task.task_id]: '' })); }} className="shrink-0 rounded bg-green-700 px-2 py-1 text-[10px] font-medium text-white hover:bg-green-800">Add</button>
+                                )}
+                              </div>
+                            </th>
+                            <th className="sticky right-0 z-10 px-3 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500 min-w-[90px] bg-slate-100 border-l border-slate-200">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {currentFarms.length === 0 && (
+                            <tr><td colSpan={100} className="px-4 py-6 text-center text-xs text-slate-400 italic">Use "+ Add farm column" above to start distributing.</td></tr>
+                          )}
+                          {items.map(([productId, item]) => {
+                            const allocated = currentFarms.reduce((s, fid) => {
+                              const local = apiAllocDistribution[task.task_id]?.[productId]?.[fid];
+                              const val = local !== undefined ? Number(local) : (item.farm_allocation?.[fid]?.quantity ?? 0);
+                              return s + (isNaN(val) ? 0 : val);
+                            }, 0);
+                            const isFullyAllocated = item.quantity > 0 && allocated === item.quantity;
+                            const isOver = allocated > item.quantity;
+                            return (
+                              <tr key={productId} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/40">
+                                <td className="sticky left-0 bg-white z-10 px-4 py-3 border-r border-slate-200">
+                                  <div className="font-semibold text-slate-900 truncate max-w-[140px]">{item.item_name}</div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5">Need: {item.quantity} {item.unit}</div>
+                                </td>
+                                {currentFarms.map(farmId => (
+                                  <td key={farmId} className="px-2 py-2 text-center border-r border-slate-100">
+                                    <input
+                                      type="number" min="0"
+                                      value={getCellValue(productId, farmId)}
+                                      onChange={e => setApiAllocDistribution(prev => ({ ...prev, [task.task_id]: { ...(prev[task.task_id] || {}), [productId]: { ...((prev[task.task_id] || {})[productId] || {}), [farmId]: e.target.value } } }))}
+                                      placeholder="0"
+                                      className="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-center focus:border-green-600 focus:outline-none focus:ring-1 focus:ring-green-200"
+                                    />
+                                  </td>
+                                ))}
+                                <td className="px-2 py-2 border-r border-slate-100 bg-slate-50/30" />
+                                <td className="sticky right-0 z-10 px-3 py-2 text-center bg-white border-l border-slate-200">
+                                  <span className={cn('text-xs font-bold block', isOver ? 'text-red-600' : isFullyAllocated ? 'text-emerald-700' : 'text-amber-600')}>{allocated}/{item.quantity}</span>
+                                  {isFullyAllocated && <span className="text-[10px] text-emerald-600">Done</span>}
+                                  {isOver && <span className="text-[10px] text-red-500">+{allocated - item.quantity} over</span>}
+                                  {!isFullyAllocated && !isOver && <span className="text-[10px] text-amber-500">{item.quantity - allocated} left</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {apiAllocationsLoading ? (
             <div className="bg-white border border-gray-200 rounded-lg p-8 text-sm text-muted-foreground text-center">
               Loading allocations…
@@ -907,7 +1127,7 @@ const OnDemandTask = () => {
             </div>
           ) : (() => {
             const grouped = apiAllocations.reduce((acc: Record<string, ApiAllocationSchema[]>, a) => {
-              const key = a.create_at ? a.create_at.split('T')[0] : 'unknown';
+              const key = a.created_at ? a.created_at.split('T')[0] : 'unknown';
               (acc[key] = acc[key] || []).push(a);
               return acc;
             }, {});
@@ -932,7 +1152,7 @@ const OnDemandTask = () => {
                     const items = Object.entries(alloc.allocation_schema);
                     const statusCfg = allocationStatusConfig[alloc.allocation_schema_status] ?? allocationStatusConfig.pending;
                     const timeStr = (() => {
-                      const d = new Date(alloc.create_at);
+                      const d = new Date(alloc.created_at);
                       return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
                     })();
                     return (
@@ -963,7 +1183,7 @@ const OnDemandTask = () => {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleLockAllocation(alloc.task_id)}
+                                  onClick={() => setLockConfirmTarget({ taskId: alloc.task_id, stepsDict: alloc.steps_dict ?? {}, allocationSchema: alloc.allocation_schema, createdAt: alloc.created_at, staffId: alloc.staff_id })}
                                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-[11px] font-medium text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors shadow-sm"
                                 >
                                   <Lock className="h-3.5 w-3.5" />
@@ -1432,6 +1652,21 @@ const OnDemandTask = () => {
                               {/* Inventory */}
                               {step.type === 'inventory' && (
                                 <div className="space-y-2">
+                                  <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                    <span className="text-xs font-semibold text-slate-700">Allocation needed?</span>
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateStepDetails(step.id, { allocationNeeded: true })}
+                                        className={cn('px-3 py-1 rounded-md text-xs font-semibold border transition-colors', step.details.allocationNeeded ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50')}
+                                      >Yes</button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateStepDetails(step.id, { allocationNeeded: false })}
+                                        className={cn('px-3 py-1 rounded-md text-xs font-semibold border transition-colors', !step.details.allocationNeeded ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50')}
+                                      >No</button>
+                                    </div>
+                                  </div>
                                   <div className="flex items-center justify-between">
                                     <p className="text-xs font-semibold text-slate-900">Selected items</p>
                                     <button type="button" onClick={() => setResourcePopup({ stepId: step.id, type: 'inventory' })} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
@@ -1678,6 +1913,152 @@ const OnDemandTask = () => {
           </div>
         </div>
       )}
+      {/* ── Lock Confirmation Modal ── */}
+      {lockConfirmTarget && (() => {
+        const target = lockConfirmTarget;
+        const steps = normalizeTaskSteps(target.stepsDict);
+        const allocItems = Object.entries(target.allocationSchema);
+        const allFarms = Array.from(new Set(
+          allocItems.flatMap(([, item]) => Object.keys(item.farm_allocation || {}))
+        ));
+        const getFarmName = (farmId: string): string => {
+          const farm = farms.find((f: any) => String(f?.farm_id || '') === farmId);
+          if (farm) return String((farm as any)?.owner_name || farmId);
+          for (const [, it] of allocItems) {
+            if (it.farm_allocation?.[farmId]?.owner_name) return it.farm_allocation[farmId].owner_name;
+          }
+          return farmId;
+        };
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-amber-500 flex items-center justify-center shrink-0">
+                    <Lock className="h-4 w-4 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-900">Confirm Allocation Lock</h2>
+                    <p className="text-[11px] text-slate-500">{target.taskId}</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setLockConfirmTarget(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Scrollable body */}
+              <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+                {/* Task meta */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Task ID', value: target.taskId },
+                    { label: 'Created', value: formatTaskDate(target.createdAt) },
+                    { label: 'Staff ID', value: target.staffId || '—' },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                      <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-400 mb-0.5">{label}</p>
+                      <p className="text-xs font-medium text-slate-800 truncate">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Steps summary */}
+                {steps.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-2">Task Steps</p>
+                    <div className="space-y-1.5">
+                      {steps.map(step => (
+                        <div key={step.key} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold text-slate-500 w-12">Step {step.stepNumber}</span>
+                            <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border capitalize', stepTypeColor[step.type] ?? stepTypeColor.other)}>
+                              {step.type || 'unknown'}
+                            </span>
+                          </div>
+                          <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border capitalize', getStepStatusClasses(step.status))}>
+                            {step.status || 'pending'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Allocation table */}
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-2">Farm Distribution</p>
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500 min-w-[140px]">Item</th>
+                          <th className="text-center px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Total Qty</th>
+                          {allFarms.map(farmId => (
+                            <th key={farmId} className="text-center px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500 min-w-[100px]">
+                              {getFarmName(farmId)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {allocItems.map(([productId, item]) => (
+                          <tr key={productId} className="hover:bg-slate-50/50">
+                            <td className="px-3 py-2">
+                              <p className="font-medium text-slate-800 truncate">{item.item_name || productId}</p>
+                              <p className="text-[10px] text-slate-400">{item.unit}</p>
+                            </td>
+                            <td className="px-3 py-2 text-center font-semibold text-slate-700">{item.quantity}</td>
+                            {allFarms.map(farmId => {
+                              const local = apiAllocDistribution[target.taskId]?.[productId]?.[farmId];
+                              const qty = local !== undefined ? local : (item.farm_allocation?.[farmId]?.quantity ?? '—');
+                              return (
+                                <td key={farmId} className="px-3 py-2 text-center text-slate-700">
+                                  {qty !== '' && qty !== undefined ? qty : '—'}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Disclaimer */}
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex gap-3">
+                  <div className="shrink-0 mt-0.5 h-4 w-4 rounded-full bg-red-500 flex items-center justify-center text-white text-[9px] font-bold">!</div>
+                  <div>
+                    <p className="text-xs font-semibold text-red-700 mb-0.5">Disclaimer</p>
+                    <p className="text-[11px] text-red-600 leading-relaxed">
+                      Locking this allocation will <span className="font-semibold">permanently commit</span> the farm distribution and may trigger changes in inventory stocks and allocation of items to land. This action cannot be undone.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setLockConfirmTarget(null)}
+                  className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { handleLockAllocation(target.taskId); setLockConfirmTarget(null); }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition-colors shadow-sm"
+                >
+                  <Lock className="h-3.5 w-3.5" /> Confirm & Lock
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

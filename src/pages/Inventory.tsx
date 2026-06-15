@@ -3,9 +3,9 @@ import {
   Plus,
   Search,
   Edit3,
-  ArrowLeftRight,
   ArrowDownToLine,
   ArrowUpFromLine,
+  Lock,
   PackageCheck,
   History,
   Boxes,
@@ -16,6 +16,8 @@ import {
   AlertTriangle,
   ClipboardList,
   Undo2,
+  IndianRupee,
+  ShieldAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -69,6 +71,7 @@ type StockItem = {
   // Series number like SBR/INV/P2/
   seriesNumber: string;
   transactions: StockTransaction[];
+  fifoList?: { stock: number; per_unit_cost: number; po_number: string }[];
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -302,16 +305,20 @@ const Inventory = () => {
   const prevStockRef = useRef<Record<string, number>>({});
   const [editItem, setEditItem] = useState<StockItem | null>(null);
   const [updateStockItem, setUpdateStockItem] = useState<StockItem | null>(null);
+  const [ledgerItem, setLedgerItem] = useState<StockItem | null>(null);
   const [requestStockOpen, setRequestStockOpen] = useState(false);
   const [requestStockItems, setRequestStockItems] = useState<StockItem[]>([]);
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [issuedItemsOpen, setIssuedItemsOpen] = useState(false);
   const [incomingItem, setIncomingItem] = useState<StockItem | null>(null);
   const [outgoingItem, setOutgoingItem] = useState<StockItem | null>(null);
+  const [returnEntryItem, setReturnEntryItem] = useState<StockItem | null>(null);
+  const [damageItem, setDamageItem] = useState<StockItem | null>(null);
   const [issuedItem, setIssuedItem] = useState<StockItem | null>(null);
   const [historyItem, setHistoryItem] = useState<StockItem | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'incoming' | 'outgoing'>('all');
   const [deleteItem, setDeleteItem] = useState<StockItem | null>(null);
+  const [openLedgersCount, setOpenLedgersCount] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchAllItems = async () => {
@@ -359,6 +366,13 @@ const Inventory = () => {
             vendors: [],
             seriesNumber: '',
             transactions: stockHistory,
+            fifoList: Array.isArray(it?.fifo_list)
+              ? it.fifo_list.map((e: any) => ({
+                  stock: Number(e?.stock) || 0,
+                  per_unit_cost: Number(e?.per_unit_cost) || 0,
+                  po_number: String(e?.po_number || ''),
+                }))
+              : [],
           };
         });
 
@@ -371,10 +385,37 @@ const Inventory = () => {
     fetchAllItems();
   }, []);
 
+  useEffect(() => {
+    const fetchOpenLedgers = async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/inventory/get_issue_requests`);
+        const data: any = await res.json().catch(() => null);
+        if (res.ok && data?.success && Array.isArray(data?.issue_requests)) {
+          const count = data.issue_requests.filter(
+            (r: any) => r.status === 'pending' || r.status === 'issued',
+          ).length;
+          setOpenLedgersCount(count);
+        }
+      } catch {
+        // silently fail — KPI shows '—'
+      }
+    };
+    fetchOpenLedgers();
+  }, []);
+
   // ── Low stock derived list ───────────────────────────────
   const lowStockItems = useMemo(
     () => items.filter((i) => i.currentStock < i.minStock && !dismissedAlerts.has(i.id)),
     [items, dismissedAlerts],
+  );
+
+  const inventoryValue = useMemo(
+    () =>
+      items.reduce((sum, item) => {
+        const val = (item.fifoList ?? []).reduce((s, e) => s + e.stock * e.per_unit_cost, 0);
+        return sum + val;
+      }, 0),
+    [items],
   );
 
   // ── Toast when an item crosses the low-stock threshold ──
@@ -543,39 +584,70 @@ const Inventory = () => {
         ))}
       </div>
 
-      {/* ── Summary Strip ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        {[
-          { label: 'Total Items', value: items.length, color: 'text-gray-800' },
-          {
-            label: 'Low Stock',
-            value: items.filter((i) => i.currentStock < i.minStock).length,
-            color: 'text-red-600',
-            onClick: () => { setDismissedAlerts(new Set()); setAlertPanelOpen(true); },
-          },
-          {
-            label: 'Categories',
-            value: new Set(items.map((i) => i.category)).size,
-            color: 'text-blue-600',
-          },
-          {
-            label: 'Showing',
-            value: filtered.length,
-            color: 'text-green-600',
-          },
-        ].map((s) => (
-          <div
-            key={s.label}
-            onClick={(s as any).onClick}
-            className={cn(
-              'bg-white rounded-xl border border-gray-100 p-3 shadow-sm',
-              (s as any).onClick && 'cursor-pointer hover:border-red-300 hover:shadow-md transition-all',
-            )}
-          >
-            <p className="text-xs text-gray-500">{s.label}</p>
-            <p className={cn('text-xl font-bold', s.color)}>{s.value}</p>
+      {/* ── KPI Strip ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        {/* Total Inventory Value */}
+        <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
+              <IndianRupee className="w-3.5 h-3.5 text-green-600" />
+            </div>
+            <p className="text-xs font-medium text-gray-500">Inventory Value</p>
           </div>
-        ))}
+          <p className="text-xl font-bold text-gray-900">
+            ₹{inventoryValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Based on FIFO cost</p>
+        </div>
+
+        {/* Total Items */}
+        <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
+              <Boxes className="w-3.5 h-3.5 text-blue-600" />
+            </div>
+            <p className="text-xs font-medium text-gray-500">Total Items</p>
+          </div>
+          <p className="text-xl font-bold text-gray-900">{items.length}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">{new Set(items.map((i) => i.category)).size} categories</p>
+        </div>
+
+        {/* Open Ledgers */}
+        <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-7 h-7 rounded-lg bg-violet-50 flex items-center justify-center">
+              <ClipboardList className="w-3.5 h-3.5 text-violet-600" />
+            </div>
+            <p className="text-xs font-medium text-gray-500">Open Ledgers</p>
+          </div>
+          <p className="text-xl font-bold text-violet-600">
+            {openLedgersCount ?? '—'}
+          </p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Pending &amp; active issues</p>
+        </div>
+
+        {/* Low Stock */}
+        <div
+          className={cn(
+            'bg-white rounded-xl border p-4 shadow-sm cursor-pointer hover:shadow-md transition-all',
+            lowStockItems.length > 0 ? 'border-red-200 hover:border-red-300' : 'border-gray-100',
+          )}
+          onClick={() => { setDismissedAlerts(new Set()); setAlertPanelOpen(true); }}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <div className={cn(
+              'w-7 h-7 rounded-lg flex items-center justify-center',
+              lowStockItems.length > 0 ? 'bg-red-50' : 'bg-gray-50',
+            )}>
+              <AlertTriangle className={cn('w-3.5 h-3.5', lowStockItems.length > 0 ? 'text-red-600' : 'text-gray-400')} />
+            </div>
+            <p className="text-xs font-medium text-gray-500">Low Stock</p>
+          </div>
+          <p className={cn('text-xl font-bold', lowStockItems.length > 0 ? 'text-red-600' : 'text-gray-900')}>
+            {lowStockItems.length}
+          </p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Below minimum threshold</p>
+        </div>
       </div>
 
       {/* ── Restore alerts link ── */}
@@ -607,9 +679,9 @@ const Inventory = () => {
                 setRequestStockItems([item]);
                 setRequestStockOpen(true);
               }}
-              onTransferStock={() => setUpdateStockItem(item)}
-              onIncomingHistory={() => { setHistoryItem(item); setHistoryFilter('incoming'); }}
-              onOutgoingHistory={() => { setHistoryItem(item); setHistoryFilter('outgoing'); }}
+              onLedger={() => setLedgerItem(item)}
+              onDamage={() => setDamageItem(item)}
+              onReturnEntry={() => setReturnEntryItem(item)}
               onHistory={() => { setHistoryItem(item); setHistoryFilter('all'); }}
               onDelete={() => setDeleteItem(item)}
             />
@@ -723,6 +795,11 @@ const Inventory = () => {
         />
       )}
 
+      {/* Ledger */}
+      {ledgerItem && (
+        <LedgerModal item={ledgerItem} onClose={() => setLedgerItem(null)} />
+      )}
+
       <RequestStockModal
         open={requestStockOpen}
         onClose={() => setRequestStockOpen(false)}
@@ -795,6 +872,22 @@ const Inventory = () => {
         />
       )}
 
+      {/* Return Entry */}
+      {returnEntryItem && (
+        <ReturnEntryModal
+          item={returnEntryItem}
+          onClose={() => setReturnEntryItem(null)}
+        />
+      )}
+
+      {/* Damage Entry */}
+      {damageItem && (
+        <DamageEntryModal
+          item={damageItem}
+          onClose={() => setDamageItem(null)}
+        />
+      )}
+
       {/* Issued Stock */}
       {issuedItem && (
         <TransactionModal
@@ -845,15 +938,232 @@ const Inventory = () => {
 };
 
 // ─────────────────────────────────────────────────────────────
+// LEDGER MODAL
+// ─────────────────────────────────────────────────────────────
+type LedgerEntry = {
+  quantity: number;
+  date: string;
+  lock_status?: string;
+  input_id: string;
+  per_unit_cost: number;
+  output: number;
+  returned?: number;
+  input: number;
+  amount: number;
+  balance?: number;
+  equipment_id: string;
+  description: string;
+};
+
+const LedgerModal = ({ item, onClose }: { item: StockItem; onClose: () => void }) => {
+  const [entries, setEntries] = useState<LedgerEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const fetchLedger = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await fetch(`${BASE_URL}/inventory/get_item_ledger/${item.id}`);
+        const data: any = await res.json().catch(() => null);
+        if (!res.ok || !data?.success || !Array.isArray(data?.ledger)) {
+          throw new Error(data?.message || 'Failed to fetch ledger');
+        }
+        setEntries(data.ledger);
+      } catch (e: any) {
+        setError(e?.message || 'Failed to fetch ledger');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchLedger();
+  }, [item.id]);
+
+  const fmtDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch { return iso; }
+  };
+
+  const getParticulars = (e: LedgerEntry) => {
+    if (e.input > 0) return 'Goods Received';
+    if (e.output > 0) return 'Stock Issued';
+    return 'Stock Adjustment';
+  };
+
+  const getRef = (e: LedgerEntry) => {
+    const m = e.description.match(/TASK-[A-Z0-9]+/);
+    return m ? m[0] : e.equipment_id;
+  };
+
+  const getVoucherNo = (e: LedgerEntry, idx: number) => {
+    const n = String(idx + 1).padStart(3, '0');
+    if (e.input > 0)  return `GRN-${n}`;
+    if (e.output > 0) return `ISS-${n}`;
+    return `ADJ-${n}`;
+  };
+
+  const totalReceived = entries.reduce((s, e) => s + e.input, 0);
+  const totalIssued   = entries.reduce((s, e) => s + e.output, 0);
+  const totalAmount   = entries.reduce((s, e) => s + e.amount, 0);
+  const lastDate      = entries.length > 0 ? fmtDate(entries[entries.length - 1].date) : '—';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4">
+      <div className="w-full max-w-6xl bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col max-h-[92vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 shrink-0">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Stock Ledger</h2>
+            <p className="text-sm text-gray-400 mt-0.5">Summary of stock received, issued and balance.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
+              {item.name} · <span className="font-medium text-gray-700">{item.sku}</span>
+            </span>
+            <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 transition-colors">
+              <X className="w-4 h-4 text-gray-400" />
+            </button>
+          </div>
+        </div>
+
+        {/* Table area */}
+        <div className="overflow-auto flex-1">
+          {loading ? (
+            <div className="flex items-center justify-center py-24 gap-2 text-sm text-gray-400">
+              <div className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+              Loading ledger…
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-24 text-red-500 gap-2">
+              <AlertTriangle className="w-8 h-8 opacity-50" />
+              <p className="text-sm font-medium">{error}</p>
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-gray-400">
+              <ClipboardList className="w-10 h-10 mb-3 opacity-30" />
+              <p className="text-sm font-medium">No ledger entries yet</p>
+              <p className="text-xs mt-1">Entries will appear here once allocations are created.</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 min-w-[100px]">Date</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 min-w-[100px]">Voucher No.</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 min-w-[200px]">Particulars / Narration</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 min-w-[130px]">Ref. / Description</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-green-600 min-w-[110px]">Received (Qty)</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-red-500 min-w-[100px]">Issued (Qty)</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-blue-500 min-w-[110px]">Balance (Qty)</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 min-w-[60px]">Unit</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 min-w-[100px]">Value (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry, idx) => (
+                  <tr key={`${entry.input_id}-${idx}`} className="border-b border-gray-100 hover:bg-gray-50/60 transition-colors">
+                    <td className="px-4 py-3.5 text-sm text-gray-600 whitespace-nowrap">{fmtDate(entry.date)}</td>
+                    <td className="px-4 py-3.5">
+                      <span className="text-sm font-semibold text-blue-600">{getVoucherNo(entry, idx)}</span>
+                    </td>
+                    <td className="px-4 py-3.5 max-w-[200px]">
+                      <p className="text-sm font-semibold text-gray-900">{getParticulars(entry)}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 line-clamp-1" title={entry.description}>{entry.description}</p>
+                    </td>
+                    <td className="px-4 py-3.5 text-sm text-gray-600">{getRef(entry)}</td>
+                    <td className="px-4 py-3.5 text-right">
+                      {entry.input > 0
+                        ? <span className="text-sm font-bold text-green-600">{entry.input.toLocaleString('en-IN')}</span>
+                        : <span className="text-gray-300 text-sm">-</span>}
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      {entry.output > 0
+                        ? <span className="text-sm font-bold text-red-500">{entry.output.toLocaleString('en-IN')}</span>
+                        : <span className="text-gray-300 text-sm">-</span>}
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      {entry.balance != null
+                        ? <span className="text-sm font-bold text-blue-600">{entry.balance.toLocaleString('en-IN')}</span>
+                        : <span className="text-gray-300 text-sm">—</span>}
+                    </td>
+                    <td className="px-4 py-3.5 text-center text-sm text-gray-600">{item.unit}</td>
+                    <td className="px-4 py-3.5 text-right text-sm font-semibold text-gray-800">
+                      ₹{entry.amount.toLocaleString('en-IN')}
+                    </td>
+                  </tr>
+                ))}
+
+                {/* Total row */}
+                <tr className="bg-gray-50 border-t-2 border-gray-200">
+                  <td colSpan={4} className="px-4 py-3 text-sm font-bold text-gray-700">Total</td>
+                  <td className="px-4 py-3 text-right text-sm font-bold text-green-600">
+                    {totalReceived > 0 ? totalReceived.toLocaleString('en-IN') : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm font-bold text-red-500">
+                    {totalIssued > 0 ? totalIssued.toLocaleString('en-IN') : '-'}
+                  </td>
+                  <td className="px-4 py-3" />
+                  <td className="px-4 py-3" />
+                  <td className="px-4 py-3 text-right text-sm font-bold text-gray-800">
+                    ₹{totalAmount.toLocaleString('en-IN')}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer: legend + closing stock card */}
+        <div className="px-6 py-4 border-t border-gray-100 shrink-0 flex items-end justify-between gap-6">
+          <div className="space-y-1.5 text-xs text-gray-600">
+            <p><span className="font-bold text-green-600">Received (Qty)</span> = Quantity added to stock</p>
+            <p><span className="font-bold text-red-500">Issued (Qty)</span> = Quantity issued from stock</p>
+            <p><span className="font-bold text-blue-500">Balance (Qty)</span> = Closing available quantity in stock</p>
+            <p><span className="font-bold text-gray-700">Value (₹)</span> = Valuation of stock balance</p>
+          </div>
+
+          {entries.length > 0 ? (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 min-w-[230px] text-right shrink-0">
+              <p className="text-xs font-semibold text-gray-500">Closing Stock Balance (Qty)</p>
+              <p className="text-3xl font-extrabold text-blue-600 mt-1 leading-none">
+                {item.currentStock.toLocaleString('en-IN')}
+                <span className="text-base font-semibold text-blue-400 ml-1.5">{item.unit}</span>
+              </p>
+              <p className="text-[11px] text-gray-400 mt-1">As on {lastDate}</p>
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <p className="text-xs font-semibold text-gray-500">Closing Stock Value</p>
+                <p className="text-2xl font-extrabold text-gray-900 mt-0.5">
+                  ₹{totalAmount.toLocaleString('en-IN')}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+            >
+              Close
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
 // INVENTORY CARD
 // ─────────────────────────────────────────────────────────────
 interface CardProps {
   item: StockItem;
   onEdit: () => void;
   onUpdateStock: () => void;
-  onTransferStock: () => void;
-  onIncomingHistory: () => void;
-  onOutgoingHistory: () => void;
+  onLedger: () => void;
+  onDamage: () => void;
+  onReturnEntry: () => void;
   onHistory: () => void;
   onDelete: () => void;
 }
@@ -862,9 +1172,9 @@ const InventoryCard = ({
   item,
   onEdit,
   onUpdateStock,
-  onTransferStock,
-  onIncomingHistory,
-  onOutgoingHistory,
+  onLedger,
+  onDamage,
+  onReturnEntry,
   onHistory,
   onDelete,
 }: CardProps) => {
@@ -919,6 +1229,20 @@ const InventoryCard = ({
           </div>
         </div>
 
+        {/* FIFO inventory value */}
+        {(() => {
+          const val = (item.fifoList ?? []).reduce((s, e) => s + e.stock * e.per_unit_cost, 0);
+          if (val <= 0) return null;
+          return (
+            <div className="flex items-center justify-between text-xs px-1">
+              <span className="text-gray-400">Inventory Value</span>
+              <span className="font-semibold text-green-700">
+                ₹{val.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </span>
+            </div>
+          );
+        })()}
+
         {/* Stock bar */}
         <div className="w-full bg-gray-100 rounded-full h-1.5">
           <div
@@ -948,25 +1272,25 @@ const InventoryCard = ({
         {/* Secondary action row */}
         <div className="grid grid-cols-3 gap-2">
           <button
-            onClick={onIncomingHistory}
-            className="flex flex-col items-center gap-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg py-2 transition-colors"
-          >
-            <ArrowDownToLine className="w-4 h-4" />
-            Incoming
-          </button>
-          <button
-            onClick={onOutgoingHistory}
+            onClick={onDamage}
             className="flex flex-col items-center gap-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg py-2 transition-colors"
           >
-            <ArrowUpFromLine className="w-4 h-4" />
-            Outgoing
+            <ShieldAlert className="w-4 h-4" />
+            Damage
           </button>
           <button
-            onClick={onTransferStock}
-            className="flex flex-col items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg py-2 transition-colors"
+            onClick={onReturnEntry}
+            className="flex flex-col items-center gap-1 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg py-2 transition-colors"
           >
-            <ArrowLeftRight className="w-4 h-4" />
-            Transfer
+            <Undo2 className="w-4 h-4" />
+            Return
+          </button>
+          <button
+            onClick={onLedger}
+            className="flex flex-col items-center gap-1 text-xs font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg py-2 transition-colors"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Ledger
           </button>
         </div>
 
@@ -2574,6 +2898,504 @@ const IssuedItemsModal = ({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// DAMAGE ENTRY MODAL
+// ─────────────────────────────────────────────────────────────
+type DamageType = 'before_application' | 'inventory';
+
+const DAMAGE_OPTIONS: { value: DamageType; label: string; desc: string }[] = [
+  { value: 'before_application', label: 'Damage Before Application', desc: 'Item was damaged at the farm before being applied — select the farm below' },
+  { value: 'inventory',          label: 'Damage in Inventory',       desc: 'Item was damaged while in storage' },
+];
+
+const DamageEntryModal = ({
+  item,
+  onClose,
+}: {
+  item: StockItem;
+  onClose: () => void;
+}) => {
+  const [damageQty, setDamageQty]       = useState(0);
+  const [perUnitCost, setPerUnitCost]   = useState(0);
+  const [reason, setReason]             = useState('');
+  const [damageType, setDamageType]     = useState<DamageType | ''>('');
+
+  const [farms, setFarms]               = useState<FarmOption[]>([]);
+  const [farmsLoading, setFarmsLoading] = useState(false);
+  const [selectedFarmId, setSelectedFarmId] = useState('');
+
+  const [saving, setSaving] = useState(false);
+
+  const totalLoss = damageQty > 0 && perUnitCost > 0 ? damageQty * perUnitCost : 0;
+
+  // Fetch farms only when "before_application" damage type selected
+  useEffect(() => {
+    if (damageType !== 'before_application') { setFarms([]); setSelectedFarmId(''); return; }
+    const fetchFarms = async () => {
+      setFarmsLoading(true);
+      try {
+        const res  = await fetch(`${BASE_URL}/admin_ops_requests/get_farm_and_farmer`);
+        const data: any = await res.json().catch(() => null);
+        if (res.ok && Array.isArray(data?.farm_farmer_mapping)) {
+          setFarms(data.farm_farmer_mapping.map((f: any) => ({
+            farm_id:    String(f.farm_id ?? ''),
+            owner_name: String(f.owner_name ?? ''),
+            crop_type:  String(f.crop_type ?? ''),
+            area:       Number(f.area) || 0,
+          })));
+        }
+      } catch { /* silently fail */ }
+      finally { setFarmsLoading(false); }
+    };
+    fetchFarms();
+  }, [damageType]);
+
+  const handleSave = async () => {
+    if (damageQty <= 0)    return toast.error('Quantity damaged must be greater than 0');
+    if (perUnitCost <= 0)  return toast.error('Per unit cost must be greater than 0');
+    if (!damageType)       return toast.error('Please select a damage type');
+    if (damageType === 'before_application' && !selectedFarmId) return toast.error('Please select the farm');
+    if (!reason.trim())    return toast.error('Please enter a reason for damage');
+    setSaving(true);
+    try {
+      const otherDetails: Record<string, string> =
+        damageType === 'before_application'
+          ? { damage_type: 'Damage before Application', farm_id: selectedFarmId }
+          : { damage_type: 'Damage in inventory' };
+      const res  = await fetch(`${BASE_URL}/inventory/item_damage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_id:             item.id,
+          quantity:            damageQty,
+          per_unit_cost:       perUnitCost,
+          damage_description:  reason.trim(),
+          other_details:       otherDetails,
+        }),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to record damage');
+      toast.success(`Damage of ${damageQty} ${item.unit} recorded for "${item.name}"`);
+      onClose();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to record damage');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-red-600">
+            <ShieldAlert className="w-5 h-5" />
+            Record Damage
+          </DialogTitle>
+        </DialogHeader>
+
+        <p className="text-sm text-gray-500 -mt-1">Log damaged inventory and calculate total loss.</p>
+
+        {/* Item info bar */}
+        <div className="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-gray-800">{item.name}</p>
+            <p className="text-xs text-gray-400">{item.sku}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-gray-400">Current Stock</p>
+            <p className="font-bold text-gray-800">{item.currentStock} {item.unit}</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {/* Damage type */}
+          <Field label="Damage Type">
+            <div className="space-y-2">
+              {DAMAGE_OPTIONS.map(opt => (
+                <label
+                  key={opt.value}
+                  className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                    damageType === opt.value
+                      ? 'border-red-400 bg-red-50'
+                      : 'border-gray-200 hover:border-gray-300 bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="damageType"
+                    value={opt.value}
+                    checked={damageType === opt.value}
+                    onChange={() => setDamageType(opt.value)}
+                    className="mt-0.5 accent-red-600"
+                  />
+                  <div>
+                    <p className={`text-sm font-medium ${damageType === opt.value ? 'text-red-700' : 'text-gray-700'}`}>
+                      {opt.label}
+                    </p>
+                    <p className="text-[11px] text-gray-400">{opt.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </Field>
+
+          {/* Farm dropdown — only for before_application */}
+          {damageType === 'before_application' && (
+            <Field label="Farm Where Damage Occurred">
+              <div className="relative">
+                <select
+                  className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-500 pr-8 disabled:bg-gray-50 disabled:text-gray-400"
+                  value={selectedFarmId}
+                  onChange={e => setSelectedFarmId(e.target.value)}
+                  disabled={farmsLoading}
+                >
+                  <option value="">{farmsLoading ? 'Loading farms…' : 'Select farm'}</option>
+                  {farms.map(f => (
+                    <option key={f.farm_id} value={f.farm_id}>
+                      {f.owner_name} — {f.crop_type} — {f.area} acres
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+            </Field>
+          )}
+
+          {/* Quantity damaged */}
+          <Field label={`Quantity Damaged (${item.unit})`}>
+            <Input
+              type="number"
+              min={1}
+              max={item.currentStock}
+              value={damageQty || ''}
+              onChange={e => setDamageQty(Number(e.target.value))}
+              placeholder="0"
+            />
+          </Field>
+
+          {/* Per unit cost */}
+          <Field label="Per Unit Cost (₹)">
+            <Input
+              type="number"
+              min={0}
+              value={perUnitCost || ''}
+              onChange={e => setPerUnitCost(Number(e.target.value))}
+              placeholder="0.00"
+            />
+          </Field>
+
+          {/* Reason */}
+          <Field label="Reason for Damage">
+            <Input
+              placeholder="Describe how the damage occurred…"
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+            />
+          </Field>
+
+          {/* Total Loss card */}
+          <div className={`rounded-lg border px-4 py-3 flex items-center justify-between transition-colors ${
+            totalLoss > 0 ? 'border-red-200 bg-red-50' : 'border-gray-100 bg-gray-50'
+          }`}>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Loss</p>
+              <p className={`text-2xl font-extrabold leading-tight ${totalLoss > 0 ? 'text-red-600' : 'text-gray-300'}`}>
+                ₹{totalLoss.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            {totalLoss > 0 && (
+              <div className="text-right text-[11px] text-red-400 space-y-0.5">
+                <p>{damageQty} {item.unit}</p>
+                <p>× ₹{perUnitCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            className="bg-red-600 hover:bg-red-700 text-white"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? 'Recording…' : 'Record Damage'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// RETURN ENTRY MODAL
+// ─────────────────────────────────────────────────────────────
+type FarmOption = {
+  farm_id: string;
+  owner_name: string;
+  crop_type: string;
+  area: number;
+};
+
+type FarmLedgerEntry = {
+  voucher_number: string;
+  date: string;
+  input: number;
+  output: number;
+  amount: number;
+  unit: string;
+  description: string;
+  investment: number;
+  item_description: { item_code: string; item_unit: string; item_name: string };
+};
+
+const ReturnEntryModal = ({
+  item,
+  onClose,
+}: {
+  item: StockItem;
+  onClose: () => void;
+}) => {
+  const [farms, setFarms]               = useState<FarmOption[]>([]);
+  const [farmsLoading, setFarmsLoading] = useState(false);
+  const [selectedFarmId, setSelectedFarmId] = useState('');
+
+  const [ledger, setLedger]               = useState<FarmLedgerEntry[]>([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [selectedVoucher, setSelectedVoucher] = useState('');
+
+  const [returnQty, setReturnQty] = useState(0);
+  const [note, setNote]           = useState('');
+  const [saving, setSaving]       = useState(false);
+
+  // Fetch all farms on mount
+  useEffect(() => {
+    const fetchFarms = async () => {
+      setFarmsLoading(true);
+      try {
+        const res  = await fetch(`${BASE_URL}/admin_ops_requests/get_farm_and_farmer`);
+        const data: any = await res.json().catch(() => null);
+        if (res.ok && Array.isArray(data?.farm_farmer_mapping)) {
+          setFarms(data.farm_farmer_mapping.map((f: any) => ({
+            farm_id:    String(f.farm_id ?? ''),
+            owner_name: String(f.owner_name ?? ''),
+            crop_type:  String(f.crop_type ?? ''),
+            area:       Number(f.area) || 0,
+          })));
+        }
+      } catch { /* silently fail */ }
+      finally { setFarmsLoading(false); }
+    };
+    fetchFarms();
+  }, []);
+
+  // Fetch investment ledger when farm changes
+  useEffect(() => {
+    if (!selectedFarmId) { setLedger([]); setSelectedVoucher(''); setReturnQty(0); return; }
+    const fetchLedger = async () => {
+      setLedgerLoading(true);
+      setLedger([]);
+      setSelectedVoucher('');
+      setReturnQty(0);
+      try {
+        const res  = await fetch(`${BASE_URL}/inventory/get_farm_investment_ledger/${selectedFarmId}`);
+        const data: any = await res.json().catch(() => null);
+        if (res.ok && data?.success && Array.isArray(data?.ledger) && data.ledger.length > 0) {
+          setLedger(data.ledger);
+        }
+      } catch { /* silently fail */ }
+      finally { setLedgerLoading(false); }
+    };
+    fetchLedger();
+  }, [selectedFarmId]);
+
+  const selectedEntry = ledger.find(e => e.voucher_number === selectedVoucher);
+
+  const fmtDate = (iso: string) => {
+    try { return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch { return iso; }
+  };
+
+  const handleSave = async () => {
+    if (!selectedFarmId)    return toast.error('Please select a farm');
+    if (!selectedVoucher)   return toast.error('Please select a ledger entry');
+    if (returnQty <= 0)     return toast.error('Return quantity must be greater than 0');
+    setSaving(true);
+    try {
+      const res  = await fetch(`${BASE_URL}/inventory/inventory_item_return_ledger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          investment:       selectedEntry?.investment ?? 0,
+          input:            returnQty,
+          item_description: selectedEntry?.item_description ?? {},
+          farm_id:          selectedFarmId,
+          unit:             selectedEntry?.unit ?? item.unit,
+          voucher_number:   selectedVoucher,
+        }),
+      });
+      const data: any = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to submit return entry');
+      toast.success(`Return of ${returnQty} ${item.unit} recorded for "${item.name}"`);
+      onClose();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to submit return entry');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-orange-600">
+            <Undo2 className="w-5 h-5" />
+            Return Entry
+          </DialogTitle>
+        </DialogHeader>
+
+        <p className="text-sm text-gray-500 -mt-1">Select the farm and ledger entry for the return.</p>
+
+        {/* Item info bar */}
+        <div className="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-gray-800">{item.name}</p>
+            <p className="text-xs text-gray-400">{item.sku}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-gray-400">Current Stock</p>
+            <p className="font-bold text-gray-800">{item.currentStock} {item.unit}</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {/* Step 1 — Farm */}
+          <Field label="Step 1 · Select Farm">
+            <div className="relative">
+              <select
+                className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 pr-8 disabled:bg-gray-50 disabled:text-gray-400"
+                value={selectedFarmId}
+                onChange={e => setSelectedFarmId(e.target.value)}
+                disabled={farmsLoading}
+              >
+                <option value="">{farmsLoading ? 'Loading farms…' : 'Select a farm'}</option>
+                {farms.map(f => (
+                  <option key={f.farm_id} value={f.farm_id}>
+                    {f.owner_name} — {f.crop_type} — {f.area} acres
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
+          </Field>
+
+          {/* Step 2 — Ledger entry (shown after farm selected) */}
+          {selectedFarmId && (
+            ledgerLoading ? (
+              <div className="flex items-center justify-center gap-2 py-5 text-sm text-gray-400">
+                <div className="w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+                Loading investment ledger…
+              </div>
+            ) : ledger.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 py-5 text-center">
+                <p className="text-sm text-gray-400 font-medium">No investments found for this farm</p>
+                <p className="text-xs text-gray-300 mt-0.5">No items have been sent to this farm yet</p>
+              </div>
+            ) : (
+              <Field label="Step 2 · Select Ledger Entry">
+                <div className="relative">
+                  <select
+                    className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 pr-8"
+                    value={selectedVoucher}
+                    onChange={e => {
+                      setSelectedVoucher(e.target.value);
+                      const entry = ledger.find(l => l.voucher_number === e.target.value);
+                      if (entry) setReturnQty(entry.input || 1);
+                    }}
+                  >
+                    <option value="">Select an entry</option>
+                    {ledger.map(e => (
+                      <option key={e.voucher_number} value={e.voucher_number}>
+                        {e.item_description?.item_name?.trim()} — {e.input} {e.unit} — {fmtDate(e.date)}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                </div>
+
+                {/* Entry detail card */}
+                {selectedEntry && (() => {
+                  const perUnit = selectedEntry.input > 0
+                    ? selectedEntry.investment / selectedEntry.input
+                    : selectedEntry.output > 0
+                      ? selectedEntry.investment / selectedEntry.output
+                      : null;
+                  return (
+                    <div className="mt-2 rounded-lg border border-orange-100 bg-orange-50 px-3 py-2.5 space-y-1">
+                      <p className="text-xs font-semibold text-orange-800">{selectedEntry.item_description?.item_name?.trim()}</p>
+                      <div className="flex items-center justify-between text-[11px] text-orange-600">
+                        <span className="font-mono">{selectedEntry.item_description?.item_code}</span>
+                        <span className="font-semibold">
+                          {selectedEntry.input} {selectedEntry.unit} · ₹{selectedEntry.amount.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                      {perUnit !== null && (
+                        <p className="text-[11px] text-orange-500 font-medium">
+                          ₹{perUnit.toLocaleString('en-IN', { maximumFractionDigits: 2 })} / {selectedEntry.unit}
+                        </p>
+                      )}
+                      <p className="text-[10px] text-orange-400">{fmtDate(selectedEntry.date)}</p>
+                    </div>
+                  );
+                })()}
+              </Field>
+            )
+          )}
+
+          {/* Step 3 — Qty + Note (shown after entry selected) */}
+          {selectedVoucher && (
+            <>
+              <Field label={`Step 3 · Return Quantity (${item.unit})`}>
+                <Input
+                  type="number"
+                  min={1}
+                  max={selectedEntry?.input ?? undefined}
+                  value={returnQty || ''}
+                  onChange={e => setReturnQty(Number(e.target.value))}
+                  placeholder="0"
+                />
+                {selectedEntry && (
+                  <p className="text-[11px] text-gray-400 mt-0.5">Originally issued: {selectedEntry.input} {selectedEntry.unit}</p>
+                )}
+              </Field>
+              <Field label="Note (optional)">
+                <Input
+                  placeholder="Reason for return, condition, etc."
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                />
+              </Field>
+            </>
+          )}
+        </div>
+
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            className="bg-orange-600 hover:bg-orange-700 text-white"
+            onClick={handleSave}
+            disabled={saving || !selectedVoucher}
+          >
+            {saving ? 'Submitting…' : 'Submit Return'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

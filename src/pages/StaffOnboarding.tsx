@@ -16,6 +16,13 @@ import { toast } from 'sonner';
 import CredentialsDialog, { type FarmerCredentials } from '@/components/farmers/CredentialsDialog';
 
 // --- TYPES ---
+interface VendorItem {
+  vendor_id: string;
+  vendor_name: string;
+  vendor_contact: string;
+  order_number: string;
+}
+
 interface StaffApiItem {
   staff_id: string;
   created_at: string;
@@ -28,10 +35,12 @@ interface StaffApiItem {
   assigned_vehicles: any[];
   staff_information: {
     staff_name: string;
-    employment_type: 'Permanent' | 'Contract' | 'Temporary' | string;
+    employment_type: Record<string, any> | string;
     staff_phone: string;
     staff_department: string;
     staff_designation: string;
+    profile_image_url?: string;
+    adhar_card_url?: string;
   };
   credentials?: FarmerCredentials | null;
 }
@@ -53,6 +62,13 @@ const StaffOnboarding = () => {
   const [ifscCode, setIfscCode] = useState('');
   const [formStep, setFormStep] = useState<1 | 2>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
+  const [profileImageFile, setProfileImageFile] = useState<File | null>(null);
+  const [aadharImagePreview, setAadharImagePreview] = useState<string | null>(null);
+  const [aadharImageFile, setAadharImageFile] = useState<File | null>(null);
+  const [vendors, setVendors] = useState<VendorItem[]>([]);
+  const [selectedVendorIndex, setSelectedVendorIndex] = useState<number | null>(null);
+  const [isFetchingVendors, setIsFetchingVendors] = useState(false);
   const [credentialsDialogStaffId, setCredentialsDialogStaffId] = useState<string | null>(null);
   // Payroll config state
   const [payrollConfigs, setPayrollConfigs] = useState<Record<string, { baseSalary: number; deductions: number; additions: number }>>({});
@@ -74,10 +90,68 @@ const StaffOnboarding = () => {
     setBankName('');
     setAccountNumber('');
     setIfscCode('');
+    setProfileImagePreview(null);
+    setProfileImageFile(null);
+    setAadharImagePreview(null);
+    setAadharImageFile(null);
+    setVendors([]);
+    setSelectedVendorIndex(null);
   };
 
   const handleBulkUpload = () => {
     toast.success("Bulk upload feature triggered");
+  };
+
+  const fetchActiveVendors = async () => {
+    const BASE_URL = getBaseUrl().replace(/\/$/, '');
+    try {
+      setIsFetchingVendors(true);
+      const res = await fetch(`${BASE_URL}/admin_cultivation/get_active_vendor`, {
+        headers: { Accept: 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) { toast.error('Failed to fetch vendors'); return; }
+      setVendors(data.vendors ?? []);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to fetch vendors');
+    } finally {
+      setIsFetchingVendors(false);
+    }
+  };
+
+  const handleEmploymentTypeChange = (type: 'Permanent' | 'Contract' | 'Temporary') => {
+    setEmploymentType(type);
+    setSelectedVendorIndex(null);
+    if (type === 'Contract') {
+      fetchActiveVendors();
+    } else {
+      setVendors([]);
+    }
+  };
+
+  const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProfileImagePreview(URL.createObjectURL(file));
+    setProfileImageFile(file);
+  };
+
+  const handleAadharImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAadharImagePreview(URL.createObjectURL(file));
+    setAadharImageFile(file);
+  };
+
+  const uploadImageToS3 = async (file: File, documentType: string): Promise<string> => {
+    const BASE_URL = getBaseUrl().replace(/\/$/, '');
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('document_type', documentType);
+    const res = await fetch(`${BASE_URL}/admin_staff/add_document_to_s3`, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data?.message || 'Image upload failed');
+    return data.image_url as string;
   };
 
   const fetchAllStaff = async () => {
@@ -127,25 +201,39 @@ const StaffOnboarding = () => {
     }
 
     const BASE_URL = getBaseUrl().replace(/\/$/, '');
-    const payload = {
-      staff_information: {
-        staff_name: fullName.trim(),
-        staff_phone: phone.trim(),
-        staff_department: department,
-        staff_designation: designation,
-        employment_type: employmentType,
-      },
-      account_details: {
-        bank_name: bankName.trim(),
-        account_number: accountNumber.trim(),
-        ifsc_code: ifscCode.trim().toUpperCase(),
-      },
-      assigned_vehicles: [],
-      assigned_blocks: [],
-    };
 
     try {
       setIsSubmitting(true);
+
+      const [profileImageUrl, aadharCardUrl] = await Promise.all([
+        profileImageFile ? uploadImageToS3(profileImageFile, 'profile_picture') : Promise.resolve(''),
+        aadharImageFile  ? uploadImageToS3(aadharImageFile,  'adhaar_card')      : Promise.resolve(''),
+      ]);
+
+      const payload = {
+        staff_information: {
+          staff_name: fullName.trim(),
+          staff_phone: phone.trim(),
+          staff_department: department,
+          staff_designation: designation,
+          employment_type: employmentType === 'Contract'
+            ? {
+                type: 'Contract',
+                vendor: selectedVendorIndex !== null ? vendors[selectedVendorIndex].vendor_name : '',
+                order_number: selectedVendorIndex !== null ? vendors[selectedVendorIndex].order_number : null,
+              }
+            : { type: employmentType, vendor: 'Sai Bioresources Pvt Ltd', order_number: null },
+          profile_image_url: profileImageUrl,
+          adhar_card_url: aadharCardUrl,
+        },
+        account_details: {
+          bank_name: bankName.trim(),
+          account_number: accountNumber.trim(),
+          ifsc_code: ifscCode.trim().toUpperCase(),
+        },
+        assigned_vehicles: [],
+        assigned_blocks: [],
+      };
       const res = await fetch(`${BASE_URL}/admin_staff/add_staff`, {
         method: 'POST',
         headers: {
@@ -284,14 +372,21 @@ const StaffOnboarding = () => {
                 const staffDesignation = staff.staff_information?.staff_designation ?? '-';
                 const staffDepartment = staff.staff_information?.staff_department ?? '-';
                 const staffPhone = staff.staff_information?.staff_phone ?? '-';
-                const staffType = staff.staff_information?.employment_type ?? '-';
+                const rawType = staff.staff_information?.employment_type;
+                const staffType = typeof rawType === 'object' && rawType !== null
+                  ? (rawType as any).type ?? '-'
+                  : rawType ?? '-';
 
                 return (
                   <tr key={staff.staff_id} className="hover:bg-muted/20">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
-                          {(staffName || '?').charAt(0).toUpperCase()}
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs overflow-hidden">
+                          {staff.staff_information?.profile_image_url ? (
+                            <img src={staff.staff_information.profile_image_url} alt={staffName} className="w-full h-full object-cover" />
+                          ) : (
+                            (staffName || '?').charAt(0).toUpperCase()
+                          )}
                         </div>
                         <span className="font-medium text-foreground">{staffName}</span>
                       </div>
@@ -398,15 +493,34 @@ const StaffOnboarding = () => {
                     {/* Profile Image */}
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-foreground">Profile Image</label>
-                      <div className="relative">
+                      <div className="flex flex-col items-center gap-2">
+                        <div
+                          onClick={() => document.getElementById('profile-image-input')?.click()}
+                          className="relative w-24 h-24 rounded-full border-2 border-dashed border-input bg-muted/30 flex items-center justify-center cursor-pointer hover:border-primary/60 hover:bg-muted/50 transition-all overflow-hidden"
+                        >
+                          {profileImagePreview ? (
+                            <img src={profileImagePreview} alt="Profile" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                              <ImageIcon className="w-6 h-6" />
+                              <span className="text-[10px]">Upload</span>
+                            </div>
+                          )}
+                          {isSubmitting && (
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-full">
+                              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            </div>
+                          )}
+                        </div>
                         <input
+                          id="profile-image-input"
                           type="file"
                           accept="image/*"
-                          className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted/80"
+                          className="hidden"
+                          onChange={handleProfileImageChange}
                         />
-                        <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                        <p className="text-[11px] text-muted-foreground">Click to upload a face photo</p>
                       </div>
-                      <p className="text-[11px] text-muted-foreground">Upload a clear face photo.</p>
                     </div>
 
                     {/* Aadhaar Card Photo */}
@@ -417,9 +531,20 @@ const StaffOnboarding = () => {
                           type="file"
                           accept="image/*"
                           className="w-full px-3 py-2 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all pl-10 file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted/80"
+                          onChange={handleAadharImageChange}
                         />
                         <IdCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                       </div>
+                      {aadharImagePreview && (
+                        <div className="relative rounded-lg overflow-hidden border border-border">
+                          <img src={aadharImagePreview} alt="Aadhaar card" className="w-full h-28 object-cover" />
+                          {isSubmitting && (
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <p className="text-[11px] text-muted-foreground">Upload front side (preferred).</p>
                     </div>
                 
@@ -521,6 +646,7 @@ const StaffOnboarding = () => {
                       <option value="Executive">Executive</option>
                       <option value="EA To Director">EA To Director</option>
                       <option value="Field Manager">Field Manager</option>
+                      <option value="Labour">Labour</option>
                       <option value="Manager">Manager</option>
                       <option value="Operator">Operator</option>
                       <option value="Supervisor">Supervisor</option>
@@ -550,7 +676,7 @@ const StaffOnboarding = () => {
                   <label className="text-sm font-medium text-foreground">Employment Type</label>
                   <select
                     value={employmentType}
-                    onChange={(e) => setEmploymentType(e.target.value as any)}
+                    onChange={(e) => handleEmploymentTypeChange(e.target.value as any)}
                     className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
                   >
                     <option value="Permanent">Permanent</option>
@@ -558,6 +684,37 @@ const StaffOnboarding = () => {
                     <option value="Temporary">Temporary</option>
                   </select>
                 </div>
+
+                {/* Vendor / Work Order (Contract only) */}
+                {employmentType === 'Contract' && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">Work Order / Vendor</label>
+                    {isFetchingVendors ? (
+                      <div className="flex items-center gap-2 px-3 py-2.5 border border-input rounded-lg text-sm text-muted-foreground bg-muted/30">
+                        <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        Loading work orders...
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedVendorIndex !== null ? String(selectedVendorIndex) : ''}
+                        onChange={(e) => setSelectedVendorIndex(e.target.value === '' ? null : Number(e.target.value))}
+                        className="w-full px-3 py-2.5 border border-input rounded-lg text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                      >
+                        <option value="">Select work order</option>
+                        {vendors.map((v, i) => (
+                          <option key={`${v.vendor_id}-${v.order_number}`} value={i}>
+                            {v.vendor_name} • {v.order_number} • {v.vendor_contact}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {selectedVendorIndex !== null && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Order: <span className="font-medium text-foreground">{vendors[selectedVendorIndex]?.order_number}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* User Account Link */}
                 <div className="space-y-2 md:col-span-2">

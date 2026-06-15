@@ -12,8 +12,13 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
+import { useAuth } from '@/context/AuthContext';
+import logoUrl from '@/Assets/3f-logo.png';
 
 const BASE_URL = getBaseUrl().replace(/\/$/, '');
+const COMPANY_NAME    = 'Sai Bioresources Private Limited';
+const COMPANY_ADDRESS = 'Khasra No. 121/1, Kachandur - Dhour Road, Village - Jeora (Jeora-Sirsa), Durg, Chhattisgarh - 491001';
+const COMPANY_CONTACT = '+91 75870 76870';
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -22,9 +27,8 @@ type RequestStatus = 'pending' | 'sent_to_admin' | 'approved' | 'rejected';
 type RequestSource = 'driver_app' | 'manual' | 'vendor';
 
 type StaffDetails = {
-  staff_name: string;
-  staff_contact: string;
-  staff_id: string;
+  name: string;
+  contact: string;
 };
 
 type VehicleDetails = {
@@ -41,6 +45,7 @@ type VendorDetails = {
   vendor_contact: string;
   vendor_id: string;
   order_number: string;
+  vendor_address?: string;
 };
 
 type Vendor = {
@@ -48,6 +53,13 @@ type Vendor = {
   vendor_name: string;
   vendor_contact: string;
   order_number: string;
+};
+
+type ReceiptVendor = {
+  vendor_id: string;
+  vendor_name: string;
+  vendor_contact: string;
+  vendor_address: string;
 };
 
 // Matches the API response shape; optional fields are filled for manual / receipt-stage requests
@@ -63,6 +75,9 @@ type FuelRequest = {
   staff_details?: StaffDetails;       // absent for vendor-source requests
   vehicle_details: VehicleDetails;
   vendor_details?: VendorDetails;     // present for vendor-source requests
+  requestor_approval_details?: { approver_name: string; approver_designation: string; approved_time: string; approved_date: string };
+  admin_ops_approval_details?: { approver_name: string; approver_designation: string; approved_time: string; approved_date: string };
+  director_approval_details?:  { approver_name: string; approver_designation: string; approved_time: string; approved_date: string };
   // Optional — filled at manual-entry / receipt stage
   receipt_no?: string;
   issue_type?: string;
@@ -194,6 +209,7 @@ const emptyForm = (): NewRequestForm => ({
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────
 const FuelsAndConsumables = () => {
+  const { user } = useAuth();
   const [requests, setRequests] = useState<FuelRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -229,7 +245,7 @@ const FuelsAndConsumables = () => {
     return requests.filter(r => {
       const matchSearch = !q ||
         (r.request_id ?? '').toLowerCase().includes(q) ||
-        (r.staff_details?.staff_name ?? '').toLowerCase().includes(q) ||
+        (r.staff_details?.name ?? '').toLowerCase().includes(q) ||
         (r.vendor_details?.vendor_name ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.vehicle_number ?? '').toLowerCase().includes(q) ||
         (r.vehicle_details?.model ?? '').toLowerCase().includes(q) ||
@@ -281,10 +297,19 @@ const FuelsAndConsumables = () => {
     if (selectedPendingIds.length === 0) return;
     setSendingToAdmin(true);
     try {
+      const now = new Date();
       const res = await fetch(`${BASE_URL}/fuels_consumables/requestor_approval_and_forwarded`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: selectedPendingIds }),
+        body: JSON.stringify({
+          request_id: selectedPendingIds,
+          approval_details: {
+            approver_name:        user?.name        ?? '',
+            approver_designation: user?.designation ?? '',
+            approved_time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+            approved_date: `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`,
+          },
+        }),
       });
       const data: any = await res.json().catch(() => null);
       if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to send to Admin Ops');
@@ -299,6 +324,7 @@ const FuelsAndConsumables = () => {
       toast.success(
         `${selectedPendingIds.length} request${selectedPendingIds.length > 1 ? 's' : ''} sent to Admin Ops`
       );
+      window.location.reload();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to send to Admin Ops');
     } finally {
@@ -313,18 +339,36 @@ const FuelsAndConsumables = () => {
     requestorType: 'staff' | 'vendor',
     selectedVendor: Vendor | null,
   ) => {
-    const payload = {
-      fuel_requested: data.fuel_requested,
-      purpose: data.purpose,
-      source: requestorType === 'vendor' ? 'vendor' : 'manual',
-      vendor_details: selectedVendor ?? {},
-      vehicle_details: {
-        vehicle_number: data.vehicle_number,
-        type: data.vehicle_type,
-        model: data.vehicle_model,
-        company: data.vehicle_company,
-      },
-    };
+    const payload =
+      requestorType === 'staff'
+        ? {
+            fuel_requested: data.fuel_requested,
+            purpose: data.purpose,
+            source: 'manual',
+            staff_details: {
+              name: data.staff_name,
+              contact: data.staff_contact,
+            },
+            vehicle_details: {
+              vehicle_number: data.vehicle_number,
+              type: data.vehicle_type,
+              model: data.vehicle_model,
+              company: data.vehicle_company,
+            },
+          }
+        : {
+            fuel_requested: data.fuel_requested,
+            purpose: data.purpose,
+            source: 'vendor',
+            staff_details: {},
+            vehicle_details: {
+              vehicle_number: data.vehicle_number,
+              type: data.vehicle_type,
+              model: data.vehicle_model,
+              company: data.vehicle_company,
+            },
+            vendor_details: selectedVendor ?? {},
+          };
 
     setCreatingRequest(true);
     try {
@@ -598,7 +642,7 @@ const FuelsAndConsumables = () => {
                         <p className="font-medium text-gray-900 truncate max-w-[150px]">
                           {req.source === 'vendor'
                             ? (req.vendor_details?.vendor_name || '—')
-                            : (req.staff_details?.staff_name || '—')}
+                            : (req.staff_details?.name || '—')}
                         </p>
                         <p className="text-[11px] text-gray-400 truncate max-w-[150px] mt-0.5">
                           {vehicleLabel || req.vehicle_details?.model || '—'}
@@ -1043,8 +1087,8 @@ const ViewRequestModal = ({
         {req.staff_details ? (
           <FormSection title="Issued To" color="blue">
             <div className="grid grid-cols-2 gap-2">
-              <DetailRow icon={User}     label="Person Name" value={req.staff_details.staff_name} />
-              <DetailRow icon={Phone}    label="Contact"     value={req.staff_details.staff_contact} />
+              <DetailRow icon={User}     label="Person Name" value={req.staff_details.name} />
+              <DetailRow icon={Phone}    label="Contact"     value={req.staff_details.contact} />
               <DetailRow icon={FileText} label="Purpose"     value={req.purpose} />
               <DetailRow icon={MapPin}   label="Location"    value={req.location ?? '—'} />
             </div>
@@ -1128,66 +1172,57 @@ const ReceiptModal = ({
 }) => {
   const receiptNo = req.receipt_no || genReceiptNo();
   const printRef  = useRef<HTMLDivElement>(null);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [vendors, setVendors] = useState<ReceiptVendor[]>([]);
   const [selectedVendorId, setSelectedVendorId] = useState(
-    req.vendor_details?.order_number ?? ''
+    req.vendor_details?.vendor_id ?? ''
   );
+  const [fuelType, setFuelType] = useState('Diesel');
 
   useEffect(() => {
-    fetch(`${BASE_URL}/admin_cultivation/get_active_vendor`)
+    fetch(`${BASE_URL}/purchase_flow/get_vendors`)
       .then(r => r.json())
       .then((data: any) => { if (Array.isArray(data?.vendors)) setVendors(data.vendors); })
       .catch(() => {});
   }, []);
 
-  const selectedVendor = vendors.find(v => v.order_number === selectedVendorId) ?? null;
+  const selectedVendor = vendors.find(v => v.vendor_id === selectedVendorId) ?? null;
 
   // Vendor values: selected from dropdown → request vendor_details → legacy flat fields → '—'
   const vName    = selectedVendor?.vendor_name    || req.vendor_details?.vendor_name    || req.vendor_name  || '—';
   const vContact = selectedVendor?.vendor_contact || req.vendor_details?.vendor_contact || req.vendor_phone || '—';
   const vId      = selectedVendor?.vendor_id      || req.vendor_details?.vendor_id      || req.vendor_code  || '—';
-  const vOrderNo = selectedVendor?.order_number   || req.vendor_details?.order_number   || req.reference_wo || '—';
+  const vAddress = selectedVendor?.vendor_address || req.vendor_details?.vendor_address || req.vendor_address || '—';
 
   const handleDownload = () => {
     if (!selectedVendorId) { toast.error('Please select a vendor before downloading'); return; }
-    const win = window.open('', '_blank', 'width=820,height=1000');
+    const win = window.open('', '_blank', 'width=820,height=1200');
     if (!win) { toast.error('Pop-up blocked — please allow pop-ups'); return; }
-    win.document.write(`<!DOCTYPE html><html><head>
-      <title>Diesel Issue Receipt — ${receiptNo}</title>
-      <style>
-        *{box-sizing:border-box;margin:0;padding:0}
-        body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:28px;max-width:780px;margin:0 auto}
-        h1{font-size:22px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em}
-        .subtitle{font-size:12px;color:#666;margin-top:4px}
-        .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:12px}
-        .box{border:1px solid #ccc;border-radius:6px;margin-bottom:12px;overflow:hidden}
-        .box-title{background:#f3f4f6;border-bottom:1px solid #ccc;padding:8px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em}
-        .box-body{padding:12px 14px}
-        .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px}
-        .grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:0;border-top:1px solid #eee}
-        .grid4-cell{padding:10px 12px;text-align:center;border-right:1px solid #eee}
-        .grid4-cell:last-child{border-right:none}
-        .label{font-size:11px;color:#666}
-        .val-big{font-size:20px;font-weight:700;color:#059669;margin-top:4px}
-        .val-med{font-size:16px;font-weight:700;margin-top:4px}
-        .sig{text-align:right;margin-top:16px;font-size:12px;color:#666}
-        .sig-line{letter-spacing:0.15em;font-size:16px;color:#bbb;margin-top:20px}
-        .footer{border-top:1px solid #ddd;margin-top:16px;padding-top:10px;text-align:center;font-size:11px;color:#999}
-        b{font-weight:600}
-      </style>
-    </head><body>
-      <div style="text-align:center;border-bottom:2px solid #111;padding-bottom:12px">
-        <h1>Diesel Issue Receipt</h1>
-        <p class="subtitle">SBR Agri Management System</p>
+
+    const absoluteLogoUrl = window.location.origin + logoUrl;
+    const requestType     = req.staff_details ? 'For Staff' : 'For Vendor';
+
+    const companyHeader = (badge: string) => `
+      <div style="position:absolute;top:18px;right:22px">
+        <span class="badge ${badge === 'ORIGINAL' ? 'badge-orig' : 'badge-copy'}">${badge}</span>
       </div>
-      <div class="meta" style="margin-top:12px">
-        <div>
-          <p><b>Receipt No:</b> ${receiptNo}</p>
-          <p style="margin-top:4px"><b>Date:</b> ${fmtDate(req.date)}</p>
-        </div>
-        <div style="text-align:right">
-          <p><b>Issue Type:</b> ${req.issue_type || 'Diesel Issue'}</p>
-        </div>
+      <div style="text-align:center;padding-bottom:10px;margin-bottom:10px">
+        <img src="${absoluteLogoUrl}" style="height:156px;width:156px;object-fit:contain;display:block;margin:0 auto 8px" />
+        <div style="font-size:18px;font-weight:900;color:#111;text-transform:uppercase;letter-spacing:0.04em">${COMPANY_NAME.toUpperCase()}</div>
+        <div style="font-size:10px;color:#555;margin-top:3px;line-height:1.6">${COMPANY_ADDRESS}</div>
+        <div style="font-size:10px;color:#555">Contact: ${COMPANY_CONTACT}</div>
+      </div>
+      <div style="border-top:2px solid #111;margin-bottom:12px"></div>
+      <div style="text-align:center;margin-bottom:10px">
+        <div style="font-size:19px;font-weight:800;text-transform:uppercase;letter-spacing:0.04em">Fuel Issue Receipt</div>
+      </div>
+    `;
+
+    const receiptBody = (badge: string) => `
+      ${companyHeader(badge)}
+      <div class="meta-row">
+        <div><div class="meta-label">Request ID</div><div class="meta-val">${req.request_id}</div></div>
+        <div><div class="meta-label">Request Type</div><div class="meta-val">${req.staff_details ? 'For Self' : 'For Vendor'}</div></div>
+        <div><div class="meta-label">Date</div><div class="meta-val">${fmtDate(req.date)}</div></div>
       </div>
       <div class="box">
         <div class="box-title">Diesel Vendor Details</div>
@@ -1195,43 +1230,80 @@ const ReceiptModal = ({
           <p><b>Vendor Name:</b> ${vName}</p>
           <p><b>Vendor ID:</b> ${vId}</p>
           <p><b>Contact:</b> ${vContact}</p>
-          <p><b>PO / WO No.:</b> ${vOrderNo}</p>
+          <p><b>Address:</b> ${vAddress}</p>
         </div>
       </div>
       <div class="box">
-        <div class="box-title">Diesel Issued To</div>
+        <div class="box-title">Issued To</div>
         <div class="box-body grid2">
-          <p><b>Person Name:</b> ${req.staff_details?.staff_name || req.vendor_details?.vendor_name || '—'}</p>
-          <p><b>Purpose (For What):</b> ${req.purpose || '—'}</p>
-          <p><b>Contact:</b> ${req.staff_details?.staff_contact || req.vendor_details?.vendor_contact || '—'}</p>
-          <p><b>Vehicle:</b> ${[req.vehicle_details?.type, req.vehicle_details?.vehicle_number].filter(Boolean).join(' · ') || '—'}</p>
+          <p><b>Person Name:</b> ${req.staff_details?.name || req.vendor_details?.vendor_name || '—'}</p>
+          <p><b>Contact:</b> ${req.staff_details?.contact || req.vendor_details?.vendor_contact || '—'}</p>
+          <p><b>Vehicle Type:</b> ${req.vehicle_details?.type || '—'}</p>
+          <p><b>Vehicle Number:</b> ${req.vehicle_details?.vehicle_number || '—'}</p>
           <p><b>Model:</b> ${req.vehicle_details?.model || '—'}</p>
-          <p><b>Location:</b> ${req.location || '—'}</p>
         </div>
       </div>
-      <div class="box">
-        <div class="box-title">Diesel Issue Details</div>
-        <div class="grid4">
-          <div class="grid4-cell"><p class="label">Diesel Quantity</p><p class="val-big">${req.fuel_requested.toFixed(2)} Ltr</p></div>
-          <div class="grid4-cell"><p class="label">Rate (Per Ltr)</p><p class="val-med">${(req.rate_per_ltr ?? 0) > 0 ? fmtCurrency(req.rate_per_ltr!) : '—'}</p></div>
-          <div class="grid4-cell"><p class="label">Total Amount</p><p class="val-med">${(req.total_amount ?? 0) > 0 ? fmtCurrency(req.total_amount!) : '—'}</p></div>
-          <div class="grid4-cell"><p class="label">Odometer/Hour Reading</p><p class="val-med">${req.odometer_reading || '—'}</p></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="box" style="margin-bottom:0">
+          <div class="box-title">Fuel Issue Details</div>
+          <div class="box-body" style="text-align:center">
+            <div style="display:inline-block;background:#fff7ed;border:2px solid #f97316;border-radius:8px;padding:4px 18px;margin-bottom:6px;font-size:13px;font-weight:700;color:#c2410c;letter-spacing:0.06em;text-transform:uppercase">
+              ${fuelType}
+            </div>
+            <p class="label" style="margin-top:2px">Quantity</p>
+            <p class="val-big">${req.fuel_requested.toFixed(2)} Ltr</p>
+          </div>
+        </div>
+        <div class="box" style="margin-bottom:0">
+          <div class="box-title">Additional Information</div>
+          <div class="box-body">
+            <p><b>Purpose:</b> ${req.purpose || '—'}</p>
+            <p style="margin-top:5px"><b>Reference:</b> ${req.reference_wo || '—'}</p>
+          </div>
         </div>
       </div>
-      <div class="box">
-        <div class="box-title">Additional Information</div>
-        <div class="box-body grid2">
-          <p><b>Purpose:</b> ${req.purpose || '—'}</p>
-          <p><b>Issue Date &amp; Time:</b> ${fmtDate(req.date)}</p>
-          <p><b>Reference:</b> ${vOrderNo}</p>
-        </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:18px">
+        ${[
+          { role: 'Indented By',   d: req.requestor_approval_details },
+          { role: 'Forwarded By',  d: req.admin_ops_approval_details },
+          { role: 'Approved By',   d: req.director_approval_details  },
+        ].map(({ role, d }) => `
+          <div>
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;margin-bottom:4px">${role}</div>
+            <div style="border:1px solid #d1d5db;border-radius:5px;padding:5px 9px;font-size:10px;color:#374151;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              ${d ? `${d.approver_name || '—'} | ${d.approver_designation || '—'} | ${d.approved_time} | ${d.approved_date}` : '<span style="color:#9ca3af;font-style:italic">Pending</span>'}
+            </div>
+          </div>
+        `).join('')}
       </div>
-      <div class="sig"><p>Received By (Name &amp; Signature)</p><p class="sig-line">— — — — — — — — — — — — — — —</p></div>
-      <div class="footer">
-        <p>This is a computer-generated receipt and does not require a signature.</p>
-        <p>For queries, contact: support@sbragri.com</p>
-      </div>
-    </body></html>`);
+    `;
+
+    const copies = (['ORIGINAL', 'COPY', 'COPY'] as const)
+      .map(badge => `<div class="receipt">${receiptBody(badge)}</div>`)
+      .join('');
+
+    win.document.write(`<!DOCTYPE html><html><head>
+      <title>Fuel Issue Receipt — ${receiptNo}</title>
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:Arial,sans-serif;font-size:12px;color:#111;max-width:800px;margin:0 auto}
+        .receipt{padding:24px 28px;page-break-after:always;position:relative;border:2px solid #111;margin:8px 0}
+        .receipt:last-child{page-break-after:auto}
+        .badge{display:inline-block;padding:3px 14px;border-radius:99px;font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase}
+        .badge-orig{background:#1e293b;color:#fff;border:2px solid #1e293b}
+        .badge-copy{background:#e2e8f0;color:#475569;border:2px solid #94a3b8}
+        .meta-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:10px 0;border:1px solid #e5e7eb;border-radius:5px;padding:8px 12px;background:#f9fafb}
+        .meta-label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.06em}
+        .meta-val{font-weight:700;margin-top:2px;font-size:12px}
+        .box{border:1px solid #ddd;border-radius:4px;margin-bottom:8px;overflow:hidden}
+        .box-title{background:#f3f4f6;border-bottom:1px solid #ddd;padding:5px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em}
+        .box-body{padding:8px 10px}
+        .grid2{display:grid;grid-template-columns:1fr 1fr;gap:5px 20px}
+        .label{font-size:10px;color:#666}
+        .val-big{font-size:22px;font-weight:800;color:#059669;margin-top:3px}
+        b{font-weight:600}
+      </style>
+    </head><body>${copies}</body></html>`);
     win.document.close();
     win.focus();
     setTimeout(() => { win.print(); win.close(); }, 400);
@@ -1243,152 +1315,188 @@ const ReceiptModal = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Printer className="w-5 h-5 text-emerald-600" />
-            Diesel Issue Receipt — {receiptNo}
+            Fuel Issue Receipt — {receiptNo}
           </DialogTitle>
         </DialogHeader>
 
-        {/* ── Vendor selector (not in print area) ── */}
-        <div className="rounded-xl border border-orange-200 bg-orange-50/40 p-4">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-orange-700 mb-2">
-            Select Fuel Vendor
-          </p>
-          <select
-            className="w-full border border-gray-200 rounded-lg px-3 h-10 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400"
-            value={selectedVendorId}
-            onChange={e => setSelectedVendorId(e.target.value)}
-          >
-            <option value="">— Choose a vendor —</option>
-            {vendors.map(v => (
-              <option key={v.order_number} value={v.order_number}>
-                {v.vendor_name} — {v.order_number}
-              </option>
-            ))}
-          </select>
+        {/* ── Selectors (not in print) ── */}
+        <div className="space-y-3">
+          {/* Vendor */}
+          <div className="rounded-xl border border-orange-200 bg-orange-50/40 p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-orange-700 mb-2">Select Fuel Vendor</p>
+            <select
+              className="w-full border border-gray-200 rounded-lg px-3 h-10 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400"
+              value={selectedVendorId}
+              onChange={e => setSelectedVendorId(e.target.value)}
+            >
+              <option value="">— Choose a vendor —</option>
+              {vendors.map(v => (
+                <option key={v.vendor_id} value={v.vendor_id}>
+                  {v.vendor_name} — {v.vendor_id}
+                </option>
+              ))}
+            </select>
+            {vendors.length === 0 && (
+              <p className="text-xs text-amber-600 mt-2">No vendors loaded — check API connection.</p>
+            )}
+            {selectedVendor && (
+              <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-orange-200">
+                <div className="flex items-start gap-2">
+                  <Building2 className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Vendor Name</p>
+                    <p className="text-sm font-medium text-gray-800">{vName}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Phone className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Contact</p>
+                    <p className="text-sm font-medium text-gray-800">{vContact}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <MapPin className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Address</p>
+                    <p className="text-sm font-medium text-gray-800">{vAddress}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
-          {vendors.length === 0 && (
-            <p className="text-xs text-amber-600 mt-2">No vendors loaded — check API connection.</p>
-          )}
-
-          {selectedVendor && (
-            <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-orange-200">
-              <div className="flex items-start gap-2">
-                <Building2 className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">Vendor Name</p>
-                  <p className="text-sm font-medium text-gray-800">{vName}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <Phone className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">Contact</p>
-                  <p className="text-sm font-medium text-gray-800">{vContact}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <FileText className="w-3.5 h-3.5 text-orange-400 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">PO / WO No.</p>
-                  <p className="text-sm font-medium text-gray-800">{vOrderNo}</p>
-                </div>
-              </div>
+          {/* Fuel type */}
+          <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700 mb-2">Fuel Type</p>
+            <div className="flex gap-2">
+              {['Diesel', 'Petrol', 'Other'].map(type => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setFuelType(type)}
+                  className={cn(
+                    'flex-1 rounded-lg border-2 py-2.5 text-sm font-bold transition-all',
+                    fuelType === type
+                      ? 'border-orange-500 bg-orange-500 text-white shadow-sm'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-orange-300'
+                  )}
+                >
+                  {type}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
         </div>
 
-        {/* ── Receipt preview (printable area) ── */}
-        <div
-          ref={printRef}
-          className="bg-white border border-gray-200 rounded-xl p-6 space-y-4 text-sm font-sans"
-        >
-          <div className="text-center pb-4 border-b-2 border-gray-800">
-            <h2 className="text-2xl font-black tracking-wide uppercase text-gray-900">
-              Diesel Issue Receipt
-            </h2>
-            <p className="text-xs text-gray-500 mt-1">SBR Agri Management System</p>
-          </div>
+        {/* ── Receipt preview — 3 copies ── */}
+        <div ref={printRef} className="space-y-0 text-sm font-sans">
+          {(['ORIGINAL', 'COPY', 'COPY'] as const).map((badge, i) => (
+            <div key={i}>
+              {i > 0 && (
+                <div className="flex items-center gap-2 my-2 text-[10px] text-gray-400">
+                  <div className="flex-1 border-t-2 border-dashed border-gray-300" />
+                  <span>✂ cut here</span>
+                  <div className="flex-1 border-t-2 border-dashed border-gray-300" />
+                </div>
+              )}
+              <div className="relative bg-white border-2 border-gray-900 rounded-xl p-5 space-y-3">
 
-          <div className="flex justify-between text-sm">
-            <div className="space-y-1">
-              <p><span className="font-bold">Receipt No:</span> {receiptNo}</p>
-              <p><span className="font-bold">Date:</span> {fmtDate(req.date)}</p>
-            </div>
-            <div className="text-right">
-              <p><span className="font-bold">Issue Type:</span> {req.issue_type || 'Diesel Issue'}</p>
-            </div>
-          </div>
+                {/* Badge — top-right corner */}
+                <span className={cn(
+                  'absolute top-3 right-4 px-3 py-0.5 rounded-full text-[10px] font-extrabold tracking-widest uppercase border-2',
+                  badge === 'ORIGINAL' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-200 text-slate-600 border-slate-400'
+                )}>{badge}</span>
 
-          {/* Vendor Details — populated from dropdown selection */}
-          <ReceiptBox title="Diesel Vendor Details">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Vendor Name:</span> {vName}</p>
-              <p><span className="font-semibold">Vendor ID:</span> {vId}</p>
-              <p><span className="font-semibold">Contact:</span> {vContact}</p>
-              <p><span className="font-semibold">PO / WO No.:</span> {vOrderNo}</p>
-            </div>
-          </ReceiptBox>
+                {/* Company header — centered */}
+                <div className="text-center pb-3">
+                  <img src={logoUrl} alt="logo" className="h-36 w-36 object-contain mx-auto mb-1.5" />
+                  <p className="text-[16px] font-black tracking-wide uppercase text-gray-900">{COMPANY_NAME.toUpperCase()}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">{COMPANY_ADDRESS}</p>
+                  <p className="text-[10px] text-gray-500">Contact: {COMPANY_CONTACT}</p>
+                </div>
 
-          <ReceiptBox title="Diesel Issued To">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Person / Vendor:</span> {req.staff_details?.staff_name || req.vendor_details?.vendor_name || '—'}</p>
-              <p><span className="font-semibold">Purpose (For What):</span> {req.purpose || '—'}</p>
-              <p><span className="font-semibold">Contact:</span> {req.staff_details?.staff_contact || req.vendor_details?.vendor_contact || '—'}</p>
-              <p><span className="font-semibold">Vehicle:</span> {[req.vehicle_details?.type, req.vehicle_details?.vehicle_number].filter(Boolean).join(' · ') || '—'}</p>
-              <p><span className="font-semibold">Model:</span> {req.vehicle_details?.model || '—'}</p>
-              <p><span className="font-semibold">Location:</span> {req.location || '—'}</p>
-            </div>
-          </ReceiptBox>
+                {/* Divider then title */}
+                <div className="border-t-2 border-gray-800" />
+                <div className="text-center pt-2 pb-1">
+                  <h2 className="text-base font-black tracking-wide uppercase text-gray-900 leading-tight">
+                    Fuel Issue Receipt
+                  </h2>
+                </div>
 
-          <ReceiptBox title="Diesel Issue Details">
-            <div className="grid grid-cols-4 divide-x divide-gray-200">
-              <div className="px-3 py-3 text-center">
-                <p className="text-[11px] text-gray-500">Diesel Quantity</p>
-                <p className="text-2xl font-black text-emerald-600 mt-1 leading-none">
-                  {req.fuel_requested.toFixed(2)} Ltr
-                </p>
+                {/* Meta row */}
+                <div className="grid grid-cols-3 gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5">
+                  {[
+                    { label: 'Request ID',   value: req.request_id },
+                    { label: 'Request Type', value: req.staff_details ? 'For Self' : 'For Vendor' },
+                    { label: 'Date',         value: fmtDate(req.date) },
+                  ].map(m => (
+                    <div key={m.label}>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">{m.label}</p>
+                      <p className="font-bold text-xs text-gray-800 mt-0.5">{m.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <ReceiptBox title="Diesel Vendor Details">
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                    <p><span className="font-semibold">Vendor Name:</span> {vName}</p>
+                    <p><span className="font-semibold">Vendor ID:</span> {vId}</p>
+                    <p><span className="font-semibold">Contact:</span> {vContact}</p>
+                    <p><span className="font-semibold">Address:</span> {vAddress}</p>
+                  </div>
+                </ReceiptBox>
+
+                <ReceiptBox title="Issued To">
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                    <p><span className="font-semibold">Person / Vendor:</span> {req.staff_details?.name || req.vendor_details?.vendor_name || '—'}</p>
+                    <p><span className="font-semibold">Contact:</span> {req.staff_details?.contact || req.vendor_details?.vendor_contact || '—'}</p>
+                    <p><span className="font-semibold">Vehicle Type:</span> {req.vehicle_details?.type || '—'}</p>
+                    <p><span className="font-semibold">Vehicle Number:</span> {req.vehicle_details?.vehicle_number || '—'}</p>
+                    <p><span className="font-semibold">Model:</span> {req.vehicle_details?.model || '—'}</p>
+                  </div>
+                </ReceiptBox>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <ReceiptBox title="Fuel Issue Details">
+                    <div className="py-1 text-center space-y-1.5">
+                      <span className="inline-block rounded-md border-2 border-orange-400 bg-orange-50 px-4 py-1 text-sm font-extrabold uppercase tracking-widest text-orange-700">
+                        {fuelType}
+                      </span>
+                      <p className="text-[11px] text-gray-500">Quantity</p>
+                      <p className="text-2xl font-black text-emerald-600 leading-none">
+                        {req.fuel_requested.toFixed(2)} Ltr
+                      </p>
+                    </div>
+                  </ReceiptBox>
+                  <ReceiptBox title="Additional Information">
+                    <div className="space-y-1.5 text-sm">
+                      <p><span className="font-semibold">Purpose:</span> {req.purpose || '—'}</p>
+                      <p><span className="font-semibold">Reference:</span> {req.reference_wo || '—'}</p>
+                    </div>
+                  </ReceiptBox>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5 pt-2">
+                  {([
+                    { role: 'Indented By',  details: req.requestor_approval_details },
+                    { role: 'Forwarded By', details: req.admin_ops_approval_details },
+                    { role: 'Approved By',  details: req.director_approval_details  },
+                  ] as const).map(({ role, details }) => (
+                    <div key={role}>
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 mb-1">{role}</p>
+                      <div className="border border-gray-300 rounded px-2.5 py-1.5 font-mono text-[10px] text-gray-700 truncate">
+                        {details
+                          ? `${details.approver_name || '—'} | ${details.approver_designation || '—'} | ${details.approved_time} | ${details.approved_date}`
+                          : <span className="italic text-gray-400">Pending</span>
+                        }
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="px-3 py-3 text-center">
-                <p className="text-[11px] text-gray-500">Rate (Per Ltr)</p>
-                <p className="text-xl font-bold text-gray-800 mt-1">
-                  {(req.rate_per_ltr ?? 0) > 0 ? fmtCurrency(req.rate_per_ltr!) : '—'}
-                </p>
-              </div>
-              <div className="px-3 py-3 text-center">
-                <p className="text-[11px] text-gray-500">Total Amount</p>
-                <p className="text-xl font-bold text-gray-800 mt-1">
-                  {(req.total_amount ?? 0) > 0 ? fmtCurrency(req.total_amount!) : '—'}
-                </p>
-              </div>
-              <div className="px-3 py-3 text-center">
-                <p className="text-[11px] text-gray-500">Odometer/Hour Reading</p>
-                <p className="text-xl font-bold text-gray-800 mt-1">
-                  {req.odometer_reading || '—'}
-                </p>
-              </div>
             </div>
-          </ReceiptBox>
-
-          <ReceiptBox title="Additional Information">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-              <p><span className="font-semibold">Purpose:</span> {req.purpose || '—'}</p>
-              <p><span className="font-semibold">Issue Date &amp; Time:</span> {fmtDate(req.date)}</p>
-              <p><span className="font-semibold">Reference:</span> {vOrderNo}</p>
-            </div>
-          </ReceiptBox>
-
-          <div className="flex justify-end pt-2">
-            <div className="text-right text-sm">
-              <p className="text-gray-500 text-xs">Received By (Name &amp; Signature)</p>
-              <p className="text-gray-300 mt-5 tracking-[0.2em] text-base">
-                — — — — — — — — — — — — —
-              </p>
-            </div>
-          </div>
-
-          <div className="text-center text-[11px] text-gray-400 border-t border-gray-200 pt-3">
-            <p>This is a computer-generated receipt and does not require a signature.</p>
-            <p>For queries, contact: support@sbragri.com</p>
-          </div>
+          ))}
         </div>
 
         <DialogFooter>
@@ -1396,16 +1504,14 @@ const ReceiptModal = ({
           <Button
             className={cn(
               'gap-2 text-white',
-              selectedVendorId
-                ? 'bg-emerald-600 hover:bg-emerald-700'
-                : 'bg-gray-300 cursor-not-allowed'
+              selectedVendorId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'
             )}
             onClick={handleDownload}
             disabled={!selectedVendorId}
-            title={!selectedVendorId ? 'Select a vendor to download' : 'Download as PDF'}
+            title={!selectedVendorId ? 'Select a vendor to download' : 'Print 3 copies'}
           >
             <Printer className="w-4 h-4" />
-            {selectedVendorId ? 'Download Receipt' : 'Select Vendor First'}
+            {selectedVendorId ? 'Print 3 Copies' : 'Select Vendor First'}
           </Button>
         </DialogFooter>
       </DialogContent>

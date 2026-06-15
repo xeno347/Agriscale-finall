@@ -6,11 +6,13 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, ArrowRight, ArrowLeft, MapPin, Check, Info, Navigation, ImagePlus, Video, X } from 'lucide-react';
-import { MapContainer, TileLayer, FeatureGroup, Marker } from 'react-leaflet';
+import { Loader2, ArrowRight, ArrowLeft, MapPin, Check, Info, Navigation, ImagePlus, Video, X, UploadCloud } from 'lucide-react';
+import { MapContainer, TileLayer, FeatureGroup, Marker, Polygon, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import getBaseUrl from '@/lib/config';
 import { useToast } from '@/hooks/use-toast';
+import { parseKmlFile } from '@/lib/kmlParser';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 
@@ -39,6 +41,17 @@ export interface AddLeadFormData {
   landVideo?: File | null;
 }
 
+// Animates the map to fit the given coords whenever they change
+const FlyToBounds = ({ coords }: { coords: { lat: number; lng: number }[] | null }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (!coords || coords.length === 0) return;
+    const latLngs = coords.map(c => L.latLng(c.lat, c.lng));
+    map.flyToBounds(L.latLngBounds(latLngs), { padding: [40, 40], duration: 1.4, animate: true });
+  }, [coords]);
+  return null;
+};
+
 const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'info' | 'location' | 'media' | 'mapping'>('info');
@@ -50,6 +63,8 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   const [landImagePreviews, setLandImagePreviews] = useState<(string | null)[]>([null, null, null]);
   const [landVideo, setLandVideo] = useState<File | null>(null);
   const [landVideoPreview, setLandVideoPreview] = useState<string | null>(null);
+  const [kmlCoordinates, setKmlCoordinates] = useState<{ lat: number; lng: number }[] | null>(null);
+  const [isParsingKml, setIsParsingKml] = useState(false);
   const featureGroupRef = useRef(null);
   const imageInputRefs = useRef<Array<HTMLInputElement | null>>([]);
   const videoInputRef = useRef<HTMLInputElement | null>(null);
@@ -102,6 +117,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
       setLandImagePreviews([null, null, null]);
       setLandVideo(null);
       setLandVideoPreview(null);
+      setKmlCoordinates(null);
       setFormData({
         fullName: '',
         phoneNumber: '',
@@ -229,12 +245,30 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
     });
   };
 
+  const handleKmlUpload = async (file: File) => {
+    try {
+      setIsParsingKml(true);
+      const result = await parseKmlFile(file);
+      const coords = result.land_coordinates.map(([lat, lng]) => ({ lat, lng }));
+      setKmlCoordinates(coords);
+      toast({ title: 'KML loaded', description: `${coords.length} boundary points mapped from file` });
+    } catch (err: any) {
+      toast({ title: 'KML Error', description: err?.message || 'Failed to read KML file', variant: 'destructive' });
+    } finally {
+      setIsParsingKml(false);
+    }
+  };
+
   const handleSubmit = async () => {
     setLoading(true);
     try {
       let coordinates: { lat: number; lng: number }[] = [];
-      if (!skipMapping && featureGroupRef.current) {
-        coordinates = extractCoordinates();
+      if (!skipMapping) {
+        if (kmlCoordinates && kmlCoordinates.length > 0) {
+          coordinates = kmlCoordinates;
+        } else if (featureGroupRef.current) {
+          coordinates = extractCoordinates();
+        }
       }
 
       const selectedImages = landImages.filter((f): f is File => !!f);
@@ -777,9 +811,71 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                 <div className="flex items-start gap-3 p-3 bg-info/10 rounded-lg border border-info/20">
                   <Info className="w-5 h-5 text-info mt-0.5 shrink-0" />
                   <p className="text-sm text-muted-foreground">
-                    Use the drawing tools on the map to mark your land boundary. You can draw polygons, rectangles, or circles. This step is optional.
+                    Upload a KML file to auto-map the boundary, or use the drawing tools on the map. This step is optional.
                   </p>
                 </div>
+
+                {/* KML Upload */}
+                <div className="space-y-2">
+                  <label
+                    className={`flex items-center justify-center gap-3 w-full rounded-lg border-2 border-dashed py-4 px-4 cursor-pointer transition-colors ${
+                      isParsingKml
+                        ? 'border-primary/40 bg-primary/5 cursor-wait'
+                        : kmlCoordinates
+                        ? 'border-green-400 bg-green-50'
+                        : 'border-border hover:border-primary/50 hover:bg-muted/30'
+                    }`}
+                  >
+                    {isParsingKml ? (
+                      <>
+                        <Loader2 className="w-5 h-5 text-primary animate-spin shrink-0" />
+                        <span className="text-sm font-medium text-primary">Reading KML file…</span>
+                      </>
+                    ) : kmlCoordinates ? (
+                      <>
+                        <Check className="w-5 h-5 text-green-600 shrink-0" />
+                        <span className="text-sm font-medium text-green-700">
+                          KML loaded — {kmlCoordinates.length} boundary points
+                        </span>
+                        <button
+                          type="button"
+                          onClick={e => { e.preventDefault(); setKmlCoordinates(null); }}
+                          className="ml-auto text-muted-foreground hover:text-red-500 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <UploadCloud className="w-5 h-5 text-muted-foreground shrink-0" />
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Upload KML file</p>
+                          <p className="text-xs text-muted-foreground">Auto-maps the land boundary from the file</p>
+                        </div>
+                      </>
+                    )}
+                    {!kmlCoordinates && (
+                      <input
+                        type="file"
+                        accept=".kml,.kmz"
+                        className="hidden"
+                        disabled={isParsingKml}
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (file) handleKmlUpload(file);
+                          e.target.value = '';
+                        }}
+                      />
+                    )}
+                  </label>
+
+                  {kmlCoordinates && (
+                    <p className="text-xs text-muted-foreground px-1">
+                      KML boundary will be used for land mapping. You can still draw manually on the map to override it.
+                    </p>
+                  )}
+                </div>
+
                 <div className="relative border-2 border-border rounded-lg overflow-hidden h-96">
                   <MapContainer
                     center={landLocation || mapCenter}
@@ -790,6 +886,18 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                       url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                       attribution='&copy; Esri'
                     />
+                    <FlyToBounds coords={kmlCoordinates} />
+                    {kmlCoordinates && kmlCoordinates.length >= 3 && (
+                      <Polygon
+                        positions={kmlCoordinates.map(c => [c.lat, c.lng] as [number, number])}
+                        pathOptions={{ color: '#22c55e', fillColor: '#22c55e', fillOpacity: 0.2, weight: 2.5 }}
+                      />
+                    )}
+                    {kmlCoordinates && kmlCoordinates.length > 0 && (() => {
+                      const lat = kmlCoordinates.reduce((s, c) => s + c.lat, 0) / kmlCoordinates.length;
+                      const lng = kmlCoordinates.reduce((s, c) => s + c.lng, 0) / kmlCoordinates.length;
+                      return <Marker position={[lat, lng]} />;
+                    })()}
                     <FeatureGroup ref={featureGroupRef}>
                       <EditControl
                         position="topleft"
