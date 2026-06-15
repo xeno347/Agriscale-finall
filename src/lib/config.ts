@@ -8,7 +8,7 @@ import axios from 'axios';
 // let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 // let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? 'http://192.168.31.90:8000';
 
-let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? 'https://saibioresources.com/api';
+let baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL ?? 'https://api.saibioresources.com/api';
 
 
 export const getBaseUrl = (): string => baseUrl;
