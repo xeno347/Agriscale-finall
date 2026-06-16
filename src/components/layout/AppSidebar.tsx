@@ -161,6 +161,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const navigate = useNavigate();
   const { user } = useAuth();
+  const isSuperAdmin = user?.id === 'sbr-admin';
 
   useEffect(() => {
     document.title = "SBR | Farm-connect";
@@ -237,16 +238,16 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
 
       {/* Navigation Links — fully driven by src/config/modules.json */}
       <nav className="min-h-0 flex-1 p-3 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
-        {modulesConfig.supersets.filter(s => s.enabled).map(superset => {
+        {modulesConfig.supersets.filter(s => isSuperAdmin || s.enabled).map(superset => {
           const allowedModules = user?.module_access ?? [];
 
           // Pre-compute which groups have at least one accessible item
           const visibleGroups = superset.groups
-            .filter(g => g.enabled)
+            .filter(g => isSuperAdmin || g.enabled)
             .map(g => ({
               ...g,
               visibleItems: g.items.filter(item =>
-                item.enabled && allowedModules.includes(item.key)
+                item.enabled && (isSuperAdmin || allowedModules.includes(item.key))
               ),
             }))
             .filter(g => g.visibleItems.length > 0);
