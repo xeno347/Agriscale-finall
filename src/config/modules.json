@@ -37,7 +37,7 @@
         {
           "key": "administration",
           "label": "Administration",
-          "enabled": false,
+          "enabled": true,
           "items": [
             { "key": "user-management", "label": "User Management", "path": "/user-management", "icon": "UserCheck", "enabled": true }
           ]
@@ -54,7 +54,7 @@
         {
           "key": "inventory-management",
           "label": "Inventory Management",
-          "enabled": false,
+          "enabled": true,
           "items": [
             { "key": "inventory",          "label": "Inventory",            "path": "/inventory",          "icon": "Box",     "enabled": false  },
             { "key": "inventory-indents",  "label": "Inventory Indents",    "path": "/inventory-indents",  "icon": "FileText","enabled": false  },
@@ -65,7 +65,7 @@
         {
           "key": "purchase-procurement",
           "label": "Purchase And Procurement",
-          "enabled": false,
+          "enabled": true,
           "items": [
             { "key": "finance-admin-ops",  "label": "Finance Admin Ops",          "path": "/finance-admin-ops-indents","icon": "FileText",      "enabled": false  },
             { "key": "purchase-req",       "label": "Purchase Requisition",       "path": "/purchase-requisition",     "icon": "FileText",      "enabled": false  },
