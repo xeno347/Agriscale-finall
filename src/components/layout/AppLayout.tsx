@@ -1,4 +1,5 @@
 import { ReactNode, useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import AppSidebar from './AppSidebar';
 import { mockLeads } from '@/services/mockData';
 import { IndianRupee, FileText, Share2, Plus, Trash2, Settings } from 'lucide-react';
@@ -6,6 +7,7 @@ import ShareResourceDialog from './ShareResourceDialog';
 import CreateProjectDialog from './CreateProjectDialog';
 import ProjectSettingsDialog from './ProjectSettingsDialog';
 import { getBaseUrl } from '@/lib/config';
+import { useAuth } from '@/context/AuthContext';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -23,6 +25,11 @@ interface ProjectApiItem {
 const PROJECTS_COOKIE_KEY = 'erp_projects_latest';
 
 const AppLayout = ({ children }: AppLayoutProps) => {
+  const { token, loading, isTokenValid } = useAuth();
+
+  if (loading) return null;
+  if (!token || !isTokenValid()) return <Navigate to="/login" replace />;
+
   const [leadsComplete, setLeadsComplete] = useState(false);
   const [projects, setProjects] = useState<ProjectApiItem[]>([]);
   const [currentProject, setCurrentProject] = useState('Farm Connect');

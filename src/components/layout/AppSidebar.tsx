@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   Users, UserCheck, Sprout, Calendar, UserPlus, Fuel,
   ChevronLeft, ChevronRight, ChevronDown,
-  Layers, Box, FileText, Map, AlertCircle, User,
+  Layers, Box, FileText, Map, AlertCircle, User, LogOut,
   ClipboardCheck, Activity, FolderKanban, Landmark,
   Link2, LayoutDashboard, BookOpen, CreditCard, Receipt,
   Car, Mail, Package, Scale, Truck, CheckSquare,
@@ -160,7 +160,7 @@ interface AppSidebarProps {
 const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const isSuperAdmin = user?.id === 'sbr-admin';
 
   useEffect(() => {
@@ -327,6 +327,18 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
             </div>
           )}
         </div>
+
+        <button
+          onClick={() => { logout(); navigate('/login'); }}
+          title="Logout"
+          className={cn(
+            "mt-3 w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors",
+            isCollapsed && "justify-center px-2"
+          )}
+        >
+          <LogOut className="w-4 h-4 shrink-0" />
+          {!isCollapsed && <span>Logout</span>}
+        </button>
 
       </div>
     </aside>
