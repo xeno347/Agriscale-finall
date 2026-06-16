@@ -49,7 +49,7 @@
       "label": "PURCHASE",
       "description": "Inventory and procurement modules",
       "icon": "Box",
-      "enabled": false,
+      "enabled": true,
       "groups": [
         {
           "key": "inventory-management",
