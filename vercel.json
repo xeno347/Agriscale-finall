@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://api.saibioresources.com/api/:path*"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
     }
   ]
 }
