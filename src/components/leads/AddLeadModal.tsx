@@ -189,10 +189,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
   };
 
   const handleMediaNext = () => {
-    const selectedImageCount = landImages.filter(Boolean).length;
-    if (selectedImageCount === 3 && landVideo) {
-      setStep('mapping');
-    }
+    setStep('mapping');
   };
 
   const handleImagePick = (index: number, file?: File | null) => {
@@ -272,48 +269,45 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
       }
 
       const selectedImages = landImages.filter((f): f is File => !!f);
-      if (selectedImages.length !== 3) {
-        throw new Error('Please upload exactly 3 land images');
-      }
-      if (!landVideo) {
-        throw new Error('Please upload 1 land video');
-      }
 
       const base = getBaseUrl().replace(/\/$/, '');
 
-      // Step 1: Upload land images
-      const imagesFormData = new FormData();
-      selectedImages.forEach((file) => {
-        imagesFormData.append('land_images', file, file.name);
-      });
-
-      const imagesResp = await fetch(`${base}/farmer_managment/upload_land_images`, {
-        method: 'POST',
-        body: imagesFormData,
-      });
-      if (!imagesResp.ok) throw new Error(`Failed to upload land images (${imagesResp.status})`);
-      const imagesResult = await imagesResp.json();
-      if (!imagesResult?.success || !Array.isArray(imagesResult?.images)) {
-        throw new Error('Image upload API returned invalid response');
+      // Step 1: Upload land images — only if user selected any
+      let imageUrls: string[] = [];
+      if (selectedImages.length > 0) {
+        const imagesFormData = new FormData();
+        selectedImages.forEach((file) => {
+          imagesFormData.append('land_images', file, file.name);
+        });
+        const imagesResp = await fetch(`${base}/farmer_managment/upload_land_images`, {
+          method: 'POST',
+          body: imagesFormData,
+        });
+        if (!imagesResp.ok) throw new Error(`Failed to upload land images (${imagesResp.status})`);
+        const imagesResult = await imagesResp.json();
+        if (!imagesResult?.success || !Array.isArray(imagesResult?.images)) {
+          throw new Error('Image upload API returned invalid response');
+        }
+        imageUrls = imagesResult.images
+          .map((img: any) => img?.url)
+          .filter((url: any) => typeof url === 'string' && url.length > 0);
       }
-      const imageUrls: string[] = imagesResult.images
-        .map((img: any) => img?.url)
-        .filter((url: any) => typeof url === 'string' && url.length > 0);
-      if (imageUrls.length === 0) throw new Error('Image upload succeeded but URLs missing');
 
-      // Step 2: Upload land video
-      const videoFormData = new FormData();
-      videoFormData.append('land_video', landVideo, landVideo.name);
-
-      const videoResp = await fetch(`${base}/farmer_managment/upload_land_video`, {
-        method: 'POST',
-        body: videoFormData,
-      });
-      if (!videoResp.ok) throw new Error(`Failed to upload land video (${videoResp.status})`);
-      const videoResult = await videoResp.json();
-      const videoUrl: string | undefined = videoResult?.video?.url;
-      if (!videoResult?.success || !videoUrl) {
-        throw new Error('Video upload API returned invalid response');
+      // Step 2: Upload land video — only if user selected one
+      let videoUrl = '';
+      if (landVideo) {
+        const videoFormData = new FormData();
+        videoFormData.append('land_video', landVideo, landVideo.name);
+        const videoResp = await fetch(`${base}/farmer_managment/upload_land_video`, {
+          method: 'POST',
+          body: videoFormData,
+        });
+        if (!videoResp.ok) throw new Error(`Failed to upload land video (${videoResp.status})`);
+        const videoResult = await videoResp.json();
+        if (!videoResult?.success || !videoResult?.video?.url) {
+          throw new Error('Video upload API returned invalid response');
+        }
+        videoUrl = videoResult.video.url;
       }
 
       // Step 3: Create lead with uploaded media URLs
@@ -733,14 +727,14 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
             <div className="flex items-start gap-3 p-3 bg-info/10 rounded-lg border border-info/20">
               <Info className="w-5 h-5 text-info mt-0.5 shrink-0" />
               <p className="text-sm text-muted-foreground">
-                Upload exactly 3 land images and 1 land video. Click any box to choose a file. This helps us verify the site quickly.
+                Land images and video are optional. If no media is uploaded, the lead will be saved without media.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[0, 1, 2].map((index) => (
                 <div key={index} className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Image {index + 1} *</Label>
+                  <Label className="text-xs text-muted-foreground">Image {index + 1}</Label>
                   <input
                     ref={(el) => { imageInputRefs.current[index] = el; }}
                     type="file"
@@ -775,7 +769,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Land Video *</Label>
+              <Label className="text-xs text-muted-foreground">Land Video</Label>
               <input
                 ref={videoInputRef}
                 type="file"
@@ -794,7 +788,7 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                   <div className="flex flex-col items-center gap-2 text-muted-foreground">
                     <Video className="w-7 h-7" />
                     <span className="text-sm font-medium">Click to upload land video</span>
-                    <span className="text-xs">One video required</span>
+                    <span className="text-xs">Optional</span>
                   </div>
                 )}
               </button>
@@ -820,7 +814,6 @@ const AddLeadModal = ({ open, onClose, onSubmit }: AddLeadModalProps) => {
                 <Button
                   type="button"
                   onClick={handleMediaNext}
-                  disabled={landImages.filter(Boolean).length !== 3 || !landVideo}
                   className="gap-2"
                 >
                   Next: Land Mapping (Optional)

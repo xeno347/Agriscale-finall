@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(find \"/c/Users/HP\" -iname \"budget.txt\" 2>/dev/null)",
+      "Read(//c/Users/HP/**)"
+    ]
+  }
+}

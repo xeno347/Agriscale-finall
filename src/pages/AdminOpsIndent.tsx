@@ -117,6 +117,17 @@ const formatInr = (value: number) => {
   }
 };
 
+const formatBudgetHead = (budgetHead: any): string => {
+  if (!budgetHead) return '';
+  const lineItems = Array.isArray(budgetHead.line_item) ? budgetHead.line_item : [];
+  if (lineItems.length === 0) return '';
+  return lineItems
+    .map((li: any) =>
+      `${li.category || ''} | ${li.line_item || ''} | ${li.budget_type || ''} | ${formatInr(Number(li.allocated_amount) || 0)}`
+    )
+    .join('\n');
+};
+
 const PRPreview = ({
   indent,
   attachments,
@@ -290,7 +301,7 @@ const PRPreview = ({
             </div>
             <div className="p-2">
               <div className="font-semibold">Budget Head</div>
-              <div className="text-gray-700">{indent.budgetHead || '—'}</div>
+              <div className="text-gray-700 text-[11px] whitespace-pre-line leading-snug">{indent.budgetHead || '—'}</div>
             </div>
           </div>
         </div>
@@ -641,7 +652,7 @@ const AdminOpsIndent = () => {
             forwardedByTimestamp: forwardedTimestamp ? new Date(forwardedTimestamp).toISOString().slice(0,10) : '',
             directorsApproval: (r.approved_by?.name_id) ?? '',
             remarksNotes: r.notes ?? '',
-            budgetHead: '',
+            budgetHead: formatBudgetHead(r.budget_head),
             items,
             areaOfService: r.indent_data?.area_of_service ?? '',
             func: r.indent_data?.function ?? '',
