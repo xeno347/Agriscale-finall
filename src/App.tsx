@@ -53,7 +53,8 @@ import DirectorCashFlow from "./pages/DirectorCashFlow";
 import DirectorCostMonitoring from "./pages/DirectorCostMonitoring";
 import DirectorEmisInvestments from "./pages/DirectorEmisInvestments";
 import DirectorAssetsLiabilities from "./pages/DirectorAssetsLiabilities";
-import HRMS from "./pages/HRMS";
+import HRManagement from "./pages/HRManagement";
+import Settings from "./pages/Settings";
 import OnDemandTask from "./pages/OnDemandTask";
 import FarmDirectory from "./pages/FarmDirectory";
 import FuelsAndConsumables from "./pages/FuelsAndConsumables";
@@ -143,9 +144,10 @@ const App = () => (
           <Route path="/user-management" element={<AppLayout><UserManagement /></AppLayout>} />
           <Route path="/man-power-requisition" element={<AppLayout><ManPowerRequisition /></AppLayout>} />
           <Route path="/admin-mrf-approvals" element={<AppLayout><AdminMrfApproval /></AppLayout>} />
-                    {/* Human Resources */}
-                    <Route path="/hrms/*" element={<AppLayout><HRMS /></AppLayout>} />
-          
+          {/* Human Resources */}
+          <Route path="/hr-management" element={<AppLayout><HRManagement /></AppLayout>} />
+          <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
+
           {/* Blocks */}
           <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />
 

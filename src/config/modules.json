@@ -91,8 +91,8 @@
           "label": "Human Resource",
           "enabled": true,
           "items": [
-            { "key": "hrms",             "label": "Payroll & Attendance",  "path": "/hrms",                 "icon": "Landmark", "enabled": true },
-            { "key": "staff-onboarding", "label": "Staff Onboarding",      "path": "/staff-onboarding",     "icon": "UserPlus", "enabled": true  },
+            { "key": "hr-management",    "label": "HR Management",         "path": "/hr-management",        "icon": "LayoutDashboard", "enabled": true },
+            { "key": "staff-onboarding", "label": "Employee Directory",    "path": "/staff-onboarding",     "icon": "UserPlus", "enabled": true  },
             { "key": "man-power-req",    "label": "Man Power Requisition", "path": "/man-power-requisition","icon": "FileText", "enabled": true },
             { "key": "hrms-inbox",       "label": "Inbox",                 "path": "/hrms/inbox",           "icon": "Mail",     "enabled": true }
           ]
