@@ -333,7 +333,7 @@ const Blocks = () => {
 
   const confirmAssignFieldManager = async () => {
     if (!assigningZone || selectedManagerIds.length === 0) return;
-    const selected = fieldManagers.filter((m) => selectedManagerIds.includes(m.staff_id));
+    const selected = fieldManagers.filter((m) => selectedManagerIds.includes(m.manager_id));
     if (selected.length === 0) {
       toast({ title: 'Error', description: 'Please select at least one field manager', variant: 'destructive' });
       return;
@@ -420,20 +420,21 @@ const Blocks = () => {
 
       if (resp.ok) {
         const result = await resp.json();
-        const transformed: AvailableFarm[] = (result.farmers || []).map((item: any) => {
-          const fd = item.farmer_data || {};
+        const transformed: AvailableFarm[] = (result.not_assigned_farms || []).map((item: any) => {
+          const kyc = item.kyc_data || null;
           return {
-            id: item.farmer_id,
-            fullName: fd.full_name || 'Unknown',
-            phoneNumber: fd.phone_number || 'N/A',
-            village: fd.village || 'N/A',
-            district: fd.district || 'N/A',
-            state: fd.state || 'N/A',
-            landMapping: fd.estimated_land_area != null
-              ? { totalArea: fd.estimated_land_area, coordinates: fd.land_coordinates || [] }
+            id: item.farm_id,
+            fullName: item.farmer_name || 'Unknown',
+            phoneNumber: item.farmer_contact || 'N/A',
+            village: item.village || 'N/A',
+            district: item.district || 'N/A',
+            state: item.state || 'N/A',
+            kyc: kyc ? { verified: true } : undefined,
+            landMapping: item.area != null
+              ? { totalArea: item.area, coordinates: [] }
               : undefined,
-            agreements: item.agreement_data || [],
-            createdAt: item.created_at ? new Date(item.created_at) : new Date(),
+            agreements: [],
+            createdAt: new Date(),
           } as any;
         });
         setAvailableFarms(transformed);
@@ -502,7 +503,7 @@ const Blocks = () => {
       };
     });
 
-    const totalArea = farmerList.reduce((sum, row) => sum + (row.area || 0), 0);
+    const totalArea = Number(farmerList.reduce((sum, row) => sum + (row.area || 0), 0).toFixed(2));
 
     return {
       block_id: assigningBlock?.block_id || viewBlock?.block_id || '',
@@ -612,7 +613,7 @@ const Blocks = () => {
               return sum + (Number.isFinite(areaValue) ? areaValue : 0);
             }, 0);
 
-            return [String(block.block_id), totalArea] as const;
+            return [String(block.block_id), Number(totalArea.toFixed(2))] as const;
           } catch {
             return [String(block.block_id), Number(block.total_area ?? 0)] as const;
           }
@@ -687,7 +688,7 @@ const Blocks = () => {
             const totalCount = allLands.length;
 
             setZoneLandCountById((prev) => ({ ...prev, [String(zone.zone_id)]: totalCount }));
-            return [String(zone.zone_id), totalArea] as const;
+            return [String(zone.zone_id), Number(totalArea.toFixed(2))] as const;
           } catch {
             setZoneLandCountById((prev) => ({ ...prev, [String(zone.zone_id)]: 0 }));
             return [String(zone.zone_id), Number(zone.total_area ?? 0)] as const;
@@ -963,12 +964,13 @@ const Blocks = () => {
   });
 
   const getZoneViewTotalArea = () => {
-    return Object.values(blocksInZoneView).reduce((sum, lands) => {
+    const total = Object.values(blocksInZoneView).reduce((sum, lands) => {
       return sum + lands.reduce((landSum, land) => {
         const areaValue = Number(land?.area ?? 0);
         return landSum + (Number.isFinite(areaValue) ? areaValue : 0);
       }, 0);
     }, 0);
+    return Number(total.toFixed(2));
   };
 
   const dashboardTotals = {
@@ -976,7 +978,9 @@ const Blocks = () => {
     zones: zones.length,
     blocks: blocks.length,
     lands: Object.values(zoneLandCountById).reduce((sum, count) => sum + (Number.isFinite(Number(count)) ? Number(count) : 0), 0),
-    area: Object.values(zoneAreaById).reduce((sum, area) => sum + (Number.isFinite(Number(area)) ? Number(area) : 0), 0),
+    area: Number(
+      Object.values(zoneAreaById).reduce((sum, area) => sum + (Number.isFinite(Number(area)) ? Number(area) : 0), 0).toFixed(2)
+    ),
   };
 
   const getEntityCardArea = (entityType: EntityType, entity: any) => {
@@ -1161,10 +1165,11 @@ const Blocks = () => {
         return config.viewEntity?.total_area ?? 0;
       }
 
-      return farmsInBlock.reduce((sum, farm: any) => {
+      const total = farmsInBlock.reduce((sum, farm: any) => {
         const areaValue = Number(farm?.area ?? 0);
         return sum + (Number.isFinite(areaValue) ? areaValue : 0);
       }, 0);
+      return Number(total.toFixed(2));
     };
 
     return (

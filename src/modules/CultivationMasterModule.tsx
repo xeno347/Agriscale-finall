@@ -36,6 +36,7 @@ import {
 	Hammer,
 	Sprout,
 	HelpCircle,
+	ListPlus,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -57,7 +58,15 @@ import {
 	TableHeader,
 	TableRow,
 } from '@/components/ui/table';
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	DialogFooter,
+} from '@/components/ui/dialog';
 import getBaseUrl from '@/lib/config';
+import activitiesData from '@/config/activities.json';
 
 // ============================================================
 // TYPES
@@ -92,15 +101,15 @@ export interface PlannerActivity {
 export interface MasterPlanner {
 	id: string;
 	name: string;
-	cropType?: 'Paddy' | 'Ragi' | 'Napier';
+	cropType?: 'Paddy' | 'Rahar' | 'Napier';
 	activities: PlannerActivity[];
 	createdAt: Date;
 	updatedAt: Date;
 }
 
-const CROP_TYPE_API_MAP: Record<'Paddy' | 'Ragi' | 'Napier', 'paddy' | 'ragi' | 'napier'> = {
+const CROP_TYPE_API_MAP: Record<'Paddy' | 'Rahar' | 'Napier', 'paddy' | 'rahar' | 'napier'> = {
 	Paddy: 'paddy',
-	Ragi: 'ragi',
+	Rahar: 'rahar',
 	Napier: 'napier',
 };
 
@@ -108,19 +117,39 @@ const CROP_TYPE_API_MAP: Record<'Paddy' | 'Ragi' | 'Napier', 'paddy' | 'ragi' | 
 // CONSTANTS - ACTIVITIES LIST
 // ============================================================
 
-export const ACTIVITIES: Activity[] = [
-	{ id: 'bed-making-land', name: 'Bed Making', category: 'Land Preparation', icon: 'Rows3' },
-	{ id: 'bed-making-other', name: 'Bed Making', category: 'Other', icon: 'Rows4' },
-	{ id: 'field-visits', name: 'Field Visits', category: 'Crop Care', icon: 'Footprints' },
-	{ id: 'harvesting', name: 'Harvesting', category: 'Other', icon: 'Scissors' },
-	{ id: 'initial-ploughing', name: 'Initial Ploughing', category: 'Land Preparation', icon: 'Tractor' },
-	{ id: 'interweeding-fertilization', name: 'Interweeding + Fertilization', category: 'Crop Care', icon: 'Flower2' },
-	{ id: 'irrigation', name: 'Irrigation', category: 'Irrigation', icon: 'Droplets' },
-	{ id: 'mulching', name: 'Mulching', category: 'Crop Care', icon: 'Layers' },
-	{ id: 'ploughing', name: 'Ploughing', category: 'Plantation', icon: 'Shovel' },
-	{ id: 'soil-pulverization', name: 'Soil Pulverization', category: 'Land Preparation', icon: 'Hammer' },
-	{ id: 'sowing', name: 'Sowing', category: 'Plantation', icon: 'Sprout' },
+export const ACTIVITY_CATEGORIES: ActivityCategory[] = [
+	'Land Preparation',
+	'Crop Care',
+	'Irrigation',
+	'Plantation',
+	'Other',
 ];
+
+// Base activities always come fresh from activities.json. Per-browser customizations
+// (edits/deletions of base entries, plus fully custom additions) are layered on top via
+// localStorage, so updates to activities.json keep showing up for everyone.
+const ACTIVITY_EDITS_STORAGE_KEY = 'cultivation-master-activity-edits';
+const ACTIVITY_DELETED_STORAGE_KEY = 'cultivation-master-activity-deleted-ids';
+const ACTIVITY_ADDITIONS_STORAGE_KEY = 'cultivation-master-activity-additions';
+
+function loadFromStorage<T>(key: string, fallback: T): T {
+	try {
+		const stored = localStorage.getItem(key);
+		return stored ? JSON.parse(stored) : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+function saveToStorage<T>(key: string, value: T) {
+	try {
+		localStorage.setItem(key, JSON.stringify(value));
+	} catch {
+		// ignore storage failures (e.g. private browsing quota)
+	}
+}
+
+export const ACTIVITIES: Activity[] = activitiesData as Activity[];
 
 // ============================================================
 // DEMO DATA
@@ -193,17 +222,18 @@ const ActivityIcon = ({ iconName, className }: ActivityIconProps) => {
 
 interface CreateMasterPlannerProps {
 	planners: MasterPlanner[];
+	availableActivities: Activity[];
 	onSave: (planner: MasterPlanner) => void;
 }
 
-const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => {
+const CreateMasterPlanner = ({ planners, availableActivities, onSave }: CreateMasterPlannerProps) => {
 	const navigate = useNavigate();
 	const { id } = useParams();
 
 	const existingPlanner = id ? planners.find((p) => p.id === id) : null;
 
 	const [plannerName, setPlannerName] = useState(existingPlanner?.name || '');
-	const [cropType, setCropType] = useState<'Paddy' | 'Ragi' | 'Napier' | ''>(existingPlanner?.cropType || '');
+	const [cropType, setCropType] = useState<'Paddy' | 'Rahar' | 'Napier' | ''>(existingPlanner?.cropType || '');
 	const [activities, setActivities] = useState<PlannerActivity[]>(
 		existingPlanner?.activities || []
 	);
@@ -217,7 +247,7 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 		const newActivity: PlannerActivity = {
 			id: `activity-${Date.now()}`,
 			sno: activities.length + 1,
-			activityId: ACTIVITIES[0].id,
+			activityId: availableActivities[0]?.id || '',
 			dayOffset: 0,
 			frequency: 'once',
 			workQty: 1,
@@ -298,7 +328,7 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 	};
 
 	const getActivity = (activityId: string) => {
-		return ACTIVITIES.find((a) => a.id === activityId);
+		return availableActivities.find((a) => a.id === activityId);
 	};
 
 	const getActivityLabel = (activityId: string) => {
@@ -350,7 +380,7 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 										<Sprout className="h-4 w-4 text-emerald-700" />
 										Crop Type
 									</label>
-									<Select value={cropType || 'none'} onValueChange={(value) => setCropType(value === 'none' ? '' : value as 'Paddy' | 'Ragi' | 'Napier')}>
+									<Select value={cropType || 'none'} onValueChange={(value) => setCropType(value === 'none' ? '' : value as 'Paddy' | 'Rahar' | 'Napier')}>
 										<SelectTrigger>
 											<SelectValue placeholder="Select crop type" />
 										</SelectTrigger>
@@ -362,10 +392,10 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 													<span>Paddy</span>
 												</div>
 											</SelectItem>
-											<SelectItem value="Ragi">
+											<SelectItem value="Rahar">
 												<div className="flex items-center gap-2">
 													<Flower2 className="h-4 w-4 text-amber-600" />
-													<span>Ragi</span>
+													<span>Rahar</span>
 												</div>
 											</SelectItem>
 											<SelectItem value="Napier">
@@ -430,7 +460,7 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 																</div>
 															</SelectTrigger>
 															<SelectContent>
-																{ACTIVITIES.map((act) => (
+																{availableActivities.map((act) => (
 																	<SelectItem key={act.id} value={act.id}>
 																		<div className="flex items-center gap-2">
 																			<ActivityIcon iconName={act.icon} className="text-primary" />
@@ -524,11 +554,58 @@ const CreateMasterPlanner = ({ planners, onSave }: CreateMasterPlannerProps) => 
 
 interface PlannerListProps {
 	planners: MasterPlanner[];
+	activities: Activity[];
 	onDelete: (id: string) => void;
+	onSaveActivity: (activity: Activity) => void;
+	onDeleteActivity: (id: string) => void;
 }
 
-const PlannerList = ({ planners, onDelete }: PlannerListProps) => {
+const PlannerList = ({ planners, activities, onDelete, onSaveActivity, onDeleteActivity }: PlannerListProps) => {
 	const navigate = useNavigate();
+
+	const [isAddActivityOpen, setIsAddActivityOpen] = useState(false);
+	const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
+	const [newActivityName, setNewActivityName] = useState('');
+	const [newActivityCategory, setNewActivityCategory] = useState<ActivityCategory>('Other');
+	const [newActivityIcon, setNewActivityIcon] = useState<string>('Sprout');
+
+	const resetNewActivityForm = () => {
+		setEditingActivityId(null);
+		setNewActivityName('');
+		setNewActivityCategory('Other');
+		setNewActivityIcon('Sprout');
+	};
+
+	const startEditActivity = (activity: Activity) => {
+		setEditingActivityId(activity.id);
+		setNewActivityName(activity.name);
+		setNewActivityCategory(activity.category);
+		setNewActivityIcon(activity.icon);
+	};
+
+	const handleAddActivitySubmit = () => {
+		if (!newActivityName.trim()) {
+			toast.error('Please enter an activity name');
+			return;
+		}
+
+		const activity: Activity = {
+			id: editingActivityId || `custom-${newActivityName.trim().toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+			name: newActivityName.trim(),
+			category: newActivityCategory,
+			icon: newActivityIcon,
+		};
+
+		onSaveActivity(activity);
+		toast.success(editingActivityId ? 'Activity updated' : 'Activity type added');
+		resetNewActivityForm();
+	};
+
+	const handleDeleteActivityClick = (id: string) => {
+		onDeleteActivity(id);
+		if (editingActivityId === id) resetNewActivityForm();
+		toast.success('Activity deleted');
+	};
 
 	return (
 		<div className="min-h-screen bg-background">
@@ -540,11 +617,127 @@ const PlannerList = ({ planners, onDelete }: PlannerListProps) => {
 							Create and manage week-wise activity planners for your farm
 						</p>
 					</div>
-					<Button onClick={() => navigate('/cultivation-master/create')} className="gap-2">
-						<Plus className="h-4 w-4" />
-						Create New Planner
-					</Button>
+					<div className="flex gap-3">
+						<Button variant="outline" onClick={() => setIsAddActivityOpen(true)} className="gap-2">
+							<ListPlus className="h-4 w-4" />
+							Add Activity Type
+						</Button>
+						<Button onClick={() => navigate('/cultivation-master/create')} className="gap-2">
+							<Plus className="h-4 w-4" />
+							Create New Planner
+						</Button>
+					</div>
 				</div>
+
+				<Dialog
+					open={isAddActivityOpen}
+					onOpenChange={(open) => {
+						setIsAddActivityOpen(open);
+						if (!open) resetNewActivityForm();
+					}}
+				>
+					<DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+						<DialogHeader>
+							<DialogTitle>Activity Types</DialogTitle>
+						</DialogHeader>
+						<div className="space-y-4 py-2">
+							<div className="space-y-2">
+								<label className="text-sm font-medium text-foreground">Existing Activities</label>
+								<div className="border rounded-lg divide-y max-h-48 overflow-y-auto">
+									{activities.length === 0 ? (
+										<div className="p-3 text-sm text-muted-foreground italic">No activities yet.</div>
+									) : (
+										activities.map((activity) => (
+											<div key={activity.id} className="flex items-center justify-between gap-2 p-2.5">
+												<div className="flex items-center gap-2 min-w-0">
+													<ActivityIcon iconName={activity.icon} className="text-primary shrink-0" />
+													<div className="min-w-0">
+														<div className="text-sm font-medium text-foreground truncate">{activity.name}</div>
+														<div className="text-xs text-muted-foreground">{activity.category}</div>
+													</div>
+												</div>
+												<div className="flex items-center gap-1 shrink-0">
+													<Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditActivity(activity)}>
+														<Edit className="h-3.5 w-3.5" />
+													</Button>
+													<Button
+														variant="ghost"
+														size="icon"
+														className="h-7 w-7 text-destructive hover:text-destructive"
+														onClick={() => handleDeleteActivityClick(activity.id)}
+													>
+														<Trash2 className="h-3.5 w-3.5" />
+													</Button>
+												</div>
+											</div>
+										))
+									)}
+								</div>
+							</div>
+
+							<div className="space-y-4 border-t pt-4">
+								<label className="text-sm font-medium text-foreground">
+									{editingActivityId ? 'Edit Activity' : 'Add New Activity'}
+								</label>
+								<div className="space-y-2">
+									<Input
+										placeholder="e.g., Pest Scouting"
+										value={newActivityName}
+										onChange={(e) => setNewActivityName(e.target.value)}
+									/>
+								</div>
+								<div className="space-y-2">
+									<Select
+										value={newActivityCategory}
+										onValueChange={(value) => setNewActivityCategory(value as ActivityCategory)}
+									>
+										<SelectTrigger>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{ACTIVITY_CATEGORIES.map((category) => (
+												<SelectItem key={category} value={category}>
+													{category}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Select value={newActivityIcon} onValueChange={setNewActivityIcon}>
+										<SelectTrigger>
+											<div className="flex items-center gap-2">
+												<ActivityIcon iconName={newActivityIcon} className="text-primary" />
+												<span>{newActivityIcon}</span>
+											</div>
+										</SelectTrigger>
+										<SelectContent>
+											{Object.keys(iconMap).map((iconName) => (
+												<SelectItem key={iconName} value={iconName}>
+													<div className="flex items-center gap-2">
+														<ActivityIcon iconName={iconName} className="text-primary" />
+														<span>{iconName}</span>
+													</div>
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+								{editingActivityId && (
+									<Button variant="outline" size="sm" onClick={resetNewActivityForm}>
+										Cancel Edit
+									</Button>
+								)}
+							</div>
+						</div>
+						<DialogFooter>
+							<Button variant="outline" onClick={() => setIsAddActivityOpen(false)}>
+								Close
+							</Button>
+							<Button onClick={handleAddActivitySubmit}>{editingActivityId ? 'Save Changes' : 'Add Activity'}</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
 
 				{planners.length === 0 ? (
 					<Card className="border-dashed">
@@ -628,6 +821,24 @@ const CultivationMasterModule = () => {
 	const [planners, setPlanners] = useState<MasterPlanner[]>([]);
 	const [loading, setLoading] = useState(true);
 
+	// Base list is always the current activities.json. Customizations layer on top.
+	const [activityEdits, setActivityEdits] = useState<Record<string, Activity>>(() =>
+		loadFromStorage(ACTIVITY_EDITS_STORAGE_KEY, {} as Record<string, Activity>)
+	);
+	const [deletedActivityIds, setDeletedActivityIds] = useState<string[]>(() =>
+		loadFromStorage(ACTIVITY_DELETED_STORAGE_KEY, [] as string[])
+	);
+	const [activityAdditions, setActivityAdditions] = useState<Activity[]>(() =>
+		loadFromStorage(ACTIVITY_ADDITIONS_STORAGE_KEY, [] as Activity[])
+	);
+
+	const availableActivities: Activity[] = [
+		...ACTIVITIES
+			.filter((activity) => !deletedActivityIds.includes(activity.id))
+			.map((activity) => activityEdits[activity.id] || activity),
+		...activityAdditions,
+	];
+
 	useEffect(() => {
 		const fetchPlans = async () => {
 			setLoading(true);
@@ -643,7 +854,7 @@ const CultivationMasterModule = () => {
 					name: plan.plan_name,
 					activities: (plan.plan_list || []).map((item: any, idx: number) => {
 						// Find activityId by name
-						const act = ACTIVITIES.find(a => a.name === item.activity);
+						const act = availableActivities.find(a => a.name === item.activity);
 						return {
 							id: `${id}-a${item.index}`,
 							sno: item.index,
@@ -680,15 +891,70 @@ const CultivationMasterModule = () => {
 		}
 	};
 
+	const isBaseActivityId = (id: string) => ACTIVITIES.some((a) => a.id === id);
+
+	const handleSaveActivity = (activity: Activity) => {
+		if (isBaseActivityId(activity.id)) {
+			setActivityEdits((prev) => {
+				const next = { ...prev, [activity.id]: activity };
+				saveToStorage(ACTIVITY_EDITS_STORAGE_KEY, next);
+				return next;
+			});
+			return;
+		}
+
+		setActivityAdditions((prev) => {
+			const exists = prev.some((a) => a.id === activity.id);
+			const next = exists ? prev.map((a) => (a.id === activity.id ? activity : a)) : [...prev, activity];
+			saveToStorage(ACTIVITY_ADDITIONS_STORAGE_KEY, next);
+			return next;
+		});
+	};
+
+	const handleDeleteActivity = (id: string) => {
+		if (isBaseActivityId(id)) {
+			setDeletedActivityIds((prev) => {
+				const next = prev.includes(id) ? prev : [...prev, id];
+				saveToStorage(ACTIVITY_DELETED_STORAGE_KEY, next);
+				return next;
+			});
+			setActivityEdits((prev) => {
+				if (!(id in prev)) return prev;
+				const next = { ...prev };
+				delete next[id];
+				saveToStorage(ACTIVITY_EDITS_STORAGE_KEY, next);
+				return next;
+			});
+			return;
+		}
+
+		setActivityAdditions((prev) => {
+			const next = prev.filter((a) => a.id !== id);
+			saveToStorage(ACTIVITY_ADDITIONS_STORAGE_KEY, next);
+			return next;
+		});
+	};
+
 	if (loading) {
 		return <div className="p-8 text-center text-muted-foreground">Loading plans...</div>;
 	}
 
 	return (
 		<Routes>
-			<Route path="/" element={<PlannerList planners={planners} onDelete={handleDelete} />} />
-			<Route path="/create" element={<CreateMasterPlanner planners={planners} onSave={handleSave} />} />
-			<Route path="/edit/:id" element={<CreateMasterPlanner planners={planners} onSave={handleSave} />} />
+			<Route
+				path="/"
+				element={
+					<PlannerList
+						planners={planners}
+						activities={availableActivities}
+						onDelete={handleDelete}
+						onSaveActivity={handleSaveActivity}
+						onDeleteActivity={handleDeleteActivity}
+					/>
+				}
+			/>
+			<Route path="/create" element={<CreateMasterPlanner planners={planners} availableActivities={availableActivities} onSave={handleSave} />} />
+			<Route path="/edit/:id" element={<CreateMasterPlanner planners={planners} availableActivities={availableActivities} onSave={handleSave} />} />
 		</Routes>
 	);
 };

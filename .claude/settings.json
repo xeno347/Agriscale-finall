@@ -5,7 +5,10 @@
       "Bash(npx tsc *)",
       "Bash(find \"/c/Users/HP\" -iname \"budget.txt\" 2>/dev/null)",
       "Read(//c/Users/HP/**)",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Read(//c/HP/AppData/Local/Programs/Python/Python312/Sigmoyd testing/SBR Agrotech project/farm-connect/farm-connect/src/modules/**)",
+      "Read(//c/HP/AppData/Local/Programs/Python/Python312/Sigmoyd testing/SBR Agrotech project/farm-connect/farm-connect/src/pages/**)"
     ]
   }
 }
