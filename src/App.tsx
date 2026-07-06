@@ -26,7 +26,6 @@ import ManPowerRequisition from "./pages/ManPowerRequisition";
 import AdminMrfApproval from "./pages/adminmrfapproval";
 import LogisticsManagement from "./pages/LogisticsManagement";
 import AdminRequestPage from "./pages/AdminRequestPage";
-import Blocks from "./pages/Blocks";
 import TasksBeta from "./pages/TasksBeta";
 import VehicleManagement from "./pages/VehicleManagement";
 import WeighmentQC from "./pages/WeighmentQC";
@@ -147,9 +146,6 @@ const App = () => (
           {/* Human Resources */}
           <Route path="/hr-management" element={<AppLayout><HRManagement /></AppLayout>} />
           <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
-
-          {/* Blocks */}
-          <Route path="/blocks" element={<AppLayout><Blocks /></AppLayout>} />
 
           {/* Lease & Asset Management */}
           <Route path="/rental-rate-card" element={<AppLayout><RentalRateCard /></AppLayout>} />
