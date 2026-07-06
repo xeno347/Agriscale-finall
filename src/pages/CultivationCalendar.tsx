@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
 Calendar as CalendarIcon,
 X,
@@ -610,8 +611,16 @@ null
 
 // --- Main Component ---
 const CultivationCalendar = () => {
+const [searchParams] = useSearchParams();
 const [timelineMonth, setTimelineMonth] = useState<Date | null>(null);
-const [baseDate] = useState(new Date());
+const [baseDate] = useState(() => {
+const monthParam = searchParams.get('month');
+if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+const [y, m] = monthParam.split('-').map(Number);
+return new Date(y, m - 1, 1);
+}
+return new Date();
+});
 const [selectedDate, setSelectedDate] = useState<string | null>(null);
 const [isModalOpen, setIsModalOpen] = useState(false);
 // New State for Assignment

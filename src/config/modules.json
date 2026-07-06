@@ -1,6 +1,23 @@
 {
   "supersets": [
     {
+      "key": "ceos-desk",
+      "label": "CEO'S DESK",
+      "description": "Executive overview and decision dashboard",
+      "icon": "Landmark",
+      "enabled": true,
+      "groups": [
+        {
+          "key": "executive",
+          "label": "Executive",
+          "enabled": true,
+          "items": [
+            { "key": "ceos-desk", "label": "CEO's Desk", "path": "/ceos-desk", "icon": "Landmark", "enabled": true }
+          ]
+        }
+      ]
+    },
+    {
       "key": "admin",
       "label": "ADMIN",
       "description": "Admin controls and farmer operations",

@@ -7,6 +7,7 @@ import AppLayout from "./components/layout/AppLayout";
 import AuthLanding from "./pages/AuthLanding";
 import Login from "./pages/Login";
 import Index from "./pages/Index";
+import CeosDesk from "./pages/CeosDesk";
 import Leads from "./pages/Leads";
 import Farmers from "./pages/Farmers";
 import FarmerProfile from "./pages/FarmerProfile";
@@ -85,7 +86,9 @@ const App = () => (
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<AuthLanding />} />
           <Route path="/index" element={<Index />} />
-          
+
+          <Route path="/ceos-desk" element={<AppLayout><CeosDesk /></AppLayout>} />
+
           <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
           <Route path="/tasks-beta" element={<AppLayout><TasksBeta /></AppLayout>} />
           <Route path="/farmers" element={<AppLayout><Farmers /></AppLayout>} />
