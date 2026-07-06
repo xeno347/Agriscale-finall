@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import getBaseUrl from "@/lib/config";
+import type { Lead } from "@/types/farm";
 
 type Tone = "green" | "blue" | "orange" | "purple" | "red";
 
@@ -342,28 +343,6 @@ const leaseRenewals = [
     status: "Field Review",
   },
 ];
-
-const acquisitionPipeline = [
-  { stage: "Lead Identified", acres: 214, color: "#8b5cf6" },
-  { stage: "Field Verification", acres: 126, color: "#3b82f6" },
-  { stage: "Agreement Drafting", acres: 88, color: "#f59e0b" },
-  { stage: "Agreement Signed", acres: 152, color: "#10b981" },
-  { stage: "Possession Pending", acres: 46, color: "#f97316" },
-];
-
-const acquisitionPipelineTotal = acquisitionPipeline.reduce((total, item) => total + item.acres, 0);
-const RADIAN = Math.PI / 180;
-const renderPipelinePercent = ({ cx, cy, midAngle, outerRadius, percent }: any) => {
-  const radius = outerRadius + 18;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-  return (
-    <text x={x} y={y} fill="#0f172a" textAnchor={x > cx ? "start" : "end"} dominantBaseline="central" className="text-[11px] font-black">
-      {`${Math.round(percent * 100)}%`}
-    </text>
-  );
-};
 
 const leadStatusRows = [
   {
@@ -1771,7 +1750,155 @@ const PlotMapViewerCard = ({
   );
 };
 
-const LandAcquisitionView = () => (
+// TODO: keep in sync with src/pages/Leads.tsx's own transform of GET /farmer_managment/get_leads.
+const transformLeads = (rawLeads: any[]): Lead[] =>
+  rawLeads.map((item) => {
+    const farmer = item?.farmer_data ?? {};
+    return {
+      id: String(item?.lead_id ?? ""),
+      backendId: String(item?.lead_id ?? ""),
+      farmerId: item?.farmer_id,
+      fullName: farmer.full_name || "N/A",
+      phoneNumber: farmer.phone_number || "N/A",
+      alternatePhone: farmer.alternate_phone_number,
+      leadSource: farmer.lead_source || "N/A",
+      farmingOption: farmer.farming_option,
+      village: farmer.village || "N/A",
+      taluka: farmer.taluka,
+      tehsil: farmer.tehsil || farmer.taluka || undefined,
+      district: farmer.district || "N/A",
+      state: farmer.state || "N/A",
+      estimatedLandArea: farmer.estimated_land_area,
+      waterAvailable: farmer.water_available,
+      notes: farmer.note,
+      landCoordinates: farmer.land_coordinates,
+      status: item?.status,
+      createdAt: item?.created_at,
+      kycData: item?.kyc_data,
+      agreementData: item?.agreement_data,
+      isFlagged: false,
+      stopPayments: false,
+      stopInputs: false,
+    } as Lead;
+  });
+
+const toLatLngTuple = (point: unknown): [number, number] | null => {
+  if (Array.isArray(point)) {
+    const [lat, lng] = point;
+    return Number.isFinite(lat) && Number.isFinite(lng) ? [Number(lat), Number(lng)] : null;
+  }
+  if (point && typeof point === "object") {
+    const lat = Number((point as { lat?: unknown }).lat);
+    const lng = Number((point as { lng?: unknown }).lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+  }
+  return null;
+};
+
+const LeadMapThumbnail = ({ coordinates }: { coordinates?: { lat: number; lng: number }[] }) => {
+  // Backend may return land_coordinates as either [lat, lng] tuples or {lat, lng} objects — normalize defensively.
+  const coords: [number, number][] = (coordinates ?? [])
+    .map((c) => toLatLngTuple(c))
+    .filter((c): c is [number, number] => c !== null);
+
+  if (coords.length < 3) {
+    return (
+      <div className="flex h-28 w-full flex-col items-center justify-center gap-1 bg-slate-900 text-slate-500">
+        <MapPinned className="h-5 w-5 opacity-40" />
+        <span className="text-[10px] font-bold">No coordinates</span>
+      </div>
+    );
+  }
+
+  const center: [number, number] = [
+    coords.reduce((sum, c) => sum + c[0], 0) / coords.length,
+    coords.reduce((sum, c) => sum + c[1], 0) / coords.length,
+  ];
+
+  return (
+    <div className="h-28 w-full">
+      <MapContainer
+        key={`${center[0]}-${center[1]}`}
+        center={center}
+        zoom={14}
+        style={{ height: "100%", width: "100%" }}
+        zoomControl={false}
+        dragging={false}
+        scrollWheelZoom={false}
+        doubleClickZoom={false}
+        touchZoom={false}
+        attributionControl={false}
+      >
+        <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" maxZoom={19} />
+        <Polygon positions={coords} pathOptions={{ color: "#22c55e", fillColor: "#22c55e", fillOpacity: 0.25, weight: 2 }} />
+        <FitBounds coords={coords} />
+      </MapContainer>
+    </div>
+  );
+};
+
+const LeadAcquisitionCard = ({ lead }: { lead: Lead }) => {
+  const location = [lead.village, lead.district].filter(Boolean).join(", ");
+  const isLease = (lead.farmingOption ?? "").toLowerCase().includes("lease");
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <LeadMapThumbnail coordinates={lead.landCoordinates} />
+      <div className="space-y-2 p-3">
+        <div>
+          <p className="truncate text-xs font-black text-slate-950">{lead.fullName}</p>
+          {location && <p className="truncate text-[11px] font-bold text-slate-500">{location}</p>}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-black uppercase tracking-[0.06em] text-slate-500">Lead Source</span>
+          <span className="truncate text-xs font-bold text-slate-800">{lead.leadSource || "—"}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-black uppercase tracking-[0.06em] text-slate-500">Farming Option</span>
+          <Pill tone={isLease ? "blue" : "green"}>{lead.farmingOption || "—"}</Pill>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const LeadPipelineColumn = ({
+  label,
+  tone,
+  leads,
+  loading,
+}: {
+  label: string;
+  tone: "blue" | "orange" | "green";
+  leads: Lead[];
+  loading: boolean;
+}) => (
+  <div className="flex flex-col rounded-xl border border-slate-100 bg-slate-50/60">
+    <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5">
+      <p className="text-xs font-black text-slate-800">{label}</p>
+      <Pill tone={tone}>{leads.length}</Pill>
+    </div>
+    <div className="max-h-[480px] space-y-2 overflow-y-auto p-2.5">
+      {loading ? (
+        <div className="flex h-32 flex-col items-center justify-center gap-2 text-slate-400">
+          <RefreshCw className="h-5 w-5 animate-spin opacity-50" />
+          <p className="text-[11px] font-bold">Loading…</p>
+        </div>
+      ) : leads.length === 0 ? (
+        <div className="flex h-32 items-center justify-center text-xs font-bold text-slate-400">No leads</div>
+      ) : (
+        leads.map((lead) => <LeadAcquisitionCard key={lead.id} lead={lead} />)
+      )}
+    </div>
+  </div>
+);
+
+const LandAcquisitionView = ({ leads, leadsLoading }: { leads: Lead[]; leadsLoading: boolean }) => {
+  const contactedLeads = useMemo(() => leads.filter((lead) => lead.status === "contacted"), [leads]);
+  const verifiedLeads = useMemo(() => leads.filter((lead) => lead.status === "verified"), [leads]);
+  const registeredLeads = useMemo(() => leads.filter((lead) => lead.status === "registered"), [leads]);
+
+  return (
   <div className="space-y-4">
     <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
       {landAcquisitionStats.map((stat) => (
@@ -1790,64 +1917,15 @@ const LandAcquisitionView = () => (
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-base font-black text-slate-950">Acquisition Pipeline</h2>
-            <p className="mt-1 text-sm font-semibold text-slate-500">Stage-wise area movement across acquisition workflow.</p>
+            <p className="mt-1 text-sm font-semibold text-slate-500">Lead movement from first contact through registration.</p>
           </div>
-          <div className="w-fit rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
-            <p className="text-xs font-black uppercase tracking-[0.08em] text-emerald-700">Total Pipeline</p>
-            <p className="text-lg font-black text-emerald-900">{acquisitionPipelineTotal} ac</p>
-          </div>
+          <Pill tone="blue">{leads.length} Total Leads</Pill>
         </div>
 
-        <div className="overflow-x-auto">
-          <div className="flex min-w-[760px] items-center justify-center gap-8">
-          <div className="relative h-72 w-[340px] shrink-0">
-            <ResponsiveContainer>
-              <PieChart margin={{ top: 18, right: 34, bottom: 18, left: 34 }}>
-                <Pie data={acquisitionPipeline} dataKey="acres" innerRadius={72} outerRadius={104} paddingAngle={2} label={renderPipelinePercent} labelLine={false}>
-                  {acquisitionPipeline.map((item) => (
-                    <Cell key={item.stage} fill={item.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value) => [`${value} ac`, "Area"]} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <p className="text-3xl font-black text-slate-950">{acquisitionPipelineTotal}</p>
-              <p className="text-xs font-bold text-slate-500">Pipeline Acres</p>
-            </div>
-          </div>
-
-          <div className="w-[360px] shrink-0 border-l border-slate-100 pl-6">
-            <div className="mb-4">
-              <p className="text-sm font-black text-slate-950">Pipeline Summary</p>
-              <p className="text-xs font-bold text-slate-500">Acres and contribution by stage</p>
-            </div>
-            <div className="space-y-2">
-              {acquisitionPipeline.map((item) => (
-                <div key={item.stage} className="rounded-lg bg-slate-50 px-3 py-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="truncate text-sm font-extrabold text-slate-700">{item.stage}</span>
-                    </span>
-                    <span className="shrink-0 text-sm font-black text-slate-950">{item.acres} ac</span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <div className="h-1.5 flex-1 rounded-full bg-slate-100">
-                      <div
-                        className="h-1.5 rounded-full"
-                        style={{ width: `${Math.round((item.acres / acquisitionPipelineTotal) * 100)}%`, backgroundColor: item.color }}
-                      />
-                    </div>
-                    <span className="w-9 text-right text-xs font-black text-slate-500">
-                      {Math.round((item.acres / acquisitionPipelineTotal) * 100)}%
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <LeadPipelineColumn label="Lands Contacted" tone="blue" leads={contactedLeads} loading={leadsLoading} />
+          <LeadPipelineColumn label="Land Under Verification" tone="orange" leads={verifiedLeads} loading={leadsLoading} />
+          <LeadPipelineColumn label="Lands Registered" tone="green" leads={registeredLeads} loading={leadsLoading} />
         </div>
       </Card>
 
@@ -1932,7 +2010,8 @@ const LandAcquisitionView = () => (
       </div>
     </Card>
   </div>
-);
+  );
+};
 
 const buildLeaseTerms = (agreement: { lease_rent: number; agreement_start_date: string; agreement_end_date: string }) => {
   const start = new Date(agreement.agreement_start_date);
@@ -2534,6 +2613,22 @@ const CeosDesk = () => {
   const [categoryBudgets, setCategoryBudgets] = useState<BudgetCategoryBifurcation[]>([]);
   const [categoryBudgetsLoading, setCategoryBudgetsLoading] = useState(false);
   const [farmerNames, setFarmerNames] = useState<Record<string, string>>({});
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [leadsLoading, setLeadsLoading] = useState(false);
+  const [leadsFetched, setLeadsFetched] = useState(false);
+
+  useEffect(() => {
+    if (activeTabId !== "land-acquisition" || leadsFetched) return;
+    setLeadsFetched(true);
+    const base = getBaseUrl().replace(/\/$/, "");
+
+    setLeadsLoading(true);
+    fetch(`${base}/farmer_managment/get_leads`)
+      .then((res) => res.json())
+      .then((data: { leads?: any[] }) => setLeads(transformLeads(Array.isArray(data?.leads) ? data.leads : [])))
+      .catch(() => setLeads([]))
+      .finally(() => setLeadsLoading(false));
+  }, [activeTabId, leadsFetched]);
 
   useEffect(() => {
     if (activeTabId !== "financial-analysis" || financialFetched) return;
@@ -2663,7 +2758,7 @@ const CeosDesk = () => {
 
       <div className="space-y-3 px-6 py-4">
         {activeTabId === "land-acquisition" ? (
-          <LandAcquisitionView />
+          <LandAcquisitionView leads={leads} leadsLoading={leadsLoading} />
         ) : activeTabId === "financial-analysis" ? (
           <FinancialAnalysisView
             kpis={financialKpis}
