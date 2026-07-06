@@ -79,7 +79,7 @@ type RentalServiceOption = {
   isLive: boolean;
 };
 
-type CropType = 'paddy' | 'ragi' | 'napier';
+type CropType = 'paddy' | 'rahar' | 'napier';
 
 type CropPlannerCard = {
   id: string;
@@ -1447,7 +1447,7 @@ const CreateCultivationPlan: React.FC = () => {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="paddy">Paddy</SelectItem>
-                                  <SelectItem value="ragi">Ragi</SelectItem>
+                                  <SelectItem value="rahar">Rahar</SelectItem>
                                   <SelectItem value="napier">Napier</SelectItem>
                                 </SelectContent>
                               </Select>
