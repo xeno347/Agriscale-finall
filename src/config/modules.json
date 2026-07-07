@@ -138,7 +138,7 @@
           "items": [
             { "key": "cultivation-calendar","label": "Cultivation Calendar",  "path": "/cultivation-calendar","icon": "Calendar","enabled": true  },
             { "key": "cultivation-master",  "label": "Operations Master",     "path": "/cultivation-master",  "icon": "Sprout",  "enabled": true  },
-            { "key": "cultivation-plan",    "label": "Cultivation Plan",      "path": "/cultivation-plan",    "icon": "Layers",  "enabled": true  },
+            { "key": "cultivation-plan",    "label": "Cultivation Planner",   "path": "/cultivation-plan",    "icon": "Layers",  "enabled": true  },
             { "key": "field-monitoring",    "label": "Field Monitoring",      "path": "/field-monitoring",    "icon": "Activity","enabled": true  },
             { "key": "field-visit-analytics","label": "Field Visit Analytics","path": "/field-visit-analytics","icon": "Map",    "enabled": true  },
             { "key": "labour-management",   "label": "Labour Management",     "path": "/labour-management",   "icon": "Users",   "enabled": true  },
