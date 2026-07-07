@@ -9,16 +9,38 @@ import { toast } from 'sonner';
 
 type LeftPanelInfo = {
   pr_number?: string;
-  indent_type?: string;
-  department?: string | null;
+  approved_vendor_id?: string;
   vendor_details?: {
-    approved_vendor_id?: string;
-    vendor_name?: string;
+    nature_of_vendor?: string;
+    aadhar_card_number?: string;
+    address?: {
+      name_of_premises?: string;
+      road?: string;
+      district?: string;
+      pin_code?: string;
+      state?: string;
+      plot_flat_unit_no_and_floor?: string;
+      taluka_locality?: string;
+    };
+    address_for_place_of_supply_of_goods_services?: {
+      name_of_premises?: string;
+      road?: string;
+      district?: string;
+      pin_code?: string;
+      state?: string;
+      gst_number?: string;
+      plot_flat_unit_no_and_floor?: string;
+      taluka_locality?: string;
+      contact_number?: string;
+      e_mail_id?: string;
+    };
+    income_tax_pan?: string;
     vendor_contact?: string;
-    vendor_address?: string;
+    vendor_name?: string;
     gst_number?: string;
+    vendor_address?: string;
+    e_mail_id?: string;
   } | null;
-  Order_number?: string;
 };
 
 type ApiPurchaseFlowStageEntry = {
@@ -31,6 +53,7 @@ type ApiPurchaseFlow = {
   comparison_id?: unknown;
   flow_id?: unknown;
   order_number?: unknown;
+  order_type?: unknown;
   pr_number?: unknown;
   purchase_flow_stage?: unknown;
   timestamp?: unknown;
@@ -1259,16 +1282,15 @@ export default function PurchaseFlow() {
     if (!baseUrl) return;
 
     rows.forEach(async (flow) => {
-      const prNumber = safeTrim((flow as any)?.pr_number);
-      if (!prNumber) return;
-      const flowId = safeTrim((flow as any)?.flow_id) || safeTrim((flow as any)?.comparison_id) || prNumber;
+      const comparisonId = safeTrim((flow as any)?.comparison_id);
+      if (!comparisonId) return;
+      const flowId = safeTrim((flow as any)?.flow_id) || comparisonId;
 
       setLeftPanelLoadingSet((prev) => new Set([...prev, flowId]));
       try {
-        const res = await fetch(`${baseUrl}/purchase_flow/get_left_panel_info`, {
+        const res = await fetch(`${baseUrl}/purchase_flow/get_left_panel_info/${encodeURIComponent(comparisonId)}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ pr_number: prNumber }),
+          headers: { Accept: 'application/json' },
           signal: ac.signal,
         });
         if (!res.ok) return;
@@ -1517,6 +1539,7 @@ export default function PurchaseFlow() {
             const flowId = safeTrim((flow as any)?.flow_id) || safeTrim((flow as any)?.comparison_id) || `row-${idx}`;
             const prNumber = safeTrim((flow as any)?.pr_number);
             const orderNumber = safeTrim((flow as any)?.order_number);
+            const orderType = safeTrim((flow as any)?.order_type);
             const comparisonId = safeTrim((flow as any)?.comparison_id);
             const ts = safeTrim((flow as any)?.timestamp);
             const steps = getFlowSteps(flowId, flow);
@@ -1528,10 +1551,12 @@ export default function PurchaseFlow() {
                   {(() => {
                     const info = leftPanelInfoMap[flowId];
                     const isLoading = leftPanelLoadingSet.has(flowId);
-                    const displayPr = info?.pr_number || prNumber || '—';
-                    const displayOrder = info?.Order_number || orderNumber || '—';
-                    const indentType = info?.indent_type;
+                    const effectivePrNumber = info?.pr_number || prNumber;
+                    const displayPr = effectivePrNumber || '—';
+                    const displayOrder = orderNumber || '—';
+                    const indentType = orderType || undefined;
                     const vendor = info?.vendor_details;
+                    const approvedVendorId = info?.approved_vendor_id;
 
                     return (
                   <div className="w-[280px] shrink-0 border-r border-border px-4 py-4 bg-muted/30 flex flex-col gap-3">
@@ -1551,11 +1576,6 @@ export default function PurchaseFlow() {
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1 break-all">{displayOrder}</div>
-                      {info?.department && (
-                        <div className="text-[11px] text-muted-foreground mt-0.5">
-                          <span className="font-medium">Dept:</span> {info.department}
-                        </div>
-                      )}
                     </div>
 
                     {/* Vendor details */}
@@ -1565,11 +1585,14 @@ export default function PurchaseFlow() {
                         {vendor.vendor_name && (
                           <div className="text-xs font-semibold text-foreground">{vendor.vendor_name}</div>
                         )}
-                        {vendor.approved_vendor_id && (
-                          <div className="text-[11px] text-muted-foreground">{vendor.approved_vendor_id}</div>
+                        {approvedVendorId && (
+                          <div className="text-[11px] text-muted-foreground">{approvedVendorId}</div>
                         )}
                         {vendor.vendor_contact && (
                           <div className="text-[11px] text-muted-foreground">{vendor.vendor_contact}</div>
+                        )}
+                        {vendor.e_mail_id && (
+                          <div className="text-[11px] text-muted-foreground">{vendor.e_mail_id}</div>
                         )}
                         {vendor.vendor_address && (
                           <div className="text-[11px] text-muted-foreground">{vendor.vendor_address}</div>
@@ -1601,16 +1624,16 @@ export default function PurchaseFlow() {
                         {savingFlows[flowId] ? 'Saving…' : 'Save Current'}
                       </button>
                       <button
-                        disabled={!prNumber}
-                        onClick={() => openHoInboxView(prNumber, 'po')}
+                        disabled={!effectivePrNumber}
+                        onClick={() => openHoInboxView(effectivePrNumber, 'po')}
                         className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-700 px-2 py-2.5 text-[11px] font-medium transition-colors"
                       >
                         <Receipt className="w-4 h-4" />
                         View Order
                       </button>
                       <button
-                        disabled={!prNumber}
-                        onClick={() => openHoInboxView(prNumber, 'indent')}
+                        disabled={!effectivePrNumber}
+                        onClick={() => openHoInboxView(effectivePrNumber, 'indent')}
                         className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-700 px-2 py-2.5 text-[11px] font-medium transition-colors"
                       >
                         <FileText className="w-4 h-4" />
@@ -1620,7 +1643,7 @@ export default function PurchaseFlow() {
 
                     {indentType === 'PR' && (
                       <button
-                        disabled={!prNumber}
+                        disabled={!orderNumber}
                         onClick={() => setAddToInventoryFor({ poNumber: orderNumber })}
                         className="mt-2 w-full flex flex-col items-center justify-center gap-1 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 disabled:opacity-40 text-green-700 px-2 py-2.5 text-[11px] font-medium transition-colors"
                       >

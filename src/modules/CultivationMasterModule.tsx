@@ -66,7 +66,6 @@ import {
 	TableRow,
 } from '@/components/ui/table';
 import getBaseUrl from '@/lib/config';
-import activitiesData from '@/config/activities.json';
 import Blocks from '@/pages/Blocks';
 
 // ============================================================
@@ -91,8 +90,12 @@ export interface Activity {
 	name: string;
 	category: ActivityCategory;
 	icon: string;
-	cropName?: string;
-	cropNames?: string[];
+	crop_type?: string[];
+	dosage?: {
+		item_id: string;
+		per_acre_dosage: number;
+		UOM: string;
+	};
 }
 
 export type FrequencyType = 'once' | 'every_n_days' | 'weekly';
@@ -148,12 +151,8 @@ const normalizeActivityCategory = (category: string): ActivityCategory => {
 	return 'Other';
 };
 
-// Base activities always come fresh from activities.json. Per-browser customizations
-// (edits/deletions of base entries, plus fully custom additions) are layered on top via
-// localStorage, so updates to activities.json keep showing up for everyone.
-const ACTIVITY_EDITS_STORAGE_KEY = 'cultivation-master-activity-edits';
-const ACTIVITY_DELETED_STORAGE_KEY = 'cultivation-master-activity-deleted-ids';
-const ACTIVITY_ADDITIONS_STORAGE_KEY = 'cultivation-master-activity-additions';
+// Activities are fetched from and persisted to the backend (admin_cultivation/get_cultivation_activities,
+// admin_cultivation/add_cultivation_activity) rather than the bundled activities.json.
 const ACTIVITY_ORDER_STORAGE_KEY = 'operations-master-activity-order-by-crop';
 const ERP_APPLICABLE_CROPS_STORAGE_KEY = 'operations-master-applicable-crops';
 const ERP_CUSTOM_CROPS_STORAGE_KEY = 'operations-master-custom-crops';
@@ -176,8 +175,6 @@ function saveToStorage<T>(key: string, value: T) {
 		// ignore storage failures (e.g. private browsing quota)
 	}
 }
-
-export const ACTIVITIES: Activity[] = activitiesData as Activity[];
 
 // ============================================================
 // DEMO DATA
@@ -293,7 +290,7 @@ const CreateMasterPlanner = ({ planners, availableActivities, orderedActivitiesB
 		}
 
 		const cropActivities = orderedActivitiesByCrop?.[cropType] || availableActivities.filter((activity) => {
-			const crops = activity.cropNames?.length ? activity.cropNames : activity.cropName ? [activity.cropName] : [];
+			const crops = activity.crop_type?.length ? activity.crop_type : [];
 			return crops.includes(cropType);
 		});
 
@@ -768,6 +765,7 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 	const [newActivityCategory, setNewActivityCategory] = useState<ActivityCategory>('Other');
 	const [newActivityIcon, setNewActivityIcon] = useState<string>('Sprout');
 	const [newActivityCropNames, setNewActivityCropNames] = useState<string[]>(['All Crops']);
+	const [isSavingActivity, setIsSavingActivity] = useState(false);
 	const [activityOrderByCrop, setActivityOrderByCrop] = useState<Record<string, string[]>>(() =>
 		loadFromStorage(ACTIVITY_ORDER_STORAGE_KEY, {})
 	);
@@ -775,6 +773,7 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 	const [dosageControls, setDosageControls] = useState<DosageControlRow[]>(() =>
 		loadFromStorage(DOSAGE_CONTROLS_STORAGE_KEY, [] as DosageControlRow[])
 	);
+	const [savingDosageLockIds, setSavingDosageLockIds] = useState<Record<string, boolean>>({});
 	const [inventoryItems, setInventoryItems] = useState<DosageInventoryItem[]>(FALLBACK_DOSAGE_INVENTORY_ITEMS);
 	const [isLoadingInventoryItems, setIsLoadingInventoryItems] = useState(false);
 	const [landParcels, setLandParcels] = useState<LandDistributionFarm[]>([]);
@@ -958,10 +957,52 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 		);
 	};
 
-	const toggleDosageLock = (id: string) => {
-		setDosageControls((current) =>
-			current.map((row) => (row.id === id ? { ...row, locked: !row.locked } : row))
-		);
+	const toggleDosageLock = async (id: string) => {
+		const row = dosageControls.find((r) => r.id === id);
+		if (!row) return;
+
+		if (row.locked) {
+			setDosageControls((current) => current.map((r) => (r.id === id ? { ...r, locked: false } : r)));
+			return;
+		}
+
+		const item = getInventoryItemForDosage(row);
+		const perAcreDosage = parseFloat(row.dosagePerAcre);
+
+		if (!row.activityId || !item?.id || !Number.isFinite(perAcreDosage) || perAcreDosage <= 0) {
+			toast.error('Select an activity, item, and a valid dosage before locking');
+			return;
+		}
+
+		setSavingDosageLockIds((prev) => ({ ...prev, [id]: true }));
+		try {
+			const baseUrl = getBaseUrl();
+			const response = await fetch(`${baseUrl}/admin_cultivation/add_dosage_to_activity`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					id: row.activityId,
+					// The backend resolves the activity by this field's value, which must be the activity id (not its display name).
+					activity: row.activityId,
+					item_id: item.id,
+					per_acre_dosage: perAcreDosage,
+					UOM: item.uom || row.uom || '',
+				}),
+			});
+			if (!response.ok) throw new Error('Failed to save dosage');
+		} catch (err) {
+			toast.error('Failed to save dosage to server');
+			return;
+		} finally {
+			setSavingDosageLockIds((prev) => {
+				const next = { ...prev };
+				delete next[id];
+				return next;
+			});
+		}
+
+		setDosageControls((current) => current.map((r) => (r.id === id ? { ...r, locked: true } : r)));
+		toast.success('Dosage locked');
 	};
 
 	const deleteDosageControl = (id: string) => {
@@ -1064,8 +1105,7 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 	const activityCropOptions = ['All Crops', ...cropOptions.map((crop) => crop.name)];
 	const activityTableCropColumns = cropOptions.map((crop) => crop.name);
 	const getActivityCropNames = (activity: Activity) => {
-		if (activity.cropNames?.length) return activity.cropNames;
-		if (activity.cropName && activity.cropName !== 'All Crops') return [activity.cropName];
+		if (activity.crop_type?.length) return activity.crop_type;
 		return activityTableCropColumns;
 	};
 	const rawActivitiesByCrop = activityTableCropColumns.reduce<Record<string, Activity[]>>((acc, cropName) => {
@@ -1094,6 +1134,50 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 		? '180px'
 		: `calc((100% - 4.5rem) / ${visibleActivityCropColumns})`;
 
+	// The backend returns each activity's saved dosage inline (admin_cultivation/get_cultivation_activities).
+	// Hydrate/reconcile the dosage control rows from that so a locked dosage shows up for everyone,
+	// not just in the browser that originally locked it.
+	useEffect(() => {
+		setDosageControls((current) => {
+			let changed = false;
+			const next = [...current];
+
+			activities.forEach((activity) => {
+				if (!activity.dosage) return;
+				const crops = getActivityCropNames(activity);
+				crops.forEach((cropName) => {
+					const existingIndex = next.findIndex((row) => row.activityId === activity.id && row.cropName === cropName);
+					const serverRow: DosageControlRow = {
+						id: existingIndex >= 0 ? next[existingIndex].id : `server-${activity.id}-${cropName}`,
+						cropName,
+						activityId: activity.id,
+						inventoryItemId: activity.dosage!.item_id,
+						uom: activity.dosage!.UOM,
+						dosagePerAcre: String(activity.dosage!.per_acre_dosage),
+						locked: true,
+					};
+					if (existingIndex >= 0) {
+						const existing = next[existingIndex];
+						const isSame =
+							existing.inventoryItemId === serverRow.inventoryItemId &&
+							existing.uom === serverRow.uom &&
+							existing.dosagePerAcre === serverRow.dosagePerAcre &&
+							existing.locked === true;
+						if (!isSame) {
+							next[existingIndex] = serverRow;
+							changed = true;
+						}
+					} else {
+						next.push(serverRow);
+						changed = true;
+					}
+				});
+			});
+
+			return changed ? next : current;
+		});
+	}, [activities]);
+
 	const resetNewActivityForm = () => {
 		setEditingActivityId(null);
 		setNewActivityName('');
@@ -1107,7 +1191,7 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 		setNewActivityName(activity.name);
 		setNewActivityCategory(activity.category);
 		setNewActivityIcon(activity.icon);
-		setNewActivityCropNames(activity.cropNames?.length ? activity.cropNames : [activity.cropName || 'All Crops']);
+		setNewActivityCropNames(activity.crop_type?.length ? activity.crop_type : ['All Crops']);
 	};
 
 	const toggleActivityCropSelection = (cropName: string) => {
@@ -1121,7 +1205,7 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 		});
 	};
 
-	const handleAddActivitySubmit = () => {
+	const handleAddActivitySubmit = async () => {
 		if (!newActivityName.trim()) {
 			toast.error('Please enter an activity name');
 			return;
@@ -1138,9 +1222,24 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 			name: newActivityName.trim(),
 			category: newActivityCategory,
 			icon: newActivityIcon,
-			cropName: newActivityCropNames.includes('All Crops') ? 'All Crops' : resolvedCropNames[0],
-			cropNames: resolvedCropNames,
+			crop_type: resolvedCropNames,
 		};
+
+		setIsSavingActivity(true);
+		try {
+			const baseUrl = getBaseUrl();
+			const response = await fetch(`${baseUrl}/admin_cultivation/add_cultivation_activity`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(activity),
+			});
+			if (!response.ok) throw new Error('Failed to save activity');
+		} catch (err) {
+			toast.error('Failed to save activity to server');
+			return;
+		} finally {
+			setIsSavingActivity(false);
+		}
 
 		onSaveActivity(activity);
 		toast.success(editingActivityId ? 'Activity updated' : 'Activity type added');
@@ -1155,8 +1254,7 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 				if (nextCropNames.length > 0) {
 					onSaveActivity({
 						...activity,
-						cropName: nextCropNames.length === activityTableCropColumns.length ? 'All Crops' : nextCropNames[0],
-						cropNames: nextCropNames,
+						crop_type: nextCropNames,
 					});
 					if (editingActivityId === id) setNewActivityCropNames(nextCropNames);
 					toast.success('Activity removed from crop');
@@ -1517,9 +1615,9 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 											))}
 										</SelectContent>
 									</Select>
-									<Button onClick={handleAddActivitySubmit} className="gap-2 bg-[#0D3A35] hover:bg-[#0b302c]">
+									<Button onClick={handleAddActivitySubmit} disabled={isSavingActivity} className="gap-2 bg-[#0D3A35] hover:bg-[#0b302c]">
 										{editingActivityId ? <Save className="h-4 w-4" /> : <ListPlus className="h-4 w-4" />}
-										{editingActivityId ? 'Save' : 'Create'}
+										{isSavingActivity ? 'Saving...' : editingActivityId ? 'Save' : 'Create'}
 									</Button>
 								</div>
 								<div className="mt-3 space-y-2">
@@ -1893,6 +1991,7 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 																			? 'bg-[#0D3A35]/10 text-[#0D3A35] hover:bg-[#0D3A35]/15'
 																			: 'text-slate-500 hover:bg-slate-50 hover:text-[#0D3A35]'
 																	)}
+																	disabled={!!savingDosageLockIds[row.id]}
 																	onClick={() => toggleDosageLock(row.id)}
 																>
 																	{row.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
@@ -2085,35 +2184,29 @@ const PlannerList = ({ planners, activities, onDelete, onSavePlanner, onSaveActi
 
 const CultivationMasterModule = () => {
 	const [planners, setPlanners] = useState<MasterPlanner[]>([]);
+	const [availableActivities, setAvailableActivities] = useState<Activity[]>([]);
 	const [loading, setLoading] = useState(true);
 
-	// Base list is always the current activities.json. Customizations layer on top.
-	const [activityEdits, setActivityEdits] = useState<Record<string, Activity>>(() =>
-		loadFromStorage(ACTIVITY_EDITS_STORAGE_KEY, {} as Record<string, Activity>)
-	);
-	const [deletedActivityIds, setDeletedActivityIds] = useState<string[]>(() =>
-		loadFromStorage(ACTIVITY_DELETED_STORAGE_KEY, [] as string[])
-	);
-	const [activityAdditions, setActivityAdditions] = useState<Activity[]>(() =>
-		loadFromStorage(ACTIVITY_ADDITIONS_STORAGE_KEY, [] as Activity[])
-	);
-
-	const availableActivities: Activity[] = [
-		...ACTIVITIES
-			.filter((activity) => !deletedActivityIds.includes(activity.id))
-			.map((activity) => activityEdits[activity.id] || activity),
-		...activityAdditions,
-	].map((activity) => ({
-		...activity,
-		category: normalizeActivityCategory(activity.category),
-	}));
-
 	useEffect(() => {
-		const fetchPlans = async () => {
+		const fetchAll = async () => {
 			setLoading(true);
+			const baseUrl = getBaseUrl();
+			let fetchedActivities: Activity[] = [];
+
 			try {
-				const baseUrl = getBaseUrl();
-				console.log('Fetching from baseUrl:', baseUrl);
+				const activitiesResponse = await fetch(`${baseUrl}/admin_cultivation/get_cultivation_activities`);
+				if (!activitiesResponse.ok) throw new Error('Failed to fetch activities');
+				const activitiesData = await activitiesResponse.json();
+				fetchedActivities = (activitiesData.activities || []).map((activity: any) => ({
+					...activity,
+					category: normalizeActivityCategory(activity.category),
+				}));
+				setAvailableActivities(fetchedActivities);
+			} catch (err) {
+				setAvailableActivities([]);
+			}
+
+			try {
 				const response = await fetch(`${baseUrl}/admin_cultivation/get_master_cultivation_plans`);
 				if (!response.ok) throw new Error('Failed to fetch plans');
 				const data = await response.json();
@@ -2121,9 +2214,9 @@ const CultivationMasterModule = () => {
 				const plans: MasterPlanner[] = Object.entries(data.plan || {}).map(([id, plan]: any) => ({
 					id,
 					name: plan.plan_name,
-					activities: (plan.plan_list || []).map((item: any, idx: number) => {
+					activities: (plan.plan_list || []).map((item: any) => {
 						// Find activityId by name
-						const act = availableActivities.find(a => a.name === item.activity);
+						const act = fetchedActivities.find((a) => a.name === item.activity);
 						return {
 							id: `${id}-a${item.index}`,
 							sno: item.index,
@@ -2144,7 +2237,7 @@ const CultivationMasterModule = () => {
 				setLoading(false);
 			}
 		};
-		fetchPlans();
+		fetchAll();
 	}, []);
 
 	const handleDelete = (id: string) => {
@@ -2160,52 +2253,19 @@ const CultivationMasterModule = () => {
 		}
 	};
 
-	const isBaseActivityId = (id: string) => ACTIVITIES.some((a) => a.id === id);
-
 	const handleSaveActivity = (activity: Activity) => {
-		if (isBaseActivityId(activity.id)) {
-			setActivityEdits((prev) => {
-				const next = { ...prev, [activity.id]: activity };
-				saveToStorage(ACTIVITY_EDITS_STORAGE_KEY, next);
-				return next;
-			});
-			return;
-		}
-
-		setActivityAdditions((prev) => {
+		setAvailableActivities((prev) => {
 			const exists = prev.some((a) => a.id === activity.id);
-			const next = exists ? prev.map((a) => (a.id === activity.id ? activity : a)) : [...prev, activity];
-			saveToStorage(ACTIVITY_ADDITIONS_STORAGE_KEY, next);
-			return next;
+			return exists ? prev.map((a) => (a.id === activity.id ? activity : a)) : [...prev, activity];
 		});
 	};
 
 	const handleDeleteActivity = (id: string) => {
-		if (isBaseActivityId(id)) {
-			setDeletedActivityIds((prev) => {
-				const next = prev.includes(id) ? prev : [...prev, id];
-				saveToStorage(ACTIVITY_DELETED_STORAGE_KEY, next);
-				return next;
-			});
-			setActivityEdits((prev) => {
-				if (!(id in prev)) return prev;
-				const next = { ...prev };
-				delete next[id];
-				saveToStorage(ACTIVITY_EDITS_STORAGE_KEY, next);
-				return next;
-			});
-			return;
-		}
-
-		setActivityAdditions((prev) => {
-			const next = prev.filter((a) => a.id !== id);
-			saveToStorage(ACTIVITY_ADDITIONS_STORAGE_KEY, next);
-			return next;
-		});
+		setAvailableActivities((prev) => prev.filter((a) => a.id !== id));
 	};
 
 	if (loading) {
-		return <div className="p-8 text-center text-muted-foreground">Loading plans...</div>;
+		return <div className="p-8 text-center text-muted-foreground">Loading...</div>;
 	}
 
 	return (

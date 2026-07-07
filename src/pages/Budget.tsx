@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import {
   Plus, TrendingUp, TrendingDown, DollarSign, Filter,
-  Lock, Unlock, X, Edit3, Trash2, FileSpreadsheet,
+  Lock, Unlock, X, Edit3, Trash2, FileSpreadsheet, Info, Sparkles, ArrowUpDown,
 } from "lucide-react";
 import getBaseUrl from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
+import Playground from "./Playground";
+import DisbursementSequence, { type DisbursementSequenceLineItem } from "./DisbursementSequence";
 
 type BudgetType = "Capex" | "Opex";
 
@@ -26,6 +28,19 @@ type BudgetItem = {
   workingXlsxUrl: string;
   amountInPipeline: number;
   remainingAmount: number;
+};
+
+type BudgetAllocationEntry = {
+  flow_id: string;
+  order_number: string;
+  allocation: {
+    row_number: number;
+    line_item: string;
+    category: string;
+    type: string;
+    budgeted: number;
+    allocated: number;
+  };
 };
 
 type FarmRecord = {
@@ -1821,6 +1836,45 @@ export default function Budget() {
   const [showAdd,        setShowAdd]        = useState(false);
   const [editingItem,    setEditingItem]    = useState<BudgetItem | null>(null);
   const [xlsxDrawerItem, setXlsxDrawerItem] = useState<BudgetItem | null>(null);
+  const [showPlayground, setShowPlayground] = useState(false);
+  const [disbursementItem, setDisbursementItem] = useState<DisbursementSequenceLineItem | null>(null);
+  const [expandedAllocationId, setExpandedAllocationId] = useState<string | null>(null);
+  const [allocationBreakdowns, setAllocationBreakdowns] = useState<Record<string, BudgetAllocationEntry[]>>({});
+  const [loadingAllocationId, setLoadingAllocationId] = useState<string | null>(null);
+  const [allocationErrors, setAllocationErrors] = useState<Record<string, string>>({});
+
+  const toggleAllocationBreakdown = async (row: BudgetItem) => {
+    const nextId = expandedAllocationId === row.id ? null : row.id;
+    setExpandedAllocationId(nextId);
+    if (!nextId || allocationBreakdowns[row.id] || loadingAllocationId === row.id) return;
+
+    setLoadingAllocationId(row.id);
+    setAllocationErrors((prev) => {
+      if (!(row.id in prev)) return prev;
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
+    try {
+      const res = await fetch(`${getBaseUrl()}/admin_accounts/get_budget_allocation_schema`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          budget_id: budgetId,
+          line_item_category: row.category,
+          line_item_type: row.type,
+          line_item_name: row.lineItem,
+        }),
+      });
+      const json: any = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) throw new Error(json?.message || "Failed to load allocation breakdown");
+      setAllocationBreakdowns((prev) => ({ ...prev, [row.id]: json.data || [] }));
+    } catch (err: any) {
+      setAllocationErrors((prev) => ({ ...prev, [row.id]: err?.message || "Failed to load allocation breakdown" }));
+    } finally {
+      setLoadingAllocationId((prev) => (prev === row.id ? null : prev));
+    }
+  };
 
   // All non-budget sheets parsed from the xlsx
   const [sheetsMap,       setSheetsMap]       = useState<Record<string, SheetData>>({});
@@ -2119,6 +2173,14 @@ export default function Budget() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setShowPlayground(true)}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 text-sm font-semibold text-violet-700 transition-all hover:bg-violet-100"
+          >
+            <Sparkles className="h-4 w-4" />
+            Playground
+          </button>
+          <button
+            type="button"
             onClick={() => setLocked((l) => !l)}
             className={["inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-all",
               locked ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"].join(" ")}
@@ -2279,8 +2341,10 @@ export default function Budget() {
                 const totalValue    = totalQty * row.ratePerUnit;
                 const utilizedValue = row.utilizedQty * row.ratePerUnit;
                 const utilizedPct   = totalQty > 0 ? Math.min(100, (row.utilizedQty / totalQty) * 100) : 0;
+                const isAllocationExpanded = expandedAllocationId === row.id;
                 return (
-                  <tr key={row.id} className="border-b border-slate-100 text-sm last:border-b-0 hover:bg-slate-50/60">
+                  <Fragment key={row.id}>
+                  <tr className="border-b border-slate-100 text-sm last:border-b-0 hover:bg-slate-50/60">
                     <td className="px-3 py-3.5 text-center text-xs font-semibold text-slate-400 select-none">{idx + 1}</td>
                     <td className="whitespace-nowrap px-4 py-3.5">
                       <span className={`rounded-full px-2.5 py-0.5 text-xs font-extrabold ${typeColors[row.type]}`}>{row.type}</span>
@@ -2296,7 +2360,25 @@ export default function Budget() {
                     {/* ── Cash flow columns ── */}
                     {/* 1. Total Value — what was budgeted */}
                     <td className="whitespace-nowrap bg-emerald-50/60 px-4 py-3.5 text-right border-l-2 border-emerald-200">
-                      <div className="font-extrabold text-emerald-700 tabular-nums">{fmt(totalValue)}</div>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="font-extrabold text-emerald-700 tabular-nums">{fmt(totalValue)}</div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDisbursementItem({
+                              id: row.id,
+                              category: row.category,
+                              lineItem: row.lineItem,
+                              type: row.type,
+                              totalValue,
+                            })
+                          }
+                          title="Disbursement sequence"
+                          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-emerald-200 text-emerald-500 transition-colors hover:border-emerald-400 hover:text-emerald-700"
+                        >
+                          <ArrowUpDown className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
                     </td>
                     {/* 2. Remaining — available budget left; red when overrun */}
                     <td className={`whitespace-nowrap px-4 py-3.5 text-right ${
@@ -2316,9 +2398,24 @@ export default function Budget() {
                     </td>
                     {/* 3. Allocated / In Pipeline — committed but not yet paid */}
                     <td className="whitespace-nowrap bg-violet-50/50 px-4 py-3.5 text-right">
-                      {row.amountInPipeline !== 0
-                        ? <div className="font-extrabold text-violet-700 tabular-nums">{fmt(row.amountInPipeline)}</div>
-                        : <span className="text-slate-300 font-semibold">—</span>}
+                      {row.amountInPipeline !== 0 ? (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="font-extrabold text-violet-700 tabular-nums">{fmt(row.amountInPipeline)}</div>
+                          <button
+                            type="button"
+                            onClick={() => toggleAllocationBreakdown(row)}
+                            title="Show allocation breakdown"
+                            className={[
+                              "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                              isAllocationExpanded
+                                ? "border-violet-400 bg-violet-100 text-violet-700"
+                                : "border-violet-200 text-violet-400 hover:border-violet-400 hover:text-violet-600",
+                            ].join(" ")}
+                          >
+                            <Info className="h-2.5 w-2.5" />
+                          </button>
+                        </div>
+                      ) : <span className="text-slate-300 font-semibold">—</span>}
                     </td>
                     {/* 4. Utilization — actual spend progress */}
                     <td className="px-4 py-3.5 border-l-2 border-slate-200 min-w-[160px]">
@@ -2375,6 +2472,41 @@ export default function Budget() {
                       </td>
                     )}
                   </tr>
+                  {isAllocationExpanded && (
+                    <tr className="border-b border-slate-100 bg-violet-50/30">
+                      <td colSpan={locked ? 15 : 16} className="px-6 py-3">
+                        <div className="rounded-lg border border-violet-100 bg-white px-4 py-3 text-xs">
+                          {loadingAllocationId === row.id ? (
+                            <span className="text-slate-400">Loading allocation breakdown…</span>
+                          ) : allocationErrors[row.id] ? (
+                            <span className="text-red-500">{allocationErrors[row.id]}</span>
+                          ) : (allocationBreakdowns[row.id]?.length ?? 0) === 0 ? (
+                            <span className="text-slate-400">No allocation breakdown found.</span>
+                          ) : (
+                            <table className="w-full text-left">
+                              <thead>
+                                <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                                  <th className="pb-1.5 pr-4 font-bold">Order Number</th>
+                                  <th className="pb-1.5 pr-4 text-right font-bold">Allocated (₹)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {allocationBreakdowns[row.id]!.map((entry) => (
+                                  <tr key={entry.flow_id} className="border-t border-slate-100">
+                                    <td className="py-1.5 pr-4 font-semibold text-slate-700">{entry.order_number}</td>
+                                    <td className="py-1.5 pr-4 text-right font-extrabold text-violet-700 tabular-nums">
+                                      {fmt(entry.allocation.allocated)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -2426,6 +2558,12 @@ export default function Budget() {
           onCellEdit={handleWorkingCellEdit}
           onLoadSheet={loadSheet}
         />
+      )}
+      {showPlayground && (
+        <Playground budgetId={budgetId} onClose={() => setShowPlayground(false)} />
+      )}
+      {disbursementItem && (
+        <DisbursementSequence budgetId={budgetId} item={disbursementItem} onClose={() => setDisbursementItem(null)} />
       )}
     </div>
   );
