@@ -817,6 +817,7 @@ assignedArea: assignment.assigned_area,
 plots: assignment.plot ?? [],
 statusTone: timelineStatusTone(assignment.status),
 statusLabel: timelineStatusLabel(assignment.status),
+taskId: assignment.task_id,
 });
 });
 });
@@ -851,6 +852,28 @@ fieldManagerName: fm?.name ?? '',
 .catch(() =>
 setTimelineAssignmentByFarm((prev) => ({ ...prev, [farmId]: { supervisorName: '', fieldManagerName: '' } })),
 );
+});
+}, [timelineTasks]);
+
+const [timelineProgressImages, setTimelineProgressImages] = useState<Record<string, string[]>>({});
+const fetchedTimelineTaskIds = useRef<Set<string>>(new Set());
+
+// Progress photos for the Task Timeline panel — only fetched for completed tasks (per-task,
+// cached), since get_task_details is only worth calling once a task actually has photos.
+useEffect(() => {
+const taskIds = Array.from(new Set(
+timelineTasks.filter((task) => task.statusTone === 'green' && task.taskId).map((task) => task.taskId as string)
+));
+taskIds.forEach((taskId) => {
+if (fetchedTimelineTaskIds.current.has(taskId)) return;
+fetchedTimelineTaskIds.current.add(taskId);
+
+fetch(`${BASE_URL}/admin_all_task/get_task_details/${taskId}`)
+.then((res) => res.json())
+.then((data: { progress_images?: string[] }) => {
+setTimelineProgressImages((prev) => ({ ...prev, [taskId]: Array.isArray(data?.progress_images) ? data.progress_images : [] }));
+})
+.catch(() => setTimelineProgressImages((prev) => ({ ...prev, [taskId]: [] })));
 });
 }, [timelineTasks]);
 
@@ -1885,6 +1908,7 @@ return (
 				farmerName: task.farmerName,
 				plots: task.plots,
 			})}
+			progressImagesByTaskId={timelineProgressImages}
 		/>
 	</div>
 </div>
