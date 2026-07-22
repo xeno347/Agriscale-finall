@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Search, Plus, X, Phone, Wheat, Check, Map as MapIcon } from 'lucide-react';
+import { Search, Plus, X, Phone, Wheat, Check, Map as MapIcon, ChevronRight } from 'lucide-react';
 import { MapContainer, TileLayer, Polygon, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -158,6 +158,7 @@ const LabourManagement = () => {
 
   // Per-card labour search
   const [cardSearch, setCardSearch]     = useState<Record<string, string>>({});
+  const [expandedFarmId, setExpandedFarmId] = useState<string | null>(null);
 
   // Popup state
   const [popupFarm, setPopupFarm]       = useState<FarmItem | null>(null);
@@ -325,13 +326,13 @@ const LabourManagement = () => {
         </div>
       </div>
 
-      {/* Farm Cards */}
+      {/* Farm Roster */}
       {isLoading ? (
         <div className="text-center py-16 text-muted-foreground">Loading farms...</div>
       ) : filteredFarms.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">No farms found.</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        <div className="rounded-xl border border-border bg-white divide-y divide-border overflow-hidden">
           {filteredFarms.map(farm => {
             const assignedLabours = laboursByFarm[farm.farm_id] ?? [];
             const geo = geoByFarm[farm.farm_id];
@@ -339,111 +340,115 @@ const LabourManagement = () => {
             const visibleLabours = q
               ? assignedLabours.filter(l => l.labour_name.toLowerCase().includes(q))
               : assignedLabours;
+            const isExpanded = expandedFarmId === farm.farm_id;
 
             return (
-              <div key={farm.farm_id} className="bg-white border border-border rounded-xl shadow-sm flex flex-col overflow-hidden hover:shadow-md transition-shadow">
-
-                {/* Mini Map */}
-                <div className="h-40 w-full overflow-hidden bg-gray-900">
-                  {geo ? <FarmMiniMap geo={geo} /> : (
-                    <div className="h-full w-full flex flex-col items-center justify-center bg-gray-900 gap-1">
-                      <MapIcon className="h-6 w-6 text-gray-600" />
-                      <span className="text-[10px] text-gray-500">No map data</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Card Header */}
-                <div className="px-5 py-3 border-b border-border bg-muted/30">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-foreground text-sm truncate">{farm.owner_name}</p>
-                      <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
-                        <Phone className="w-3 h-3 shrink-0" />
-                        <span className="truncate">{farm.contact || '—'}</span>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <div className="flex items-center gap-1">
-                        <Wheat className="w-3.5 h-3.5 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground capitalize">{farm.crop_type || '—'}</span>
-                      </div>
-                      <span className="text-[11px] text-muted-foreground">{farm.area ? `${farm.area} ac` : ''}</span>
+              <div key={farm.farm_id}>
+                {/* Summary row */}
+                <button
+                  type="button"
+                  onClick={() => setExpandedFarmId(isExpanded ? null : farm.farm_id)}
+                  className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+                >
+                  <ChevronRight className={cn('w-4 h-4 text-muted-foreground shrink-0 transition-transform', isExpanded && 'rotate-90')} />
+                  <div className="h-9 w-9 shrink-0 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Wheat className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm text-foreground truncate">{farm.owner_name}</p>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Phone className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{farm.contact || '—'}</span>
                     </div>
                   </div>
-                </div>
+                  <span className="hidden sm:block text-xs text-muted-foreground shrink-0 capitalize w-28 truncate">{farm.crop_type || '—'}</span>
+                  <span className="hidden sm:block text-xs text-muted-foreground shrink-0 w-16 text-right">{farm.area ? `${farm.area} ac` : '—'}</span>
+                  <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-foreground">
+                    {assignedLabours.length} labour{assignedLabours.length !== 1 ? 's' : ''}
+                  </span>
+                </button>
 
-                {/* Labour Section */}
-                <div className="px-5 py-3 flex-1 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                      Labours {assignedLabours.length > 0 ? `(${assignedLabours.length})` : ''}
-                    </p>
-                  </div>
-
-                  {/* Per-card search — only shown when there are labours */}
-                  {assignedLabours.length > 0 && (
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                      <input
-                        type="text"
-                        placeholder="Search labours..."
-                        value={cardSearch[farm.farm_id] ?? ''}
-                        onChange={e => setCardSearch(prev => ({ ...prev, [farm.farm_id]: e.target.value }))}
-                        className="pl-7 pr-3 py-1.5 w-full text-xs border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background"
-                      />
-                    </div>
-                  )}
-
-                  {/* Scrollable labour list */}
-                  <div className="overflow-y-auto max-h-44 space-y-1.5 pr-0.5">
-                    {assignedLabours.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No labours assigned yet.</p>
-                    ) : visibleLabours.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No results.</p>
-                    ) : (
-                      visibleLabours.map(l => {
-                        const vendor = getVendorName(l.employment_type);
-                        const key = `${farm.farm_id}__${l.staff_id}`;
-                        const isRemoving = removingKey === key;
-                        return (
-                          <div key={l.staff_id} className="flex items-center gap-2 group">
-                            <Avatar name={l.labour_name} imageUrl={l.profile_image_url} size="xs" />
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-medium text-foreground truncate">{l.labour_name}</p>
-                              {vendor && (
-                                <p className="text-[10px] text-orange-600 truncate">Contract · {vendor}</p>
-                              )}
-                            </div>
-                            <button
-                              onClick={() => handleRemoveLabour(farm.farm_id, l.staff_id)}
-                              disabled={isRemoving}
-                              className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
-                              title="Remove labour"
-                            >
-                              {isRemoving
-                                ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-                                : <X className="w-3 h-3" />
-                              }
-                            </button>
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div className="border-t border-border bg-muted/20 px-4 py-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-5">
+                      {/* Map */}
+                      <div className="h-44 w-full overflow-hidden rounded-lg bg-gray-900">
+                        {geo ? <FarmMiniMap geo={geo} /> : (
+                          <div className="h-full w-full flex flex-col items-center justify-center bg-gray-900 gap-1">
+                            <MapIcon className="h-6 w-6 text-gray-600" />
+                            <span className="text-[10px] text-gray-500">No map data</span>
                           </div>
-                        );
-                      })
-                    )}
+                        )}
+                      </div>
+
+                      {/* Labour section */}
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Labours {assignedLabours.length > 0 ? `(${assignedLabours.length})` : ''}
+                          </p>
+                          <button
+                            onClick={() => openPopup(farm)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            {assignedLabours.length > 0 ? 'Manage Labours' : 'Add Labour'}
+                          </button>
+                        </div>
+
+                        {assignedLabours.length > 0 && (
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                            <input
+                              type="text"
+                              placeholder="Search labours..."
+                              value={cardSearch[farm.farm_id] ?? ''}
+                              onChange={e => setCardSearch(prev => ({ ...prev, [farm.farm_id]: e.target.value }))}
+                              className="pl-7 pr-3 py-1.5 w-full text-xs border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background"
+                            />
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 max-h-44 overflow-y-auto pr-0.5">
+                          {assignedLabours.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic">No labours assigned yet.</p>
+                          ) : visibleLabours.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic">No results.</p>
+                          ) : (
+                            visibleLabours.map(l => {
+                              const vendor = getVendorName(l.employment_type);
+                              const key = `${farm.farm_id}__${l.staff_id}`;
+                              const isRemoving = removingKey === key;
+                              return (
+                                <div key={l.staff_id} className="flex items-center gap-2 group">
+                                  <Avatar name={l.labour_name} imageUrl={l.profile_image_url} size="xs" />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-foreground truncate">{l.labour_name}</p>
+                                    {vendor && (
+                                      <p className="text-[10px] text-orange-600 truncate">Contract · {vendor}</p>
+                                    )}
+                                  </div>
+                                  <button
+                                    onClick={() => handleRemoveLabour(farm.farm_id, l.staff_id)}
+                                    disabled={isRemoving}
+                                    className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                                    title="Remove labour"
+                                  >
+                                    {isRemoving
+                                      ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                                      : <X className="w-3 h-3" />
+                                    }
+                                  </button>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-
-                {/* Add Labour Button */}
-                <div className="px-5 py-3 border-t border-border bg-gray-50">
-                  <button
-                    onClick={() => openPopup(farm)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                  >
-                    <Plus className="w-4 h-4" />
-                    {assignedLabours.length > 0 ? 'Manage Labours' : 'Add Labour'}
-                  </button>
-                </div>
-
+                )}
               </div>
             );
           })}

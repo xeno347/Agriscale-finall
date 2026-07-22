@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, Boxes, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, FileText, Lock, Phone, Plus, Receipt, SendHorizonal, Upload, User, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 
 import { Button } from '@/components/ui/button';
@@ -1125,7 +1124,6 @@ function AddToInventoryPopup({
 }
 
 export default function PurchaseFlow() {
-  const navigate = useNavigate();
   const [flows, setFlows] = useState<ApiPurchaseFlow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1234,16 +1232,6 @@ export default function PurchaseFlow() {
     } finally {
       setSavingFlows((prev) => { const c = { ...prev }; delete c[flowId]; return c; });
     }
-  };
-
-  const openHoInboxView = (prNumberRaw: string, tab: 'po' | 'indent' | 'comparative') => {
-    const prNumber = safeTrim(prNumberRaw);
-    if (!prNumber) {
-      toast.error('Missing PR number');
-      return;
-    }
-    const qs = new URLSearchParams({ open: prNumber, tab }).toString();
-    navigate(`/ho?${qs}`);
   };
 
   useEffect(() => {
@@ -1622,22 +1610,6 @@ export default function PurchaseFlow() {
                       >
                         <Check className="w-4 h-4" />
                         {savingFlows[flowId] ? 'Saving…' : 'Save Current'}
-                      </button>
-                      <button
-                        disabled={!effectivePrNumber}
-                        onClick={() => openHoInboxView(effectivePrNumber, 'po')}
-                        className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-700 px-2 py-2.5 text-[11px] font-medium transition-colors"
-                      >
-                        <Receipt className="w-4 h-4" />
-                        View Order
-                      </button>
-                      <button
-                        disabled={!effectivePrNumber}
-                        onClick={() => openHoInboxView(effectivePrNumber, 'indent')}
-                        className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-700 px-2 py-2.5 text-[11px] font-medium transition-colors"
-                      >
-                        <FileText className="w-4 h-4" />
-                        View Indent
                       </button>
                     </div>
 

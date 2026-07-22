@@ -1,60 +1,18 @@
 {
   "supersets": [
     {
-      "key": "ceos-desk",
-      "label": "CEO'S DESK",
-      "description": "Executive overview and decision dashboard",
-      "icon": "Landmark",
+      "key": "dashboard",
+      "label": "DASHBOARD",
+      "description": "Land overview dashboard",
+      "icon": "Map",
       "enabled": true,
       "groups": [
         {
-          "key": "executive",
-          "label": "Executive",
+          "key": "overview",
+          "label": "Overview",
           "enabled": true,
           "items": [
-            { "key": "ceos-desk", "label": "CEO's Desk", "path": "/ceos-desk", "icon": "Landmark", "enabled": true }
-          ]
-        }
-      ]
-    },
-    {
-      "key": "admin",
-      "label": "ADMIN",
-      "description": "Admin controls and farmer operations",
-      "icon": "ClipboardCheck",
-      "enabled": true,
-      "groups": [
-        {
-          "key": "indents-request",
-          "label": "Indents and Request",
-          "enabled": true,
-          "items": [
-            { "key": "admin-ops-indents",     "label": "Admin Ops Indents",           "path": "/admin-ops-indents",          "icon": "FileText",      "enabled": true  },
-            { "key": "fuel-requests-admin",   "label": "Fuel Requests",               "path": "/admin-ops-fuel-requests",    "icon": "Fuel",          "enabled": true  },
-            { "key": "on-demand-task",        "label": "On Demand Task & Allocation", "path": "/on-demand-task",             "icon": "ClipboardCheck","enabled": true  },
-            { "key": "admin-request",         "label": "Admin Ops Request",           "path": "/admin-request",              "icon": "ClipboardCheck","enabled": true },
-            { "key": "admin-mrf-approvals",   "label": "Admin MRF Approvals",         "path": "/admin-mrf-approvals",        "icon": "FileText",      "enabled": true },
-            { "key": "admin-inbox",           "label": "Inbox",                       "path": "/admin/inbox",                "icon": "Mail",          "enabled": true  }
-          ]
-        },
-        {
-          "key": "farm-management",
-          "label": "Farm Management",
-          "enabled": true,
-          "items": [
-            { "key": "leads",            "label": "Leads",            "path": "/leads",            "icon": "Users",       "enabled": true  },
-            { "key": "farmers",          "label": "Farmer Directory",          "path": "/farmers",          "icon": "UserCheck",   "enabled": true  },
-            { "key": "land-acquisition", "label": "Land Acquisition", "path": "/land-acquisition", "icon": "Map",         "enabled": true  },
-            { "key": "farm-directory",   "label": "Land Directory",   "path": "/farm-directory",   "icon": "FolderKanban","enabled": true  },
-            { "key": "tasks-beta",       "label": "Tasks (Beta)",     "path": "/tasks-beta",       "icon": "CheckSquare", "enabled": true }
-          ]
-        },
-        {
-          "key": "administration",
-          "label": "Administration",
-          "enabled": true,
-          "items": [
-            { "key": "user-management", "label": "User Management", "path": "/user-management", "icon": "UserCheck", "enabled": true }
+            { "key": "land-overview", "label": "Land Overview", "path": "/land-overview", "icon": "Map", "enabled": true }
           ]
         }
       ]
@@ -72,7 +30,6 @@
           "enabled": true,
           "items": [
             { "key": "inventory",          "label": "Inventory",            "path": "/inventory",          "icon": "Box",     "enabled": true  },
-            { "key": "inventory-indents",  "label": "Inventory Indents",    "path": "/inventory-indents",  "icon": "FileText","enabled": true  },
             { "key": "fuels-consumables",  "label": "Fuels & Consumables",  "path": "/fuels-and-consumables","icon": "Fuel",  "enabled": true  },
             { "key": "inventory-inbox",    "label": "Inbox",                "path": "/inventory/inbox",    "icon": "Mail",    "enabled": true  }
           ]
@@ -82,10 +39,7 @@
           "label": "Purchase And Procurement",
           "enabled": true,
           "items": [
-            { "key": "finance-admin-ops",  "label": "Finance Admin Ops",          "path": "/finance-admin-ops-indents","icon": "FileText",      "enabled": true  },
-            { "key": "purchase-req",       "label": "Purchase Requisition",       "path": "/purchase-requisition",     "icon": "FileText",      "enabled": true  },
             { "key": "vendor-directory",   "label": "Vendor Directory",           "path": "/vendor-directory",         "icon": "FileText",      "enabled": true  },
-            { "key": "ho-module",          "label": "HO Module",                  "path": "/ho",                       "icon": "FileText",      "enabled": true  },
             { "key": "purchase-flow",      "label": "Purchase Flow",              "path": "/purchase-flow",            "icon": "FileText",      "enabled": true  },
             { "key": "work-order",         "label": "Work Order",                 "path": "/work-order",               "icon": "ClipboardCheck","enabled": true  },
             { "key": "scope-of-work",      "label": "Scope of Work",              "path": "/scope-of-work",            "icon": "Link2",         "enabled": true  },
@@ -106,9 +60,7 @@
           "label": "Human Resource",
           "enabled": true,
           "items": [
-            { "key": "hr-management",    "label": "HR Management",         "path": "/hr-management",        "icon": "LayoutDashboard", "enabled": true },
-            { "key": "staff-onboarding", "label": "Employee Directory",    "path": "/staff-onboarding",     "icon": "UserPlus", "enabled": true  },
-            { "key": "man-power-req",    "label": "Man Power Requisition", "path": "/man-power-requisition","icon": "FileText", "enabled": true },
+            { "key": "staff-onboarding", "label": "Staff Onboarding",    "path": "/staff-onboarding",     "icon": "UserPlus", "enabled": true  },
             { "key": "hrms-inbox",       "label": "Inbox",                 "path": "/hrms/inbox",           "icon": "Mail",     "enabled": true }
           ]
         }
@@ -122,16 +74,6 @@
       "enabled": true,
       "groups": [
         {
-          "key": "logistics",
-          "label": "Logistics",
-          "enabled": true,
-          "items": [
-            { "key": "vehicle-management",  "label": "Vehicle List",       "path": "/vehicle-management", "icon": "Car",  "enabled": true  },
-            { "key": "fleet-chart",         "label": "Fleet Chart",        "path": "/fleet-chart",        "icon": "Map",  "enabled": true, "notificationStatus": "warning" },
-            { "key": "logistics-request",   "label": "Logistics Request",  "path": "/logistics",          "icon": "Truck","enabled": true }
-          ]
-        },
-        {
           "key": "operation",
           "label": "Operation",
           "enabled": true,
@@ -139,33 +81,11 @@
             { "key": "cultivation-calendar","label": "Cultivation Calendar",  "path": "/cultivation-calendar","icon": "Calendar","enabled": true  },
             { "key": "cultivation-master",  "label": "Operations Master",     "path": "/cultivation-master",  "icon": "Sprout",  "enabled": true  },
             { "key": "cultivation-plan",    "label": "Cultivation Planner",   "path": "/cultivation-plan",    "icon": "Layers",  "enabled": true  },
-            { "key": "field-monitoring",    "label": "Field Monitoring",      "path": "/field-monitoring",    "icon": "Activity","enabled": true  },
             { "key": "field-visit-analytics","label": "Field Visit Analytics","path": "/field-visit-analytics","icon": "Map",    "enabled": true  },
             { "key": "labour-management",   "label": "Labour Management",     "path": "/labour-management",   "icon": "Users",   "enabled": true  },
-            { "key": "harvest-planning",    "label": "Harvest Planning",      "path": "/harvest-planning",    "icon": "Sprout",  "enabled": true },
             { "key": "harvest-orders",      "label": "Harvest Orders",        "path": "/harvest-orders",      "icon": "Package", "enabled": true },
-            { "key": "harvest-cards",       "label": "Harvest Cards",         "path": "/harvest-cards",       "icon": "CreditCard","enabled": true},
             { "key": "weighment",           "label": "Weighment & QC",        "path": "/weighment",           "icon": "Scale",   "enabled": true },
-            { "key": "rental-rate-card",    "label": "Rental Rate Card",      "path": "/rental-rate-card",    "icon": "Tractor", "enabled": true },
-            { "key": "service-requests",    "label": "Service Request",       "path": "/service-requests",    "icon": "FileText","enabled": true }
-          ]
-        }
-      ]
-    },
-    {
-      "key": "director",
-      "label": "DIRECTOR",
-      "description": "Strategic finance and oversight modules",
-      "icon": "Landmark",
-      "enabled": true,
-      "groups": [
-        {
-          "key": "approvals",
-          "label": "Approvals",
-          "enabled": true,
-          "items": [
-            { "key": "director-fuel",    "label": "Fuel Requests", "path": "/director-fuel-requests", "icon": "Fuel", "enabled": true  },
-            { "key": "director-inbox",   "label": "Inbox",         "path": "/director/inbox",         "icon": "Mail", "enabled": true  }
+            { "key": "vehicle-management",  "label": "Vehicle List",          "path": "/vehicle-management",  "icon": "Car",     "enabled": true  }
           ]
         }
       ]
@@ -184,7 +104,6 @@
           "items": [
             { "key": "accounts-dashboard",  "label": "Dashboard",                 "path": "/accounts/dashboard",    "icon": "LayoutDashboard","enabled": true },
             { "key": "accounts-ledger",     "label": "Ledger",                    "path": "/accounts/ledger",       "icon": "BookOpen",       "enabled": true },
-            { "key": "accounts-purchase",   "label": "Purchase Flow Connection",  "path": "/accounts/purchase-flow","icon": "Link2",          "enabled": true },
             { "key": "accounts-payments",   "label": "Payments",                  "path": "/accounts/payments",     "icon": "CreditCard",     "enabled": true },
             { "key": "budget",              "label": "Budget",                    "path": "/budget",                "icon": "PieChart",       "enabled": true }
           ]

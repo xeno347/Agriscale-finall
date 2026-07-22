@@ -29,7 +29,6 @@ export interface MonitorTask {
   date: string;
   farm_id: string;
   farmerName: string;
-  block_id: string;
   totalArea: number;
   assignments: Assignment[];
   task_id?: string;

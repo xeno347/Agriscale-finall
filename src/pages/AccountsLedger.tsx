@@ -1273,14 +1273,16 @@ const AccountsLedger = () => {
           </button>
         </header>
 
-        <div className="inline-flex rounded-lg bg-slate-100/80 p-1 shadow-sm">
+        <div className="flex items-center gap-6 border-b border-slate-200">
           {tabs.map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={[
-                "h-9 rounded-md px-4 text-sm font-medium transition-colors",
-                activeTab === tab ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800",
+                "relative h-11 text-sm font-medium transition-colors",
+                activeTab === tab
+                  ? "text-slate-900 after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-[#173f70]"
+                  : "text-slate-500 hover:text-slate-800",
               ].join(" ")}
             >
               {tab === "Payment Schedule" ? "Create Payment Request" : tab}

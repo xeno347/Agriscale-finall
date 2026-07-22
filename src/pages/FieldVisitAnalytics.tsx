@@ -233,6 +233,16 @@ export default function FieldVisitAnalytics() {
     setData(prev => prev.map(e => e.id === id ? { ...e, flagged: !e.flagged } : e));
   };
 
+  // Group the current page of visits by date for the day-log view
+  const groupedByDate = useMemo(() => {
+    const map = new Map<string, FieldVisitEntry[]>();
+    for (const e of paginated) {
+      if (!map.has(e.date)) map.set(e.date, []);
+      map.get(e.date)!.push(e);
+    }
+    return Array.from(map.entries());
+  }, [paginated]);
+
   return (
     <div className="flex flex-col h-full bg-gray-50/50 overflow-hidden">
 
@@ -355,131 +365,114 @@ export default function FieldVisitAnalytics() {
         </div>
       </div>
 
-      {/* ── Table ── */}
+      {/* ── Day-grouped visit log ── */}
       <div className="flex-1 overflow-auto px-6 py-4">
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
 
-          {/* Header */}
-          <div className="grid grid-cols-[18px_1.2fr_1fr_0.8fr_80px_1.8fr_80px_0.8fr_80px_80px] gap-x-4 px-5 py-3 bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-            <div />
-            <div>Plot</div>
-            <div>Farm</div>
-            <div>Manager</div>
-            <div>Height</div>
-            <div>Issues</div>
-            <div>Fruiting</div>
-            <div>Date</div>
-            <div className="text-center">Images</div>
-            <div className="text-center">Flag</div>
-          </div>
-
-          {/* Rows */}
           {paginated.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-300">
               <Leaf className="w-10 h-10 mb-3" />
               <p className="text-sm text-gray-400">No visits match the current filter</p>
             </div>
           ) : (
-            paginated.map((entry) => {
-              const sev = getSeverity(entry);
-              const cfg = severityConfig[sev];
-              const issueCount = [entry.disease.present, entry.insects.present, entry.weeds.present].filter(Boolean).length;
-
-              return (
-                <div
-                  key={entry.id}
-                  className={cn(
-                    'grid grid-cols-[18px_1.2fr_1fr_0.8fr_80px_1.8fr_80px_0.8fr_80px_80px] gap-x-4 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50/60 transition-colors',
-                    cfg.row,
-                    entry.flagged && 'ring-1 ring-inset ring-rose-300',
-                  )}
-                >
-                  {/* Severity dot */}
-                  <div className={cn('w-2 h-2 rounded-full shrink-0', cfg.dot)} />
-
-                  {/* Plot */}
-                  <div>
-                    <p className="text-[12px] font-semibold text-gray-900">{entry.plot_name}</p>
-                    <p className="text-[10px] text-gray-400">{entry.block_name}</p>
-                  </div>
-
-                  {/* Farm */}
-                  <div className="text-[12px] text-gray-600 truncate">{entry.farm_name}</div>
-
-                  {/* Manager */}
-                  <div className="text-[12px] text-gray-600">{entry.field_manager}</div>
-
-                  {/* Height */}
-                  <div className="flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3 text-gray-400 shrink-0" />
-                    <span className="text-[12px] font-mono text-gray-700">{entry.crop_height_cm} cm</span>
-                  </div>
-
-                  {/* Issues */}
-                  <div className="flex flex-wrap gap-1">
-                    {issueCount === 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
-                        <CheckCircle2 className="w-2.5 h-2.5" /> No Issues
-                      </span>
-                    ) : (
-                      <>
-                        <IssueBadge issue={entry.disease} label="Disease" colorClass="bg-red-100 text-red-700 border-red-200" />
-                        <IssueBadge issue={entry.insects} label="Insects" colorClass="bg-orange-100 text-orange-700 border-orange-200" />
-                        <IssueBadge issue={entry.weeds}   label="Weeds"   colorClass="bg-yellow-100 text-yellow-700 border-yellow-200" />
-                      </>
-                    )}
-                  </div>
-
-                  {/* Fruiting */}
-                  <div>
-                    {entry.fruiting ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-purple-100 text-purple-700 border-purple-200">
-                        <Flower2 className="w-2.5 h-2.5" /> Yes
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-gray-400">—</span>
-                    )}
-                  </div>
-
-                  {/* Date */}
-                  <div className="text-[11px] text-gray-500">
-                    {new Date(entry.date).toLocaleDateString('en-IN', { day:'numeric', month:'short' })}
-                  </div>
-
-                  {/* Images */}
-                  <div className="flex justify-center">
-                    <button
-                      onClick={() => setLightboxEntry(entry)}
-                      className={cn(
-                        'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10px] font-semibold transition-colors',
-                        entry.images.length > 0
-                          ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                          : 'border-gray-200 bg-gray-50 text-gray-400 hover:bg-gray-100',
-                      )}
-                    >
-                      <ImageIcon className="w-3 h-3" />
-                      {entry.images.length || 0}
-                    </button>
-                  </div>
-
-                  {/* Flag */}
-                  <div className="flex justify-center">
-                    <button
-                      onClick={() => toggleFlag(entry.id)}
-                      title={entry.flagged ? 'Remove flag' : 'Flag for attention'}
-                      className={cn(
-                        'p-1.5 rounded-lg border transition-colors',
-                        entry.flagged
-                          ? 'border-rose-300 bg-rose-100 text-rose-600 hover:bg-rose-200'
-                          : 'border-gray-200 bg-white text-gray-400 hover:border-rose-200 hover:text-rose-500',
-                      )}
-                    >
-                      <Flag className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+            groupedByDate.map(([date, entries]) => (
+              <div key={date}>
+                {/* Day header */}
+                <div className="flex items-center gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
+                  <CalendarDays className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  <span className="text-[11px] font-bold text-gray-700">
+                    {new Date(date).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                  </span>
+                  <span className="text-[10px] text-gray-400">· {entries.length} visit{entries.length !== 1 ? 's' : ''}</span>
                 </div>
-              );
-            })
+
+                {entries.map((entry) => {
+                  const sev = getSeverity(entry);
+                  const cfg = severityConfig[sev];
+                  const issueCount = [entry.disease.present, entry.insects.present, entry.weeds.present].filter(Boolean).length;
+
+                  return (
+                    <div
+                      key={entry.id}
+                      className={cn(
+                        'flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-3 border-b border-gray-50 hover:bg-gray-50/60 transition-colors',
+                        cfg.row,
+                        entry.flagged && 'ring-1 ring-inset ring-rose-300',
+                      )}
+                    >
+                      {/* Severity dot */}
+                      <div className={cn('w-2 h-2 rounded-full shrink-0', cfg.dot)} />
+
+                      {/* Plot */}
+                      <div className="w-36 shrink-0">
+                        <p className="text-[12px] font-semibold text-gray-900 truncate">{entry.plot_name}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{entry.block_name}</p>
+                      </div>
+
+                      {/* Farm */}
+                      <div className="w-32 shrink-0 text-[12px] text-gray-600 truncate">{entry.farm_name}</div>
+
+                      {/* Manager */}
+                      <div className="w-24 shrink-0 text-[12px] text-gray-600 truncate">{entry.field_manager}</div>
+
+                      {/* Height */}
+                      <div className="w-20 shrink-0 flex items-center gap-1">
+                        <TrendingUp className="w-3 h-3 text-gray-400 shrink-0" />
+                        <span className="text-[12px] font-mono text-gray-700">{entry.crop_height_cm} cm</span>
+                      </div>
+
+                      {/* Issues */}
+                      <div className="flex flex-1 min-w-[180px] flex-wrap gap-1">
+                        {issueCount === 0 ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                            <CheckCircle2 className="w-2.5 h-2.5" /> No Issues
+                          </span>
+                        ) : (
+                          <>
+                            <IssueBadge issue={entry.disease} label="Disease" colorClass="bg-red-100 text-red-700 border-red-200" />
+                            <IssueBadge issue={entry.insects} label="Insects" colorClass="bg-orange-100 text-orange-700 border-orange-200" />
+                            <IssueBadge issue={entry.weeds}   label="Weeds"   colorClass="bg-yellow-100 text-yellow-700 border-yellow-200" />
+                          </>
+                        )}
+                        {entry.fruiting && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-purple-100 text-purple-700 border-purple-200">
+                            <Flower2 className="w-2.5 h-2.5" /> Fruiting
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Images */}
+                      <button
+                        onClick={() => setLightboxEntry(entry)}
+                        className={cn(
+                          'shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10px] font-semibold transition-colors',
+                          entry.images.length > 0
+                            ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                            : 'border-gray-200 bg-gray-50 text-gray-400 hover:bg-gray-100',
+                        )}
+                      >
+                        <ImageIcon className="w-3 h-3" />
+                        {entry.images.length || 0}
+                      </button>
+
+                      {/* Flag */}
+                      <button
+                        onClick={() => toggleFlag(entry.id)}
+                        title={entry.flagged ? 'Remove flag' : 'Flag for attention'}
+                        className={cn(
+                          'shrink-0 p-1.5 rounded-lg border transition-colors',
+                          entry.flagged
+                            ? 'border-rose-300 bg-rose-100 text-rose-600 hover:bg-rose-200'
+                            : 'border-gray-200 bg-white text-gray-400 hover:border-rose-200 hover:text-rose-500',
+                        )}
+                      >
+                        <Flag className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
 

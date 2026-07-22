@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 type HarvestCardQrPayload = {
   card_id?: string;
@@ -692,45 +691,60 @@ export default function WeighmentQCPage() {
           ) : null}
 
           {weighmentRows.length > 0 ? (
-            <div className="rounded-xl border border-border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead className="min-w-[240px]">farm_id</TableHead>
-                    <TableHead className="min-w-[170px]">order_id</TableHead>
-                    <TableHead className="min-w-[280px]">Weighment</TableHead>
-                    <TableHead className="min-w-[280px]">QC</TableHead>
-                    <TableHead className="w-40">Download</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {weighmentRows.map((row) => (
-                    <TableRow key={row.row_id}>
-                      <TableCell className="font-medium break-words">{row.farm_id}</TableCell>
-                      <TableCell className="break-words">{row.order_id}</TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div>Gross: {row.weighment.gross_weight}</div>
-                          <div>Tare: {row.weighment.tare_weight}</div>
-                          <div className="font-medium">Net: {row.weighment.net_weight}</div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div>Moisture: {row.quality_check.moisture_percentage}%</div>
-                          <div>Foreign: {row.quality_check.foreign_material_percentage}%</div>
-                          <div>Chopping: {row.quality_check.chopping_size}</div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Button type="button" variant="outline" onClick={() => downloadTripReceipt(row)}>
-                          Download
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="space-y-3">
+              {weighmentRows.map((row) => (
+                <div
+                  key={row.row_id}
+                  className="relative flex flex-col overflow-hidden rounded-xl border border-dashed border-border bg-card sm:flex-row"
+                >
+                  {/* Left stub — identity */}
+                  <div className="flex shrink-0 flex-col justify-center gap-2 bg-muted/30 p-4 sm:w-[200px]">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Farm ID</p>
+                      <p className="break-words text-sm font-semibold text-foreground">{row.farm_id}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Order ID</p>
+                      <p className="break-words font-mono text-sm text-foreground">{row.order_id}</p>
+                    </div>
+                  </div>
+
+                  <div className="hidden w-px shrink-0 border-l border-dashed border-border sm:block" />
+
+                  {/* Middle — weighment + QC */}
+                  <div className="grid flex-1 grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+                    <div>
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Weighment</p>
+                      <div className="space-y-0.5 text-sm">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Gross</span><span className="font-medium">{row.weighment.gross_weight}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Tare</span><span className="font-medium">{row.weighment.tare_weight}</span></div>
+                        <div className="flex justify-between font-bold text-foreground"><span>Net</span><span>{row.weighment.net_weight}</span></div>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Quality Check</p>
+                      <div className="space-y-0.5 text-sm">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Moisture</span><span className="font-medium">{row.quality_check.moisture_percentage}%</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Foreign</span><span className="font-medium">{row.quality_check.foreign_material_percentage}%</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Chopping</span><span className="font-medium">{row.quality_check.chopping_size}</span></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="hidden w-px shrink-0 border-l border-dashed border-border sm:block" />
+
+                  {/* Right stub — action */}
+                  <div className="flex shrink-0 items-center justify-center bg-muted/30 p-4 sm:w-32">
+                    <Button type="button" variant="outline" size="sm" onClick={() => downloadTripReceipt(row)}>
+                      Download
+                    </Button>
+                  </div>
+
+                  {/* Perforation notches */}
+                  <span className="absolute left-[200px] top-0 hidden h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#f8f9fb] sm:block" />
+                  <span className="absolute left-[200px] bottom-0 hidden h-3 w-3 -translate-x-1/2 translate-y-1/2 rounded-full bg-[#f8f9fb] sm:block" />
+                </div>
+              ))}
             </div>
           ) : null}
         </div>

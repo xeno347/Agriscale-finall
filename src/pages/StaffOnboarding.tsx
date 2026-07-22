@@ -101,6 +101,7 @@ const emptyEditProfileDetails: EditProfileDetails = {
 const StaffOnboarding = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeStaffGroup, setActiveStaffGroup] = useState<'management' | 'field'>('management');
   const [staffList, setStaffList] = useState<StaffApiItem[]>([]);
   const [isLoadingStaff, setIsLoadingStaff] = useState(false);
   const [activeProfileTab, setActiveProfileTab] = useState('Personal Details');
@@ -786,7 +787,7 @@ const StaffOnboarding = () => {
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <p className="text-sm font-bold text-emerald-700">Organization</p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">Employee Directory</h1>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">Staff Onboarding</h1>
           <p className="mt-3 text-base font-medium text-slate-600">Manage and view all employee information</p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
@@ -861,19 +862,51 @@ const StaffOnboarding = () => {
           <p className="text-sm">No staff found.</p>
         </div>
       ) : (
-        <div className="space-y-10">
-          {renderStaffSection(
-            'Management Staff',
-            'Office, administration, finance, HR, leadership, and coordination roles',
-            managementStaff,
-            Users,
-          )}
-          {renderStaffSection(
-            'Field Staff',
-            'Field-facing teams, supervisors, operators, drivers, and site roles',
-            fieldStaff,
-            MapPin,
-          )}
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          {/* Category rail */}
+          <div className="flex gap-2 overflow-x-auto pb-1 lg:w-56 lg:shrink-0 lg:flex-col lg:overflow-visible lg:pb-0">
+            {([
+              { key: 'management' as const, label: 'Management Staff', icon: Users, count: managementStaff.length },
+              { key: 'field' as const, label: 'Field Staff', icon: MapPin, count: fieldStaff.length },
+            ]).map(group => (
+              <button
+                key={group.key}
+                type="button"
+                onClick={() => setActiveStaffGroup(group.key)}
+                className={cn(
+                  'flex shrink-0 items-center gap-3 rounded-xl border px-4 py-3.5 text-left transition lg:shrink',
+                  activeStaffGroup === group.key
+                    ? 'border-[#0D3A35] bg-[#0D3A35] text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                )}
+              >
+                <group.icon className={cn('h-5 w-5 shrink-0', activeStaffGroup === group.key ? 'text-white' : 'text-slate-400')} />
+                <div className="min-w-0">
+                  <p className="whitespace-nowrap text-sm font-bold">{group.label}</p>
+                  <p className={cn('text-xs font-semibold', activeStaffGroup === group.key ? 'text-white/70' : 'text-slate-400')}>
+                    {formatTwoDigit(group.count)} employees
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* Selected group */}
+          <div className="min-w-0 flex-1">
+            {activeStaffGroup === 'management'
+              ? renderStaffSection(
+                  'Management Staff',
+                  'Office, administration, finance, HR, leadership, and coordination roles',
+                  managementStaff,
+                  Users,
+                )
+              : renderStaffSection(
+                  'Field Staff',
+                  'Field-facing teams, supervisors, operators, drivers, and site roles',
+                  fieldStaff,
+                  MapPin,
+                )}
+          </div>
         </div>
       )}
 

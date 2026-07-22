@@ -481,78 +481,82 @@ function BudgetCardItem({ budget, onClick }: { budget: BudgetCard; onClick: () =
     <div
       onClick={budget.locked ? undefined : onClick}
       className={[
-        "group relative flex flex-col gap-4 rounded-xl border p-5 shadow-sm transition-all",
+        "group relative flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-slate-100 px-5 py-4 transition-colors last:border-b-0",
         budget.locked
-          ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-70"
-          : "cursor-pointer border-slate-200 bg-white hover:border-[#173f70]/40 hover:shadow-md",
+          ? "cursor-not-allowed bg-slate-50 opacity-70"
+          : "cursor-pointer bg-white hover:bg-slate-50",
       ].join(" ")}
     >
-      {/* Top */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className={`truncate text-base font-extrabold transition-colors ${budget.locked ? "text-slate-500" : "text-slate-900 group-hover:text-[#173f70]"}`}>
-            {budget.budget_name}
-          </h3>
-          <p className="mt-0.5 text-xs font-semibold text-slate-400">FY {fy}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {budget.locked ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-extrabold text-red-600">
-              <Lock className="h-3 w-3" />
-              Locked
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-extrabold text-emerald-600">
-              <Unlock className="h-3 w-3" />
-              Open
-            </span>
-          )}
-          <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${seasonColor}`}>
-            {budget.crop_season}
-          </span>
-        </div>
+      {/* Season color rail */}
+      <span className={`h-8 w-1 shrink-0 rounded-full ${seasonColor.split(" ")[0]}`} />
+
+      {/* Name + FY */}
+      <div className="min-w-[180px] flex-1">
+        <h3 className={`truncate text-sm font-extrabold transition-colors ${budget.locked ? "text-slate-500" : "text-slate-900 group-hover:text-[#173f70]"}`}>
+          {budget.budget_name}
+        </h3>
+        <p className="mt-0.5 text-[11px] font-semibold text-slate-400">FY {fy}</p>
       </div>
 
-      {/* Details */}
-      <div className="space-y-2">
-        {budget.crop_type && (
-          <div className="flex items-center gap-2 text-xs">
-            <Wheat className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-            <span className="font-semibold capitalize text-slate-700">{budget.crop_type}</span>
-          </div>
-        )}
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-          <span className="font-semibold">{fmtDate(budget.project_start_date)} → {fmtDate(budget.project_end_date)}</span>
+      {/* Season badge */}
+      <span className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${seasonColor}`}>
+        {budget.crop_season}
+      </span>
+
+      {/* Crop type */}
+      {budget.crop_type && (
+        <div className="flex shrink-0 items-center gap-1.5 text-xs">
+          <Wheat className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <span className="font-semibold capitalize text-slate-700">{budget.crop_type}</span>
         </div>
-        {budget.budget_xlsx_url && (
-          <div className="flex items-center gap-2 text-xs">
-            <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-            <span className="font-semibold text-emerald-600">Working XLSX linked</span>
-          </div>
-        )}
+      )}
+
+      {/* Dates */}
+      <div className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500">
+        <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <span className="font-semibold">{fmtDate(budget.project_start_date)} → {fmtDate(budget.project_end_date)}</span>
       </div>
 
-      {/* Footer stats */}
-      <div className="mt-auto grid grid-cols-2 gap-3 rounded-lg bg-slate-50 px-3 py-2.5">
-        <div>
-          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Farms</p>
-          <p className="mt-0.5 text-sm font-extrabold text-slate-700">{farmCount}</p>
+      {/* xlsx linked */}
+      {budget.budget_xlsx_url && (
+        <div className="flex shrink-0 items-center gap-1.5 text-xs" title="Working XLSX linked">
+          <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
         </div>
-        <div>
-          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Status</p>
-          <p className={`mt-0.5 text-sm font-extrabold capitalize ${budget.status === "active" ? "text-emerald-600" : "text-slate-500"}`}>
-            {budget.status}
-          </p>
-        </div>
+      )}
+
+      {/* Farms */}
+      <div className="w-16 shrink-0 text-center">
+        <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Farms</p>
+        <p className="mt-0.5 text-sm font-extrabold text-slate-700">{farmCount}</p>
       </div>
+
+      {/* Status */}
+      <div className="w-20 shrink-0 text-center">
+        <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Status</p>
+        <p className={`mt-0.5 text-sm font-extrabold capitalize ${budget.status === "active" ? "text-emerald-600" : "text-slate-500"}`}>
+          {budget.status}
+        </p>
+      </div>
+
+      {/* Locked/Open */}
+      {budget.locked ? (
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-extrabold text-red-600">
+          <Lock className="h-3 w-3" />
+          Locked
+        </span>
+      ) : (
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-extrabold text-emerald-600">
+          <Unlock className="h-3 w-3" />
+          Open
+        </span>
+      )}
 
       {/* Add HR Budget — just upload an xlsx, merged straight into this budget */}
       <button
         type="button"
         disabled={budget.locked || uploadingHr}
         onClick={(e) => { e.stopPropagation(); hrFileRef.current?.click(); }}
-        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white py-2 text-xs font-semibold text-slate-600 transition-all hover:border-[#173f70]/40 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-all hover:border-[#173f70]/40 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {uploadingHr ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Users className="h-3.5 w-3.5" />}
         {uploadingHr ? "Uploading…" : "Add HR Budget"}
@@ -568,7 +572,7 @@ function BudgetCardItem({ budget, onClick }: { budget: BudgetCard; onClick: () =
 
       {/* Arrow hint on hover — only for unlocked */}
       {!budget.locked && (
-        <ChevronRight className="absolute bottom-4 right-4 h-4 w-4 text-[#173f70] opacity-0 transition-opacity group-hover:opacity-100" />
+        <ChevronRight className="h-4 w-4 shrink-0 text-[#173f70] opacity-0 transition-opacity group-hover:opacity-100" />
       )}
     </div>
   );
@@ -668,7 +672,7 @@ export default function BudgetDashboard() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           {filtered.map((b) => (
             <BudgetCardItem
               key={b.budget_id}

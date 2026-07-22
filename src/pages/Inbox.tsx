@@ -193,6 +193,7 @@ const Inbox = ({ department }: InboxProps) => {
   const [messages, setMessages]   = useState<Message[]>([]);
   const [loading, setLoading]     = useState(true);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchMessages = async () => {
@@ -202,16 +203,16 @@ const Inbox = ({ department }: InboxProps) => {
         const res  = await fetch(`${BASE_URL}/admin_all_inbox/get_all_inbox_requests/${slug}`);
         const data: any = await res.json().catch(() => null);
         if (res.ok && Array.isArray(data?.inbox_requests)) {
-          setMessages(
-            data.inbox_requests.map((r: any) => ({
-              id:      String(r.message_id),
-              from:    String(r.from) as Department,
-              to:      String(r.to) as Department,
-              message: String(r.message),
-              date:    String(r.timestamp),
-              seen:    Boolean(r.read),
-            })),
-          );
+          const list = data.inbox_requests.map((r: any) => ({
+            id:      String(r.message_id),
+            from:    String(r.from) as Department,
+            to:      String(r.to) as Department,
+            message: String(r.message),
+            date:    String(r.timestamp),
+            seen:    Boolean(r.read),
+          }));
+          setMessages(list);
+          setSelectedId(list.length > 0 ? list[0].id : null);
         }
       } catch { /* silently fail */ }
       finally { setLoading(false); }
@@ -220,6 +221,13 @@ const Inbox = ({ department }: InboxProps) => {
   }, [department]);
 
   const unreadCount = messages.filter(m => !m.seen).length;
+  const selectedMessage = messages.find(m => m.id === selectedId) ?? null;
+
+  const selectMessage = (id: string) => {
+    setSelectedId(id);
+    const msg = messages.find(m => m.id === id);
+    if (msg && !msg.seen) markSeen(id);
+  };
 
   const markSeen = async (id: string) => {
     setMessages(prev => prev.map(m => m.id === id ? { ...m, seen: true } : m));
@@ -300,7 +308,7 @@ const Inbox = ({ department }: InboxProps) => {
         </div>
       </div>
 
-      {/* Message list */}
+      {/* Two-pane mail client */}
       <div className="px-6 py-4">
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-24 text-sm text-gray-400">
@@ -314,67 +322,75 @@ const Inbox = ({ department }: InboxProps) => {
             <p className="text-gray-300 text-sm mt-0.5">Messages sent to {department} will appear here</p>
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
-            {/* Table header */}
-            <div className="grid grid-cols-[20px_140px_140px_1fr_120px] gap-4 px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-              <div />
-              <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Date</p>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">From</p>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Message</p>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 text-right">Action</p>
+          <div className="flex h-[calc(100vh-220px)] min-h-[420px] rounded-xl border border-gray-200 bg-white overflow-hidden">
+            {/* Left: message list */}
+            <div className="w-[320px] shrink-0 border-r border-gray-200 overflow-y-auto divide-y divide-gray-100">
+              {messages.map(msg => (
+                <button
+                  key={msg.id}
+                  onClick={() => selectMessage(msg.id)}
+                  className={cn(
+                    'w-full text-left px-4 py-3 transition-colors hover:bg-gray-50',
+                    msg.id === selectedId ? 'bg-indigo-50' : !msg.seen && 'bg-indigo-50/30',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold', DEPT_COLOR[msg.from])}>
+                      {msg.from}
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!msg.seen && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />}
+                      <span className="text-[11px] text-gray-400 tabular-nums">{fmtDate(msg.date)}</span>
+                    </div>
+                  </div>
+                  <p className={cn('text-sm truncate', !msg.seen ? 'font-semibold text-gray-800' : 'text-gray-500')}>
+                    {msg.message}
+                  </p>
+                </button>
+              ))}
             </div>
 
-            {messages.map(msg => (
-              <div
-                key={msg.id}
-                className={cn(
-                  'grid grid-cols-[20px_140px_140px_1fr_120px] gap-4 px-4 py-3.5 items-center transition-colors hover:bg-gray-50/80',
-                  !msg.seen && 'bg-indigo-50/40',
-                )}
-              >
-                {/* Unread dot */}
-                <div className="flex justify-center">
-                  {!msg.seen && (
-                    <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
-                  )}
+            {/* Right: reading pane */}
+            <div className="flex-1 overflow-y-auto">
+              {selectedMessage ? (
+                <div className="p-6">
+                  <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                      <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold', DEPT_COLOR[selectedMessage.from])}>
+                        {selectedMessage.from}
+                      </span>
+                      <span className="text-gray-300">→</span>
+                      <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold', DEPT_COLOR[selectedMessage.to])}>
+                        {selectedMessage.to}
+                      </span>
+                    </div>
+                    {selectedMessage.seen ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-gray-400 font-medium shrink-0">
+                        <MailOpen className="w-3.5 h-3.5" />
+                        Seen
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => markSeen(selectedMessage.id)}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-2.5 py-1.5 transition-colors shrink-0"
+                      >
+                        <MailOpen className="w-3.5 h-3.5" />
+                        Mark Seen
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mb-3 tabular-nums">{fmtDate(selectedMessage.date)}</p>
+                  <p className="text-[15px] leading-relaxed text-gray-800 whitespace-pre-wrap">
+                    {selectedMessage.message}
+                  </p>
                 </div>
-
-                {/* Date */}
-                <p className={cn('text-sm tabular-nums', !msg.seen ? 'font-semibold text-gray-800' : 'text-gray-500')}>
-                  {fmtDate(msg.date)}
-                </p>
-
-                {/* From department badge */}
-                <div>
-                  <span className={cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold', DEPT_COLOR[msg.from])}>
-                    {msg.from}
-                  </span>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-center">
+                  <Mail className="w-10 h-10 text-gray-200 mb-2" />
+                  <p className="text-gray-400 text-sm">Select a message to read</p>
                 </div>
-
-                {/* Message */}
-                <p className={cn('text-sm truncate', !msg.seen ? 'font-medium text-gray-800' : 'text-gray-500')}>
-                  {msg.message}
-                </p>
-
-                {/* Action */}
-                <div className="flex justify-end">
-                  {msg.seen ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-gray-400 font-medium">
-                      <MailOpen className="w-3.5 h-3.5" />
-                      Seen
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => markSeen(msg.id)}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-2.5 py-1.5 transition-colors"
-                    >
-                      <MailOpen className="w-3.5 h-3.5" />
-                      Mark Seen
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -1,14 +1,13 @@
 import { useState, useEffect } from "react";
 import {
   Users, UserCheck, Sprout, Calendar, UserPlus, Fuel,
-  ChevronLeft, ChevronRight, ChevronDown,
+  ChevronDown, X, Wheat, LogOut,
   Layers, Box, FileText, Map, AlertCircle, User,
   ClipboardCheck, Activity, FolderKanban, Landmark,
   Link2, LayoutDashboard, BookOpen, CreditCard, Receipt,
   Car, Mail, Package, Scale, Truck, CheckSquare, PieChart,
-  Settings,
 } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import modulesConfig from "@/config/modules.json";
@@ -29,8 +28,6 @@ interface NavItemProps {
   icon: React.ElementType;
   label: string;
   notificationStatus?: "warning" | "success" | "none";
-  isSidebarCollapsed: boolean;
-  budgetCard?: boolean;
 }
 
 const NavItem = ({
@@ -38,23 +35,16 @@ const NavItem = ({
   icon: Icon,
   label,
   notificationStatus = "none",
-  isSidebarCollapsed,
-  budgetCard = false,
 }: NavItemProps) => {
   return (
     <NavLink
       to={to}
-      title={isSidebarCollapsed ? label : undefined}
       className={({ isActive }) =>
         cn(
           "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group text-sm relative",
-          budgetCard && "rounded-xl border border-white/10 bg-white/5 px-3 py-3 shadow-sm hover:border-white/20 hover:bg-white/10",
           isActive
-            ? budgetCard
-              ? "border-white/20 bg-white/10 text-white font-semibold"
-              : "bg-white/15 text-white font-semibold"
-            : "text-white/60 hover:bg-white/10 hover:text-white font-medium",
-          isSidebarCollapsed && "justify-center px-2"
+            ? "bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] font-semibold"
+            : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 font-medium"
         )
       }
       end
@@ -63,36 +53,20 @@ const NavItem = ({
         <>
           <Icon
             className={cn(
-              "shrink-0 transition-transform group-hover:scale-105",
-              isSidebarCollapsed ? "w-6 h-6" : budgetCard ? "w-5 h-5" : "w-5 h-5",
+              "w-5 h-5 shrink-0 transition-transform group-hover:scale-105",
               isActive
-                ? "text-white"
-                : "text-white/40 group-hover:text-white"
+                ? "text-[var(--brand-primary)]"
+                : "text-slate-400 group-hover:text-slate-700"
             )}
           />
 
-          {!isSidebarCollapsed && <span className="truncate">{label}</span>}
-          {!isSidebarCollapsed && <span className="ml-auto" />}
+          <span className="truncate">{label}</span>
+          <span className="ml-auto" />
 
-          {/* Updated notification logic to render AlertCircle icon for warnings */}
           {notificationStatus === "warning" ? (
-            <AlertCircle
-              className={cn(
-                "text-orange-500 fill-orange-50 shrink-0",
-                isSidebarCollapsed
-                  ? "absolute top-1 right-1 w-3 h-3"
-                  : "w-4 h-4"
-              )}
-            />
+            <AlertCircle className="w-4 h-4 text-orange-500 fill-orange-50 shrink-0" />
           ) : notificationStatus === "success" ? (
-            <span
-              className={cn(
-                "w-2 h-2 rounded-full bg-green-500 ring-1 ring-[var(--brand-primary)] shrink-0",
-                isSidebarCollapsed
-                  ? "absolute top-2 right-2"
-                  : ""
-              )}
-            />
+            <span className="w-2 h-2 rounded-full bg-green-500 ring-1 ring-white shrink-0" />
           ) : null}
         </>
       )}
@@ -105,29 +79,16 @@ const NavItem = ({
 interface NavGroupProps {
   label: string;
   children: React.ReactNode;
-  isSidebarCollapsed: boolean;
 }
 
-const NavGroup = ({
-  label,
-  children,
-  isSidebarCollapsed,
-}: NavGroupProps) => {
+const NavGroup = ({ label, children }: NavGroupProps) => {
   const [isOpen, setIsOpen] = useState(true);
-
-  if (isSidebarCollapsed) {
-    return (
-      <div className="space-y-1 py-1 border-t border-white/10 first:border-0">
-        {children}
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-1 py-1">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-bold text-white/50 uppercase tracking-[0.08em] hover:text-white"
+        className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-bold text-slate-500 uppercase tracking-[0.08em] hover:text-slate-900"
       >
         <span>{label}</span>
         <ChevronDown
@@ -152,198 +113,177 @@ const NavGroup = ({
   );
 };
 
-/* ---------------- MAIN SIDEBAR COMPONENT ---------------- */
+/* ---------------- FLOATING TRIGGER BUTTON ---------------- */
 
-interface AppSidebarProps {
+interface FloatingNavTriggerProps {
+  isOpen: boolean;
+  onClick: () => void;
+}
+
+const FloatingNavTrigger = ({ isOpen, onClick }: FloatingNavTriggerProps) => {
+  return (
+    <button
+      onClick={onClick}
+      title={isOpen ? "Close navigation" : "Open navigation"}
+      className={cn(
+        "fixed bottom-6 left-6 z-[110] flex h-14 w-14 items-center justify-center rounded-full",
+        "bg-gradient-to-br from-[var(--brand-primary)] to-[var(--brand-primary-hover)]",
+        "shadow-lg shadow-black/30 ring-1 ring-white/10",
+        "transition-all duration-200 hover:shadow-xl hover:shadow-black/40 hover:scale-105 active:scale-95"
+      )}
+    >
+      <span className="relative flex h-6 w-6 items-center justify-center">
+        <Wheat
+          className={cn(
+            "absolute h-6 w-6 text-white transition-all duration-200",
+            isOpen ? "rotate-90 scale-0 opacity-0" : "rotate-0 scale-100 opacity-100"
+          )}
+        />
+        <X
+          className={cn(
+            "absolute h-6 w-6 text-white transition-all duration-200",
+            isOpen ? "rotate-0 scale-100 opacity-100" : "-rotate-90 scale-0 opacity-0"
+          )}
+        />
+      </span>
+    </button>
+  );
+};
+
+/* ---------------- NAV PANEL (floating overlay) ---------------- */
+
+interface NavPanelProps {
+  isOpen: boolean;
+  onClose: () => void;
   leadsComplete: boolean;
 }
 
-const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const { user } = useAuth();
+const NavPanel = ({ isOpen, onClose, leadsComplete }: NavPanelProps) => {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const isSuperAdmin = user?.id === 'sbr-admin';
 
   useEffect(() => {
-    document.title = "SBR | Farm-connect";
-  }, []);
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, onClose]);
 
   return (
-    <aside
-      className={cn(
-        "sticky top-0 h-screen bg-[var(--brand-primary)] flex flex-col border-r border-[var(--brand-primary-hover)] transition-all z-50",
-        isCollapsed ? "w-[80px]" : "w-72"
-      )}
-    >
-      {/* Header with Logo */}
+    <>
+      {/* Backdrop */}
       <div
+        onClick={onClose}
         className={cn(
-          "h-16 shrink-0 border-b border-white/10 bg-[var(--brand-primary)] px-4",
-          isCollapsed ? "flex items-center justify-center" : "flex items-center justify-between gap-2"
+          "fixed inset-0 z-[105] bg-black/40 transition-opacity duration-200",
+          isOpen ? "opacity-100" : "pointer-events-none opacity-0"
+        )}
+      />
+
+      {/* Panel */}
+      <aside
+        className={cn(
+          "fixed bottom-24 left-6 z-[108] flex w-80 max-h-[80vh] flex-col overflow-hidden rounded-2xl",
+          "bg-white shadow-2xl shadow-black/20 ring-1 ring-slate-200",
+          "origin-bottom-left transition-all duration-200",
+          isOpen
+            ? "scale-100 opacity-100"
+            : "pointer-events-none scale-95 opacity-0"
         )}
       >
-        <div className={cn("flex gap-3", isCollapsed ? "items-center" : "min-w-0 flex-1 items-start")}>
-          {/* Logo Container */}
-          <div className="h-11 w-11 rounded-2xl bg-white/95 flex items-center justify-center shadow-[0_8px_24px_rgba(15,23,42,0.09)] border border-white/10 overflow-hidden relative ring-1 ring-white/20">
-            <img
-              src="/3f-logo.png" 
-              alt="Logo"
-              className="w-full h-full object-contain p-1"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                if(e.currentTarget.parentElement) {
-                    const fallbackSpan = document.createElement('span');
-                    fallbackSpan.innerText = 'FC';
-                    fallbackSpan.className = 'text-green-700 font-bold text-sm';
-                    e.currentTarget.parentElement.appendChild(fallbackSpan);
-                }
-              }}
-            />
+        {/* Header */}
+        <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate font-semibold text-[20px] tracking-[-0.01em] text-slate-900 leading-none">
+              Agriscale
+            </h1>
+            <p className="mt-0.5 truncate text-[12px] text-slate-500 font-medium leading-tight">
+              AmritAgrotech Private Limited
+            </p>
           </div>
 
-          {!isCollapsed && (
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate font-semibold text-[20px] tracking-[-0.01em] text-white leading-none">
-                SaiBioresources
-              </h1>
-              <p className="mt-0.5 truncate text-[12px] text-white/60 font-medium leading-tight">
-                Private Limited
-              </p>
-
-            </div>
-          )}
-        </div>
-
-        {/* Collapse Button */}
-        {!isCollapsed && (
           <button
-            onClick={() => setIsCollapsed(true)}
-            className="mt-0.5 shrink-0 p-1.5 rounded-md text-white/50 hover:bg-white/10 hover:text-white transition-colors"
+            onClick={onClose}
+            className="mt-0.5 shrink-0 p-1.5 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
           >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-        )}
-      </div>
-
-      {/* Expand Button */}
-      {isCollapsed && (
-        <div className="flex justify-center py-3 border-b border-white/10">
-          <button
-            onClick={() => setIsCollapsed(false)}
-            className="p-1.5 rounded-md text-white/50 hover:bg-white/10 hover:text-white transition-colors"
-          >
-            <ChevronRight className="w-5 h-5" />
+            <X className="w-5 h-5" />
           </button>
         </div>
-      )}
 
-      {/* Navigation Links — fully driven by src/config/modules.json */}
-      <nav className="min-h-0 flex-1 p-3 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
-        {modulesConfig.supersets.filter(s => isSuperAdmin || s.enabled).map(superset => {
-          const allowedModules = user?.module_access ?? [];
+        {/* Navigation Links — fully driven by src/config/modules.json */}
+        <nav className="min-h-0 flex-1 p-3 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200">
+          {modulesConfig.supersets.filter(s => isSuperAdmin || s.enabled).map(superset => {
+            const allowedModules = user?.module_access ?? [];
 
-          // Pre-compute which groups have at least one accessible item
-          const visibleGroups = superset.groups
-            .filter(g => isSuperAdmin || g.enabled)
-            .map(g => ({
-              ...g,
-              visibleItems: g.items.filter(item =>
-                item.enabled && (isSuperAdmin || allowedModules.includes(item.key))
-              ),
-            }))
-            .filter(g => g.visibleItems.length > 0);
+            // Pre-compute which groups have at least one accessible item
+            const visibleGroups = superset.groups
+              .filter(g => isSuperAdmin || g.enabled)
+              .map(g => ({
+                ...g,
+                visibleItems: g.items.filter(item =>
+                  item.enabled && (isSuperAdmin || allowedModules.includes(item.key))
+                ),
+              }))
+              .filter(g => g.visibleItems.length > 0);
 
-          // Hide the entire superset if nothing is accessible
-          if (visibleGroups.length === 0) return null;
+            // Hide the entire superset if nothing is accessible
+            if (visibleGroups.length === 0) return null;
 
-          const SupersetIcon = ICON_MAP[superset.icon] ?? FileText;
+            const SupersetIcon = ICON_MAP[superset.icon] ?? FileText;
 
-          return (
-            <div key={superset.key} className={cn("space-y-2 py-1", !isCollapsed && "border-t border-white/10 mt-2 pt-3")}>
-              {!isCollapsed && (
-                <div className="mx-1 mb-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+            return (
+              <div key={superset.key} className="space-y-2 border-t border-slate-200 mt-2 pt-3 py-1 first:mt-0 first:border-0 first:pt-1">
+                <div className="mx-1 mb-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <SupersetIcon className="h-4 w-4 text-white/70" />
-                    <span className="text-[12px] font-extrabold text-white uppercase tracking-[0.1em]">
+                    <SupersetIcon className="h-4 w-4 text-slate-500" />
+                    <span className="text-[12px] font-extrabold text-slate-900 uppercase tracking-[0.1em]">
                       {superset.label}
                     </span>
                   </div>
-                  <p className="mt-1 text-[11px] font-medium text-white/60">
+                  <p className="mt-1 text-[11px] font-medium text-slate-500">
                     {superset.description}
                   </p>
                 </div>
-              )}
 
-              {visibleGroups.map(group => (
-                <NavGroup key={group.key} label={group.label} isSidebarCollapsed={isCollapsed}>
-                  {group.visibleItems.map(item => {
-                    const ItemIcon = ICON_MAP[item.icon] ?? FileText;
-                    const notif = item.key === 'leads'
-                      ? (leadsComplete ? 'success' : 'warning')
-                      : ((item as any).notificationStatus ?? 'none');
-                    return (
-                      <NavItem
-                        key={item.key}
-                        to={item.path}
-                        icon={ItemIcon}
-                        label={item.label}
-                        isSidebarCollapsed={isCollapsed}
-                        notificationStatus={notif as 'warning' | 'success' | 'none'}
-                      />
-                    );
-                  })}
-                </NavGroup>
-              ))}
-            </div>
-          );
-        })}
+                {visibleGroups.map(group => (
+                  <NavGroup key={group.key} label={group.label}>
+                    {group.visibleItems.map(item => {
+                      const ItemIcon = ICON_MAP[item.icon] ?? FileText;
+                      const notif = item.key === 'leads'
+                        ? (leadsComplete ? 'success' : 'warning')
+                        : ((item as any).notificationStatus ?? 'none');
+                      return (
+                        <NavItem
+                          key={item.key}
+                          to={item.path}
+                          icon={ItemIcon}
+                          label={item.label}
+                          notificationStatus={notif as 'warning' | 'success' | 'none'}
+                        />
+                      );
+                    })}
+                  </NavGroup>
+                ))}
+              </div>
+            );
+          })}
+        </nav>
 
-      </nav>
-
-      {/* Footer (User Details) */}
-      <div
-        className={cn(
-          "shrink-0 border-t border-white/10",
-          isCollapsed ? "p-2" : "p-3"
-        )}
-      >
-        <div
-          className={cn(
-            "flex items-center gap-3",
-            isCollapsed ? "justify-center" : ""
-          )}
-        >
-          <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
-            <User className="w-4 h-4 text-white/70" />
-          </div>
-
-          {!isCollapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-white truncate">
-                {user?.name || 'SBR User'}
-              </p>
-              <p className="text-xs text-white/60 truncate">
-                {user?.designation || '—'}
-              </p>
-            </div>
-          )}
-
-          {!isCollapsed && (
-            <NavLink
-              to="/settings"
-              title="Settings"
-              className={({ isActive }) =>
-                cn(
-                  "shrink-0 flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-                  isActive ? "bg-white/15 text-white" : "text-white/60 hover:bg-white/10 hover:text-white"
-                )
-              }
-            >
-              <Settings className="w-4 h-4" />
-            </NavLink>
-          )}
+        {/* Footer */}
+        <div className="shrink-0 border-t border-slate-200 p-3">
+          <button
+            onClick={() => { logout(); navigate('/login'); }}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold text-slate-600 transition-colors hover:bg-rose-50 hover:text-rose-600"
+          >
+            <LogOut className="w-4 h-4" />
+            Logout
+          </button>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 };
 
@@ -351,12 +291,26 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
 
 const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const [leadsComplete] = useState(false);
+  const [isNavOpen, setIsNavOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    document.title = "SBR | Farm-connect";
+  }, []);
+
+  // Auto-close the nav panel whenever the route changes
+  useEffect(() => {
+    setIsNavOpen(false);
+  }, [location.pathname]);
+
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f8f9fb]">
-      <AppSidebar leadsComplete={leadsComplete} />
-      <main className="flex-1 min-w-0 overflow-y-auto">
+    <div className="h-screen overflow-hidden bg-[#f8f9fb]">
+      <main className="h-full w-full overflow-y-auto">
         {children}
       </main>
+
+      <FloatingNavTrigger isOpen={isNavOpen} onClick={() => setIsNavOpen(o => !o)} />
+      <NavPanel isOpen={isNavOpen} onClose={() => setIsNavOpen(false)} leadsComplete={leadsComplete} />
     </div>
   );
 };

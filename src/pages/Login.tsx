@@ -40,7 +40,7 @@ const LoginPage = () => {
     try {
       await login(username.trim(), password);
       toast.success('Logged in');
-      navigate('/leads', { replace: true });
+      navigate('/land-overview', { replace: true });
     } catch (err: any) {
       toast.error(err?.message || 'Login failed');
     } finally {

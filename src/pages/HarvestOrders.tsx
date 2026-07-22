@@ -112,6 +112,15 @@ const HarvestOrders = () => {
     }
   };
 
+  const getStatusDotColor = (status: string) => {
+    switch (status) {
+      case 'in_progress': return 'bg-blue-500';
+      case 'completed': return 'bg-green-500';
+      case 'scheduled': return 'bg-orange-500';
+      default: return 'bg-gray-400';
+    }
+  };
+
   const handleViewTripSheet = (orderId: string) => {
     toast.info(`Opening trip sheet for ${orderId}`);
   };
@@ -163,8 +172,8 @@ const HarvestOrders = () => {
         </div>
       </div>
 
-      {/* --- HARVEST ORDERS LIST --- */}
-      <div className="space-y-4">
+      {/* --- HARVEST ORDERS TIMELINE --- */}
+      <div>
         {isLoading ? (
           <div className="bg-white border border-border rounded-xl shadow-md p-6 text-sm text-muted-foreground italic">
             Loading harvest orders...
@@ -178,7 +187,11 @@ const HarvestOrders = () => {
             No harvest orders found.
           </div>
         ) : (
-          orders.map((order, idx) => {
+          <div className="relative space-y-8 pl-10">
+            {/* Timeline spine */}
+            <div className="absolute left-[15px] top-3 bottom-3 w-0.5 bg-border" />
+
+            {orders.map((order, idx) => {
             const farm = order.farm_details;
             const vehicles = order.vehicle_details;
             const harvestor = Array.isArray(vehicles?.harvestors) ? vehicles?.harvestors?.[0] : undefined;
@@ -191,8 +204,12 @@ const HarvestOrders = () => {
             const tripSheetCount = Array.isArray(order.trip_sheet) ? order.trip_sheet.length : 0;
 
             return (
-              <div key={displayId} className="bg-white border border-border rounded-xl shadow-md overflow-hidden">
-            
+              <div key={displayId} className="relative">
+                {/* Timeline dot */}
+                <span className={cn("absolute -left-10 top-5 w-4 h-4 rounded-full border-4 border-white shadow", getStatusDotColor(status))} />
+
+                <div className="bg-white border border-border rounded-xl shadow-md overflow-hidden">
+
             {/* TOP PANEL - Harvest Order ID */}
             <div className="bg-gradient-to-r from-primary/10 to-primary/5 px-6 py-3 border-b border-border flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -402,9 +419,11 @@ const HarvestOrders = () => {
               </div>
             </div>
 
+                </div>
               </div>
             );
-          })
+            })}
+          </div>
         )}
       </div>
 

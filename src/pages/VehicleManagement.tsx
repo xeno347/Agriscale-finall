@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { 
-  Plus, Upload, Search, Filter, X, 
+import {
+  Plus, Upload, Search, Filter, X, ChevronDown,
   Truck, Wrench, CheckCircle2, Car, CalendarDays, FileText, Fuel, UserRound
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -50,6 +50,7 @@ const VehicleManagement = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [addVehicleStep, setAddVehicleStep] = useState<1 | 2>(1);
 
   const [isLoadingVehicles, setIsLoadingVehicles] = useState(false);
@@ -436,146 +437,144 @@ const VehicleManagement = () => {
           </button>
         </div>
 
-        {/* Table */}
+        {/* Status-grouped fleet list */}
         <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
           {isLoadingVehicles ? (
             <div className="p-6 text-sm text-muted-foreground">Loading vehicles…</div>
           ) : filteredVehicles.length === 0 ? (
             <div className="p-6 text-sm text-muted-foreground">No vehicles found.</div>
           ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 border-b border-border">
-              <tr>
-                <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Registration No</th>
-                <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Type</th>
-                <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Make / Model</th>
-                <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Ownership</th>
-                <th className="px-6 py-4 text-left font-semibold text-muted-foreground">Status</th>
-                <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Vehicle Calendar</th>
-                <th className="px-6 py-4 text-right font-semibold text-muted-foreground">Service Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filteredVehicles.map((vehicle) => (
-                <>
-                  <tr key={vehicle.id} className="hover:bg-muted/20">
-                    <td className="px-6 py-4 font-medium text-foreground">
-                      {vehicle.registrationNo}
-                    </td>
-                    <td className="px-6 py-4">{vehicle.vehicleType}</td>
-                    <td className="px-6 py-4 text-muted-foreground">{vehicle.make} {vehicle.model}</td>
-                    <td className="px-6 py-4">
-                      <span className={cn(
-                        "px-2 py-0.5 rounded-full text-xs border",
-                        vehicle.ownerType === 'Owned' ? "bg-purple-50 border-purple-200 text-purple-700" : "bg-gray-50 border-gray-200 text-gray-700"
-                      )}>
-                        {vehicle.ownedByRaw || vehicle.ownerType}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={cn(
-                        "px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1.5 w-fit",
-                        vehicle.status === 'Active' ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
-                      )}>
-                        <span className={cn("w-1.5 h-1.5 rounded-full", vehicle.status === 'Active' ? "bg-green-600" : "bg-orange-600")} />
-                        {vehicle.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCalendarVehicle(vehicle)}
-                        className="gap-2"
-                      >
-                        <CalendarDays className="h-4 w-4" />
-                        Calendar
-                      </Button>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      {vehicle.status === 'Active' ? (
-                        <button 
-                          onClick={() => toggleServiceStatus(vehicle.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200 transition-colors"
-                          title="Send to Service Center"
-                        >
-                          <Wrench className="w-3.5 h-3.5" />
-                          Service
-                        </button>
-                      ) : (
-                        <button 
-                          onClick={() => toggleServiceStatus(vehicle.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition-colors"
-                          title="Mark as Back from Service"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Complete
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+            (['Active', 'In Service'] as const).map((status) => {
+              const group = filteredVehicles.filter(v => v.status === status);
+              if (group.length === 0) return null;
+              const isCollapsed = collapsedGroups.has(status);
+              return (
+                <div key={status} className="border-b border-border last:border-b-0">
+                  {/* Group header */}
+                  <button
+                    type="button"
+                    onClick={() => setCollapsedGroups(prev => {
+                      const next = new Set(prev);
+                      next.has(status) ? next.delete(status) : next.add(status);
+                      return next;
+                    })}
+                    className="w-full flex items-center gap-2.5 px-6 py-3 bg-muted/40 hover:bg-muted/60 transition-colors"
+                  >
+                    <ChevronDown className={cn('w-4 h-4 text-muted-foreground transition-transform shrink-0', isCollapsed && '-rotate-90')} />
+                    <span className={cn('w-2 h-2 rounded-full shrink-0', status === 'Active' ? 'bg-green-600' : 'bg-orange-600')} />
+                    <span className="text-sm font-bold text-foreground">
+                      {status === 'Active' ? 'Active / On Road' : 'In Service'}
+                    </span>
+                    <span className="text-xs text-muted-foreground">({group.length})</span>
+                  </button>
 
-                  <tr className="bg-muted/10">
-                    <td colSpan={7} className="px-6 py-3">
-                      <div className="flex flex-col gap-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <div className="inline-flex items-center gap-2 text-sm">
-                            <UserRound className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-muted-foreground">Assigned to:</span>
-                            <span className="font-medium text-foreground">{getAssignedStaffName(vehicle.assignedStaff)}</span>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                setAssignVehicle(vehicle);
-                                setSelectedStaffId(getAssignedStaffId(vehicle.assignedStaff));
-                                await fetchStaffOptions();
-                              }}
-                              className="text-sm font-medium text-primary hover:underline"
+                  {/* Group body */}
+                  {!isCollapsed && (
+                    <div className="divide-y divide-border">
+                      {group.map((vehicle) => (
+                        <div key={vehicle.id} className="px-6 py-4 hover:bg-muted/10 transition-colors">
+                          {/* Main info row */}
+                          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                            <div className="w-32 shrink-0">
+                              <p className="font-medium text-foreground text-sm">{vehicle.registrationNo}</p>
+                            </div>
+                            <div className="w-24 shrink-0 text-sm text-muted-foreground">{vehicle.vehicleType}</div>
+                            <div className="flex-1 min-w-[140px] text-sm text-muted-foreground truncate">{vehicle.make} {vehicle.model}</div>
+                            <span className={cn(
+                              "shrink-0 px-2 py-0.5 rounded-full text-xs border",
+                              vehicle.ownerType === 'Owned' ? "bg-purple-50 border-purple-200 text-purple-700" : "bg-gray-50 border-gray-200 text-gray-700"
+                            )}>
+                              {vehicle.ownedByRaw || vehicle.ownerType}
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCalendarVehicle(vehicle)}
+                              className="gap-2 shrink-0"
                             >
-                              Edit
-                            </button>
+                              <CalendarDays className="h-4 w-4" />
+                              Calendar
+                            </Button>
+                            {vehicle.status === 'Active' ? (
+                              <button
+                                onClick={() => toggleServiceStatus(vehicle.id)}
+                                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200 transition-colors"
+                                title="Send to Service Center"
+                              >
+                                <Wrench className="w-3.5 h-3.5" />
+                                Service
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => toggleServiceStatus(vehicle.id)}
+                                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition-colors"
+                                title="Mark as Back from Service"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Complete
+                              </button>
+                            )}
                           </div>
 
-                          <Separator orientation="vertical" className="h-4" />
+                          {/* Detail row */}
+                          <div className="flex flex-wrap items-center gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border">
+                            <div className="inline-flex items-center gap-2 text-sm">
+                              <UserRound className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-muted-foreground">Assigned to:</span>
+                              <span className="font-medium text-foreground">{getAssignedStaffName(vehicle.assignedStaff)}</span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  setAssignVehicle(vehicle);
+                                  setSelectedStaffId(getAssignedStaffId(vehicle.assignedStaff));
+                                  await fetchStaffOptions();
+                                }}
+                                className="text-sm font-medium text-primary hover:underline"
+                              >
+                                Edit
+                              </button>
+                            </div>
 
-                          <button
-                            type="button"
-                            onClick={() => setFuelLogsVehicle(vehicle)}
-                            className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary"
-                          >
-                            <Fuel className="h-4 w-4 text-muted-foreground" />
-                            View fuel logs
-                          </button>
+                            <Separator orientation="vertical" className="h-4" />
 
-                          <Separator orientation="vertical" className="h-4" />
+                            <button
+                              type="button"
+                              onClick={() => setFuelLogsVehicle(vehicle)}
+                              className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary"
+                            >
+                              <Fuel className="h-4 w-4 text-muted-foreground" />
+                              View fuel logs
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => setPapersVehicle(vehicle)}
-                            className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary"
-                          >
-                            <FileText className="h-4 w-4 text-muted-foreground" />
-                            View vehicle papers
-                          </button>
+                            <Separator orientation="vertical" className="h-4" />
 
-                          <Separator orientation="vertical" className="h-4" />
+                            <button
+                              type="button"
+                              onClick={() => setPapersVehicle(vehicle)}
+                              className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary"
+                            >
+                              <FileText className="h-4 w-4 text-muted-foreground" />
+                              View vehicle papers
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => setServiceLogsVehicle(vehicle)}
-                            className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary"
-                          >
-                            <Wrench className="h-4 w-4 text-muted-foreground" />
-                            Servicing logs
-                          </button>
+                            <Separator orientation="vertical" className="h-4" />
+
+                            <button
+                              type="button"
+                              onClick={() => setServiceLogsVehicle(vehicle)}
+                              className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary"
+                            >
+                              <Wrench className="h-4 w-4 text-muted-foreground" />
+                              Servicing logs
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                  </tr>
-                </>
-              ))}
-            </tbody>
-          </table>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       </div>

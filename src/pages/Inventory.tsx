@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Plus,
   Search,
@@ -16,7 +16,6 @@ import {
   AlertTriangle,
   ClipboardList,
   Undo2,
-  IndianRupee,
   ShieldAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -33,7 +32,6 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
-import { useNavigate } from 'react-router-dom';
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -293,21 +291,14 @@ const txBadge: Record<StockTransaction['type'], { label: string; color: string }
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────
 const Inventory = () => {
-  const navigate = useNavigate();
   const [items, setItems] = useState<StockItem[]>(initialItems);
   const [search, setSearch] = useState('');
-  const [activeCategory, setActiveCategory] = useState('All');
 
   // modals
   const [addOpen, setAddOpen] = useState(false);
-  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
-  const [alertPanelOpen, setAlertPanelOpen] = useState(true);
-  const prevStockRef = useRef<Record<string, number>>({});
   const [editItem, setEditItem] = useState<StockItem | null>(null);
   const [updateStockItem, setUpdateStockItem] = useState<StockItem | null>(null);
   const [ledgerItem, setLedgerItem] = useState<StockItem | null>(null);
-  const [requestStockOpen, setRequestStockOpen] = useState(false);
-  const [requestStockItems, setRequestStockItems] = useState<StockItem[]>([]);
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [issuedItemsOpen, setIssuedItemsOpen] = useState(false);
   const [incomingItem, setIncomingItem] = useState<StockItem | null>(null);
@@ -318,7 +309,6 @@ const Inventory = () => {
   const [historyItem, setHistoryItem] = useState<StockItem | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'incoming' | 'outgoing'>('all');
   const [deleteItem, setDeleteItem] = useState<StockItem | null>(null);
-  const [openLedgersCount, setOpenLedgersCount] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchAllItems = async () => {
@@ -385,67 +375,17 @@ const Inventory = () => {
     fetchAllItems();
   }, []);
 
-  useEffect(() => {
-    const fetchOpenLedgers = async () => {
-      try {
-        const res = await fetch(`${BASE_URL}/inventory/get_issue_requests`);
-        const data: any = await res.json().catch(() => null);
-        if (res.ok && data?.success && Array.isArray(data?.issue_requests)) {
-          const count = data.issue_requests.filter(
-            (r: any) => r.status === 'pending' || r.status === 'issued',
-          ).length;
-          setOpenLedgersCount(count);
-        }
-      } catch {
-        // silently fail — KPI shows '—'
-      }
-    };
-    fetchOpenLedgers();
-  }, []);
-
-  // ── Low stock derived list ───────────────────────────────
-  const lowStockItems = useMemo(
-    () => items.filter((i) => i.currentStock < i.minStock && !dismissedAlerts.has(i.id)),
-    [items, dismissedAlerts],
-  );
-
-  const inventoryValue = useMemo(
-    () =>
-      items.reduce((sum, item) => {
-        const val = (item.fifoList ?? []).reduce((s, e) => s + e.stock * e.per_unit_cost, 0);
-        return sum + val;
-      }, 0),
-    [items],
-  );
-
-  // ── Toast when an item crosses the low-stock threshold ──
-  useEffect(() => {
-    const prev = prevStockRef.current;
-    items.forEach((item) => {
-      const wasOk = prev[item.id] === undefined || prev[item.id] >= item.minStock;
-      const isLow = item.currentStock < item.minStock;
-      if (wasOk && isLow && !dismissedAlerts.has(item.id)) {
-        toast.warning(`Low stock: ${item.name} is below minimum (${item.currentStock} / ${item.minStock} ${item.unit})`, {
-          duration: 6000,
-        });
-      }
-      prev[item.id] = item.currentStock;
-    });
-    prevStockRef.current = prev;
-  }, [items]);
-
   // ── Filtered items ──────────────────────────────────────
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return items.filter((item) => {
-      const matchCat = activeCategory === 'All' || item.category === activeCategory;
-      const matchSearch =
+      return (
         item.name.toLowerCase().includes(q) ||
         item.sku.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q);
-      return matchCat && matchSearch;
+        item.category.toLowerCase().includes(q)
+      );
     });
-  }, [items, search, activeCategory]);
+  }, [items, search]);
 
   // ── Helpers to mutate items ─────────────────────────────
   const addTransaction = (itemId: string, tx: Omit<StockTransaction, 'id'>) => {
@@ -503,58 +443,6 @@ const Inventory = () => {
         </div>
       </div>
 
-      {/* ── Low Stock Alert Panel ── */}
-      {lowStockItems.length > 0 && alertPanelOpen && (
-        <div className="mb-5 rounded-xl border border-red-200 bg-red-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-red-200 bg-red-100/60">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-600" />
-              <span className="text-sm font-semibold text-red-700">
-                {lowStockItems.length} item{lowStockItems.length > 1 ? 's' : ''} below minimum stock level
-              </span>
-            </div>
-            <button
-              onClick={() => setAlertPanelOpen(false)}
-              className="text-red-400 hover:text-red-700 transition-colors"
-              title="Dismiss all"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="divide-y divide-red-100">
-            {lowStockItems.map((item) => (
-              <div key={item.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-red-100/40 transition-colors">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-7 h-7 rounded-full bg-red-200 flex items-center justify-center shrink-0">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{item.name}</p>
-                    <p className="text-xs text-gray-500">{item.sku} · {item.location}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 shrink-0 ml-3">
-                  <div className="text-right">
-                    <p className="text-xs text-gray-400">Stock / Min</p>
-                    <p className="text-sm font-bold text-red-600">
-                      {item.currentStock}
-                      <span className="text-gray-400 font-normal"> / {item.minStock} {item.unit}</span>
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setDismissedAlerts((prev) => new Set([...prev, item.id]))}
-                    className="text-red-300 hover:text-red-600 transition-colors"
-                    title="Dismiss"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ── Search Bar ── */}
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -566,119 +454,20 @@ const Inventory = () => {
         />
       </div>
 
-      {/* ── Category Tabs ── */}
-      <div className="flex gap-2 flex-wrap mb-6">
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setActiveCategory(cat)}
-            className={cn(
-              'px-3 py-1.5 rounded-full text-sm font-medium border transition-colors',
-              activeCategory === cat
-                ? 'bg-green-600 text-white border-green-600'
-                : 'bg-white text-gray-600 border-gray-200 hover:border-green-400',
-            )}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
-      {/* ── KPI Strip ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {/* Total Inventory Value */}
-        <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
-              <IndianRupee className="w-3.5 h-3.5 text-green-600" />
-            </div>
-            <p className="text-xs font-medium text-gray-500">Inventory Value</p>
-          </div>
-          <p className="text-xl font-bold text-gray-900">
-            ₹{inventoryValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-          </p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Based on FIFO cost</p>
-        </div>
-
-        {/* Total Items */}
-        <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
-              <Boxes className="w-3.5 h-3.5 text-blue-600" />
-            </div>
-            <p className="text-xs font-medium text-gray-500">Total Items</p>
-          </div>
-          <p className="text-xl font-bold text-gray-900">{items.length}</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">{new Set(items.map((i) => i.category)).size} categories</p>
-        </div>
-
-        {/* Open Ledgers */}
-        <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-7 h-7 rounded-lg bg-violet-50 flex items-center justify-center">
-              <ClipboardList className="w-3.5 h-3.5 text-violet-600" />
-            </div>
-            <p className="text-xs font-medium text-gray-500">Open Ledgers</p>
-          </div>
-          <p className="text-xl font-bold text-violet-600">
-            {openLedgersCount ?? '—'}
-          </p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Pending &amp; active issues</p>
-        </div>
-
-        {/* Low Stock */}
-        <div
-          className={cn(
-            'bg-white rounded-xl border p-4 shadow-sm cursor-pointer hover:shadow-md transition-all',
-            lowStockItems.length > 0 ? 'border-red-200 hover:border-red-300' : 'border-gray-100',
-          )}
-          onClick={() => { setDismissedAlerts(new Set()); setAlertPanelOpen(true); }}
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <div className={cn(
-              'w-7 h-7 rounded-lg flex items-center justify-center',
-              lowStockItems.length > 0 ? 'bg-red-50' : 'bg-gray-50',
-            )}>
-              <AlertTriangle className={cn('w-3.5 h-3.5', lowStockItems.length > 0 ? 'text-red-600' : 'text-gray-400')} />
-            </div>
-            <p className="text-xs font-medium text-gray-500">Low Stock</p>
-          </div>
-          <p className={cn('text-xl font-bold', lowStockItems.length > 0 ? 'text-red-600' : 'text-gray-900')}>
-            {lowStockItems.length}
-          </p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Below minimum threshold</p>
-        </div>
-      </div>
-
-      {/* ── Restore alerts link ── */}
-      {(!alertPanelOpen || dismissedAlerts.size > 0) && items.some((i) => i.currentStock < i.minStock) && (
-        <button
-          onClick={() => { setDismissedAlerts(new Set()); setAlertPanelOpen(true); }}
-          className="mb-4 flex items-center gap-1.5 text-xs font-medium text-red-500 hover:text-red-700 transition-colors"
-        >
-          <AlertTriangle className="w-3 h-3" />
-          {items.filter((i) => i.currentStock < i.minStock).length} low-stock alert{items.filter((i) => i.currentStock < i.minStock).length > 1 ? 's' : ''} hidden — click to restore
-        </button>
-      )}
-
       {/* ── Card Grid ── */}
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-gray-400">
           <Boxes className="w-12 h-12 mb-3 opacity-40" />
           <p className="text-lg font-medium">No items found</p>
-          <p className="text-sm">Try a different search or category filter</p>
+          <p className="text-sm">Try a different search</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {filtered.map((item) => (
             <InventoryCard
               key={item.id}
               item={item}
               onEdit={() => setEditItem(item)}
-              onUpdateStock={() => {
-                setRequestStockItems([item]);
-                setRequestStockOpen(true);
-              }}
               onLedger={() => setLedgerItem(item)}
               onDamage={() => setDamageItem(item)}
               onReturnEntry={() => setReturnEntryItem(item)}
@@ -799,29 +588,6 @@ const Inventory = () => {
       {ledgerItem && (
         <LedgerModal item={ledgerItem} onClose={() => setLedgerItem(null)} />
       )}
-
-      <RequestStockModal
-        open={requestStockOpen}
-        onClose={() => setRequestStockOpen(false)}
-        selectedItems={requestStockItems}
-        onChangeSelectedItems={setRequestStockItems}
-        allItems={items}
-        onContinue={() => {
-          const payloadItems = requestStockItems.map((it) => ({
-            itemCode: it.sku,
-            uom: it.unit,
-            itemName: it.name,
-            stock: it.currentStock,
-          }));
-          setRequestStockOpen(false);
-          navigate('/inventory-indents', {
-            state: {
-              fromInventoryRequest: true,
-              items: payloadItems,
-            },
-          });
-        }}
-      />
 
       <EquipmentAllocationModal
         open={allocationOpen}
@@ -1160,7 +926,6 @@ const LedgerModal = ({ item, onClose }: { item: StockItem; onClose: () => void }
 interface CardProps {
   item: StockItem;
   onEdit: () => void;
-  onUpdateStock: () => void;
   onLedger: () => void;
   onDamage: () => void;
   onReturnEntry: () => void;
@@ -1171,7 +936,6 @@ interface CardProps {
 const InventoryCard = ({
   item,
   onEdit,
-  onUpdateStock,
   onLedger,
   onDamage,
   onReturnEntry,
@@ -1179,11 +943,30 @@ const InventoryCard = ({
   onDelete,
 }: CardProps) => {
   const isLow = item.currentStock < item.minStock;
+  const fifoValue = (item.fifoList ?? []).reduce((s, e) => s + e.stock * e.per_unit_cost, 0);
+
+  const iconBtn = (
+    onClick: () => void,
+    title: string,
+    Icon: React.ElementType,
+    colorClass: string,
+  ) => (
+    <button
+      onClick={onClick}
+      title={title}
+      className={cn(
+        'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors',
+        colorClass,
+      )}
+    >
+      <Icon className="w-3.5 h-3.5" />
+    </button>
+  );
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow">
+    <div className="group bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col hover:shadow-lg transition-shadow">
       {/* Image */}
-      <div className="relative h-40 bg-gray-50 overflow-hidden">
+      <div className="relative aspect-square bg-gray-50 overflow-hidden">
         <img
           src={item.imageUrl || PLACEHOLDER_IMG}
           alt={item.name}
@@ -1193,55 +976,41 @@ const InventoryCard = ({
           }}
         />
         {isLow && (
-          <div className="absolute top-2 left-2 flex items-center gap-1 bg-red-500 text-white text-xs font-semibold px-2 py-0.5 rounded-full">
+          <div className="absolute top-2 left-2 flex items-center gap-1 bg-red-500 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full">
             <AlertTriangle className="w-3 h-3" />
-            Low Stock
+            Low
           </div>
         )}
-        <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm text-xs font-medium text-gray-600 px-2 py-0.5 rounded-full border border-gray-200">
-          {item.category}
+
+        {/* Hover-revealed quick actions */}
+        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {iconBtn(onEdit, 'Edit', Edit3, 'bg-white/95 text-gray-600 hover:bg-white shadow-sm')}
+          {iconBtn(onDelete, 'Delete', Trash2, 'bg-white/95 text-red-500 hover:bg-white shadow-sm')}
         </div>
       </div>
 
       {/* Body */}
-      <div className="p-4 flex flex-col flex-1 gap-3">
+      <div className="p-3.5 flex flex-col flex-1 gap-2">
         {/* Name & SKU */}
         <div>
-          <h3 className="font-semibold text-gray-900 text-base leading-tight">{item.name}</h3>
-          <p className="text-xs text-gray-400 mt-0.5">{item.sku} · {item.location}</p>
+          <h3 className="font-semibold text-gray-900 text-sm leading-tight truncate">{item.name}</h3>
+          <p className="text-[11px] text-gray-400 mt-0.5 truncate">{item.sku} · {item.location}</p>
         </div>
 
-        {/* Stock Level */}
-        <div className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
-          <div>
-            <p className="text-xs text-gray-400">Current Stock</p>
-            <p className={cn('text-lg font-bold', isLow ? 'text-red-600' : 'text-gray-800')}>
-              {item.currentStock.toLocaleString()}
-              <span className="text-xs font-normal text-gray-400 ml-1">{item.unit}</span>
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-gray-400">Min Level</p>
-            <p className="text-sm font-semibold text-gray-600">
-              {item.minStock.toLocaleString()}
-              <span className="text-xs font-normal text-gray-400 ml-1">{item.unit}</span>
-            </p>
-          </div>
+        {/* Stock level — price-style prominent figure */}
+        <div className="flex items-baseline justify-between">
+          <p className={cn('text-lg font-extrabold leading-none', isLow ? 'text-red-600' : 'text-orange-600')}>
+            {item.currentStock.toLocaleString()}
+            <span className="ml-1 text-xs font-medium text-gray-400">{item.unit}</span>
+          </p>
+          <p className="text-[11px] text-gray-400 shrink-0">min {item.minStock.toLocaleString()}</p>
         </div>
 
-        {/* FIFO inventory value */}
-        {(() => {
-          const val = (item.fifoList ?? []).reduce((s, e) => s + e.stock * e.per_unit_cost, 0);
-          if (val <= 0) return null;
-          return (
-            <div className="flex items-center justify-between text-xs px-1">
-              <span className="text-gray-400">Inventory Value</span>
-              <span className="font-semibold text-green-700">
-                ₹{val.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </span>
-            </div>
-          );
-        })()}
+        {fifoValue > 0 && (
+          <p className="text-[11px] text-gray-400 -mt-1">
+            Value <span className="font-semibold text-green-700">₹{fifoValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+          </p>
+        )}
 
         {/* Stock bar */}
         <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -1251,64 +1020,14 @@ const InventoryCard = ({
           />
         </div>
 
-        {/* Primary action row */}
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={onEdit}
-            className="flex items-center justify-center gap-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg py-2 transition-colors"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            Edit
-          </button>
-          <button
-            onClick={onUpdateStock}
-            className="flex items-center justify-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg py-2 transition-colors"
-          >
-            <Boxes className="w-3.5 h-3.5" />
-            Request Stock
-          </button>
-        </div>
-
-        {/* Secondary action row */}
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            onClick={onDamage}
-            className="flex flex-col items-center gap-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg py-2 transition-colors"
-          >
-            <ShieldAlert className="w-4 h-4" />
-            Damage
-          </button>
-          <button
-            onClick={onReturnEntry}
-            className="flex flex-col items-center gap-1 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg py-2 transition-colors"
-          >
-            <Undo2 className="w-4 h-4" />
-            Return
-          </button>
-          <button
-            onClick={onLedger}
-            className="flex flex-col items-center gap-1 text-xs font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg py-2 transition-colors"
-          >
-            <ClipboardList className="w-4 h-4" />
-            Ledger
-          </button>
-        </div>
-
-        {/* Footer actions */}
-        <div className="flex items-center justify-between pt-1 border-t border-gray-100">
-          <button
-            onClick={onHistory}
-            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors"
-          >
-            <History className="w-3.5 h-3.5" />
-            View History ({item.transactions.length})
-          </button>
-          <button
-            onClick={onDelete}
-            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+        {/* Compact action row */}
+        <div className="mt-1 flex items-center justify-between border-t border-gray-100 pt-2">
+          <div className="flex items-center gap-1">
+            {iconBtn(onDamage, 'Damage', ShieldAlert, 'text-red-600 hover:bg-red-50')}
+            {iconBtn(onReturnEntry, 'Return', Undo2, 'text-orange-600 hover:bg-orange-50')}
+            {iconBtn(onLedger, 'Ledger', ClipboardList, 'text-violet-700 hover:bg-violet-50')}
+          </div>
+          {iconBtn(onHistory, `History (${item.transactions.length})`, History, 'text-gray-500 hover:bg-gray-100')}
         </div>
       </div>
     </div>
@@ -1869,156 +1588,6 @@ const TransactionModal = ({
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button className={cn(btnMap[txType], 'text-white')} onClick={handleSave}>
             Confirm
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-const RequestStockModal = ({
-  open,
-  onClose,
-  selectedItems,
-  onChangeSelectedItems,
-  allItems,
-  onContinue,
-}: {
-  open: boolean;
-  onClose: () => void;
-  selectedItems: StockItem[];
-  onChangeSelectedItems: (items: StockItem[]) => void;
-  allItems: StockItem[];
-  onContinue: () => void;
-}) => {
-  const [addMode, setAddMode] = useState(false);
-  const [query, setQuery] = useState('');
-
-  useEffect(() => {
-    if (!open) {
-      setAddMode(false);
-      setQuery('');
-    }
-  }, [open]);
-
-  const suggestions = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const selectedIds = new Set(selectedItems.map((i) => i.id));
-    return allItems
-      .filter((item) => !selectedIds.has(item.id))
-      .filter((item) => item.name.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [allItems, query, selectedItems]);
-
-  const addItem = (item: StockItem) => {
-    onChangeSelectedItems([...selectedItems, item]);
-    setAddMode(false);
-    setQuery('');
-  };
-
-  const removeItem = (itemId: string) => {
-    onChangeSelectedItems(selectedItems.filter((i) => i.id !== itemId));
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Boxes className="w-5 h-5 text-blue-600" />
-            Request Stock
-          </DialogTitle>
-          <p className="text-sm text-gray-500">Add more items to request for stock</p>
-        </DialogHeader>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 py-2">
-          {selectedItems.map((item) => (
-            <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-start gap-2 min-w-0">
-                  <img
-                    src={item.imageUrl || PLACEHOLDER_IMG}
-                    alt={item.name}
-                    className="w-12 h-12 rounded-md object-cover border border-gray-200 shrink-0"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMG;
-                    }}
-                  />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
-                    <p className="text-xs text-gray-500 mt-0.5 truncate">{item.sku}</p>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">{item.category} • {item.location}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeItem(item.id)}
-                  className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
-                  title="Remove"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-
-          <div className="rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-3 min-h-[96px]">
-            {!addMode ? (
-              <button
-                type="button"
-                onClick={() => setAddMode(true)}
-                className="w-full h-full min-h-[84px] flex flex-col items-center justify-center gap-1 text-gray-500 hover:text-blue-600"
-              >
-                <Plus className="w-5 h-5" />
-                <span className="text-xs font-medium">Add Item</span>
-              </button>
-            ) : (
-              <div className="space-y-2">
-                <Input
-                  autoFocus
-                  placeholder="Type item name or item code"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-                <div className="max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white">
-                  {suggestions.length > 0 ? (
-                    suggestions.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => addItem(s)}
-                        className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-gray-100 last:border-b-0"
-                      >
-                        <div className="flex items-center gap-2">
-                          <img
-                            src={s.imageUrl || PLACEHOLDER_IMG}
-                            alt={s.name}
-                            className="w-8 h-8 rounded object-cover border border-gray-200 shrink-0"
-                            onError={(e) => {
-                              (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMG;
-                            }}
-                          />
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
-                            <p className="text-xs text-gray-500 truncate">{s.sku}</p>
-                          </div>
-                        </div>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="px-3 py-2 text-xs text-gray-500">No suggestions</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={onContinue} disabled={selectedItems.length === 0}>
-            Continue
           </Button>
         </DialogFooter>
       </DialogContent>

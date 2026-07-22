@@ -6,10 +6,12 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Plus } from 'lucide-react';
 import getBaseUrl from '@/lib/config';
 import { toast } from 'sonner';
+import { findAmritAgrotech, fetchLands } from '@/components/land/api';
+import type { Land } from '@/components/land/types';
 
 type ApiCultivationPlanItem = {
   plan_id: string;
-  block_id: string;
+  farm_id: string[];
   date_mapping: Array<{
     index: number;
     activity: string;
@@ -25,7 +27,7 @@ type FetchCultivationPlansResponse = {
 type UiCultivationPlanRow = {
   id: string; // API key (calendar/entry id)
   plan_id: string;
-  block_id: string;
+  farm_ids: string[];
   activities_count: number;
   total_work_quantity: number;
   start_date: string;
@@ -49,10 +51,20 @@ const getPlanDateRange = (mapping: ApiCultivationPlanItem['date_mapping']) => {
 export default function CultivationPlanModule() {
   const [plans, setPlans] = useState<UiCultivationPlanRow[]>([]);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
-  const [deletingBlockId, setDeletingBlockId] = useState<string | null>(null);
+  const [deletingPlanKey, setDeletingPlanKey] = useState<string | null>(null);
+  const [lands, setLands] = useState<Land[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
+    (async () => {
+      try {
+        const farmer = await findAmritAgrotech();
+        if (farmer) setLands(await fetchLands(farmer.farmer_id));
+      } catch {
+        // land labels are a display nicety; fall back to raw farm_ids if this fails
+      }
+    })();
+
     const base = getBaseUrl().replace(/\/$/, '');
     const url = `${base}/admin_cultivation/fetch_cultivation_plans`;
     let cancelled = false;
@@ -77,7 +89,7 @@ export default function CultivationPlanModule() {
           return {
             id,
             plan_id: String(p?.plan_id || ''),
-            block_id: String(p?.block_id || ''),
+            farm_ids: Array.isArray(p?.farm_id) ? p.farm_id.map(String) : [],
             activities_count: mapping.length,
             total_work_quantity: Number.isFinite(totalWorkQty) ? totalWorkQty : 0,
             start_date: range.start,
@@ -100,24 +112,32 @@ export default function CultivationPlanModule() {
     };
   }, []);
 
-  const totalPlans = plans.length;
-  const uniqueBlocks = useMemo(() => new Set(plans.map((p) => p.block_id).filter(Boolean)).size, [plans]);
+  const landLabelFor = (farmId: string) => {
+    const land = lands.find((l) => l.farm_id === farmId);
+    if (!land) return farmId;
+    return [land.land_data.village, land.land_data.district].filter(Boolean).join(', ') || farmId;
+  };
 
-  const handleDeletePlan = async (blockId: string) => {
-    const block_id = String(blockId || '').trim();
-    if (!block_id) {
-      toast.error('block_id not available for this plan');
+  const totalPlans = plans.length;
+  const uniqueLands = useMemo(
+    () => new Set(plans.flatMap((p) => p.farm_ids).filter(Boolean)).size,
+    [plans]
+  );
+
+  const handleDeletePlan = async (plan: UiCultivationPlanRow) => {
+    if (!plan.plan_id || plan.farm_ids.length === 0) {
+      toast.error('This plan is missing plan_id/farm_id and cannot be deleted');
       return;
     }
-    if (deletingBlockId) return;
+    if (deletingPlanKey) return;
 
-    setDeletingBlockId(block_id);
+    setDeletingPlanKey(plan.id);
     try {
       const base = getBaseUrl().replace(/\/$/, '');
       const res = await fetch(`${base}/admin_cultivation/delete_cultivation_plans`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ block_id }),
+        body: JSON.stringify({ plan_id: plan.plan_id, farm_ids: plan.farm_ids }),
       });
       const data: any = await res.json().catch(() => null);
       if (!res.ok) {
@@ -134,7 +154,7 @@ export default function CultivationPlanModule() {
     } catch (e: any) {
       toast.error(e?.message || 'Failed to delete cultivation plan');
     } finally {
-      setDeletingBlockId(null);
+      setDeletingPlanKey(null);
     }
   };
 
@@ -162,11 +182,11 @@ export default function CultivationPlanModule() {
         </Card>
         <Card className="flex-1">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base text-foreground">Blocks Covered</CardTitle>
-            <CardDescription>Unique blocks with plans</CardDescription>
+            <CardTitle className="text-base text-foreground">Lands Covered</CardTitle>
+            <CardDescription>Unique lands with plans</CardDescription>
           </CardHeader>
           <CardContent>
-            <span className="text-2xl font-bold text-foreground">{uniqueBlocks}</span>
+            <span className="text-2xl font-bold text-foreground">{uniqueLands}</span>
           </CardContent>
         </Card>
       </div>
@@ -179,7 +199,7 @@ export default function CultivationPlanModule() {
             <TableHeader>
               <TableRow className="bg-muted/50">
                 <TableHead className="w-20">Plan No.</TableHead>
-                <TableHead>Block ID</TableHead>
+                <TableHead>Land(s)</TableHead>
                 <TableHead>Master Plan ID</TableHead>
                 <TableHead>Activities</TableHead>
                 <TableHead>Date Range</TableHead>
@@ -205,7 +225,9 @@ export default function CultivationPlanModule() {
                 plans.map((plan, idx) => (
                   <TableRow key={plan.id} className="hover:bg-muted transition">
                     <TableCell className="font-semibold text-foreground">{idx + 1}</TableCell>
-                    <TableCell className="font-medium">{plan.block_id || '—'}</TableCell>
+                    <TableCell className="font-medium">
+                      {plan.farm_ids.length > 0 ? plan.farm_ids.map(landLabelFor).join(', ') : '—'}
+                    </TableCell>
                     <TableCell className="text-foreground">{plan.plan_id || '—'}</TableCell>
                     <TableCell className="text-foreground font-semibold">{plan.activities_count}</TableCell>
                     <TableCell className="text-foreground">
@@ -240,8 +262,8 @@ export default function CultivationPlanModule() {
                         variant="ghost"
                         size="icon"
                         title="Delete"
-                        onClick={() => handleDeletePlan(plan.block_id)}
-                        disabled={isLoadingPlans || deletingBlockId === plan.block_id}
+                        onClick={() => handleDeletePlan(plan)}
+                        disabled={isLoadingPlans || deletingPlanKey === plan.id}
                       >
                         <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m5 0V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
                       </Button>

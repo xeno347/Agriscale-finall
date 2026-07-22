@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Sprout, LayoutDashboard, MapPin, ShoppingBag, Users, Wallet, Fuel, LogOut, Bell, X, ShieldOff } from 'lucide-react';
+import { Sprout, LayoutDashboard, MapPin, ShoppingBag, Users, Wallet, LogOut, Bell, X, ShieldOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { usePushNotification } from '@/hooks/usePushNotification';
@@ -11,7 +11,6 @@ import LandsPage    from './LandsPage';
 import PurchasePage from './PurchasePage';
 import HRPage       from './HRPage';
 import AccountsPage from './AccountsPage';
-import FuelPage     from './FuelPage';
 
 // ─────────────────────────────────────────────────────────────
 // Shared types
@@ -553,15 +552,10 @@ const BottomNav = ({ approvals }: { approvals: Approval[] }) => {
 	const pendingOf = (cat: ApprovalCategory) =>
 		approvals.filter(a => a.category === cat && a.status === 'pending').length;
 
-	const pendingFuel = approvals.filter(
-		a => a.category === 'accounts' && a.subType === 'Fuel Request' && a.status === 'pending',
-	).length;
-
-	// Order: Lands | HOME(center circle) | Fuel
+	// Order: Lands | HOME(center circle)
 	const items = [
 		{ to: `${BASE}/lands`, label: 'Lands', Icon: MapPin,          end: false, badge: pendingOf('lands'), isHome: false },
 		{ to: `${BASE}/`,      label: 'Home',  Icon: LayoutDashboard, end: true,  badge: 0,                  isHome: true  },
-		{ to: `${BASE}/fuel`,  label: 'Fuel',  Icon: Fuel,            end: false, badge: pendingFuel,        isHome: false },
 	];
 
 	return (
@@ -828,7 +822,6 @@ const WebApp = () => {
 					<Routes>
 						<Route index          element={<HomePage />} />
 						<Route path="lands"    element={<LandsPage />} />
-						<Route path="fuel"     element={<FuelPage     {...props} />} />
 						<Route path="purchase" element={<PurchasePage {...props} />} />
 						<Route path="hr"       element={<HRPage       {...props} />} />
 						<Route path="accounts" element={<AccountsPage {...props} />} />

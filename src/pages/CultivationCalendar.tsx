@@ -5,7 +5,6 @@ Calendar as CalendarIcon,
 ChevronDown,
 ChevronLeft,
 ChevronRight,
-Trash2,
 X,
 Plus,
 Shovel,
@@ -27,19 +26,16 @@ Check,
 Monitor,
 User,
 FileText,
-Map as MapIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import getBaseUrl from '@/lib/config';
-import { getFarmerNames } from '@/lib/farmerNameCache';
+import { fetchLands, findAmritAgrotech } from '@/components/land/api';
 import { toast } from 'sonner';
 
 // ✅ Import the Sidebar
 import { SidebarTask } from '@/components/cultivation/TaskSidebar';
-import { InlineTimeline } from '@/components/cultivation/InlineTimeline';
 import TaskMonitorModal, { MonitorTask } from '@/components/cultivation/TaskMonitorModal';
-import PlotMapViewModal, { MapViewTask } from '@/components/cultivation/PlotMapViewModal';
-import { TaskTimelinePanel, type TimelineTask, type TimelineAssignment } from '@/components/cultivation/TaskTimelinePanel';
+import InlineTaskPlotMap from '@/components/cultivation/InlineTaskPlotMap';
 
 // --- Types ---
 interface PlotItem {
@@ -65,7 +61,6 @@ task_id?: string;
 
 interface ApiPlan {
 plan_id: string;
-block_id: string;
 date_mapping: ApiActivity[];
 }
 
@@ -88,7 +83,6 @@ created_at: string;
 area: number;
 crop_type?: string;
 harvest_log: Record<string, unknown>;
-block_id: string;
 priority: number;
 land_data: {
 farming_option: string;
@@ -110,7 +104,6 @@ interface CalendarActivity {
 index: number;
 activity: string;
 crop_type?: string;
-block_id: string;
 plan_id: string;
 calander_id: string;
 farm_id: string;
@@ -127,26 +120,7 @@ interface CalendarData {
 [date: string]: CalendarActivity[];
 }
 
-// Rows configured in Operations Master → Dosage Control (src/modules/CultivationMasterModule.tsx),
-// persisted to the same localStorage key. Read-only here — used to populate the "Choose Item" step.
-type DosageControlRowLite = {
-id: string;
-cropName: string;
-activityId: string;
-inventoryItemId: string;
-uom: string;
-dosagePerAcre: string;
-};
-const DOSAGE_CONTROLS_STORAGE_KEY = 'operations-master-dosage-controls';
-
-interface VendorScopeEntry {
-vendor_details: { vendor_name: string; vendor_contact: string };
-activities: string[];
-start_date: string;
-end_date: string;
-}
-
-// --- Asset Types (Self Work: vehicles + equipment) ---
+// --- Asset Types (vehicles + equipment) ---
 interface Asset {
 id: string;
 name: string;
@@ -200,16 +174,11 @@ if (s === 'unaasigned') return 'unassigned';
 return s;
 };
 
-const isContractFarmPendingAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'contract_farm_pending';
-const isContractFarmCompletedAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'contract_farm_completed';
 const isContractFarmAssignmentStatus = (raw?: string) => {
 const s = normalizeAssignmentStatus(raw);
 return s === 'contract_farm' || s === 'contract_farm_pending' || s === 'contract_farm_completed';
 };
 
-const isRentalSendWorkorderAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'rental_send_workorder';
-const isRentalPendingAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'rental_pending';
-const isRentalCompletedAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'rental_completed';
 const isRentalAssignmentStatus = (raw?: string) => {
 const s = normalizeAssignmentStatus(raw);
 return s === 'rental_send_workorder' || s === 'rental_pending' || s === 'rental_completed';
@@ -247,52 +216,6 @@ return isCompletedAssignmentStatus(s);
 };
 
 const isOverdueAssignmentStatus = (raw?: string) => normalizeAssignmentStatus(raw) === 'overdue';
-
-// --- Task Timeline panel helpers ---
-const timelineStatusTone = (status?: string): 'green' | 'orange' | 'blue' | 'red' | 'yellow' => {
-const s = normalizeAssignmentStatus(status);
-if (s === 'unassigned') return 'yellow';
-if (isCompletedAssignmentStatus(s)) return 'green';
-if (isPendingAssignmentStatus(s)) return 'orange';
-if (isOverdueAssignmentStatus(s)) return 'red';
-return 'blue';
-};
-
-const timelineStatusLabel = (status?: string) => {
-const s = normalizeAssignmentStatus(status);
-if (!s) return 'Unassigned';
-return s.split('_').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-};
-
-const combineAssignmentStatus = (a?: string, b?: string) => {
-const s1 = normalizeAssignmentStatus(a);
-const s2 = normalizeAssignmentStatus(b);
-
-if (
-isContractFarmAssignmentStatus(s1) ||
-isContractFarmAssignmentStatus(s2) ||
-isContractFarmPendingAssignmentStatus(s1) ||
-isContractFarmPendingAssignmentStatus(s2) ||
-isContractFarmCompletedAssignmentStatus(s1) ||
-isContractFarmCompletedAssignmentStatus(s2)
-) {
-if (isContractFarmPendingAssignmentStatus(s1) || isContractFarmPendingAssignmentStatus(s2)) return 'contract_farm_pending';
-if (isContractFarmCompletedAssignmentStatus(s1) || isContractFarmCompletedAssignmentStatus(s2)) return 'contract_farm_completed';
-return 'contract_farm';
-}
-
-if (isRentalAssignmentStatus(s1) || isRentalAssignmentStatus(s2)) {
-if (isRentalPendingAssignmentStatus(s1) || isRentalPendingAssignmentStatus(s2)) return 'rental_pending';
-if (isRentalSendWorkorderAssignmentStatus(s1) || isRentalSendWorkorderAssignmentStatus(s2)) return 'rental_send_workorder';
-if (isRentalCompletedAssignmentStatus(s1) || isRentalCompletedAssignmentStatus(s2)) return 'rental_completed';
-}
-
-if (isCompletedAssignmentStatus(s1) || isCompletedAssignmentStatus(s2)) return 'completed';
-if (s1 === 'sup_task_completed' || s2 === 'sup_task_completed') return 'sup_task_completed';
-if (normalizeAssignmentStatus(s1) === 'pending' || normalizeAssignmentStatus(s2) === 'pending') return 'pending';
-if (isOverdueAssignmentStatus(s1) || isOverdueAssignmentStatus(s2)) return 'overdue';
-return s1 || s2 || 'unassigned';
-};
 
 const getActivityIcon = (activity: string) => {
 const key = activity.trim().toLowerCase();
@@ -394,12 +317,11 @@ task_id: existing.task_id ?? a.task_id,
 }
 
 for (const farm of byFarm.values()) {
-const rowKey = `${planKey}__${plan.plan_id}__${plan.block_id}__${activity.index}__${activity.activity}__${farm.farm_id}__${farm.status}`;
+const rowKey = `${planKey}__${plan.plan_id}__${activity.index}__${activity.activity}__${farm.farm_id}__${farm.status}`;
 calendarByDate[dateStr].set(rowKey, {
 index: activity.index,
 activity: activity.activity,
 crop_type: String((activity as any)?.crop_type || '').trim().toLowerCase(),
-block_id: plan.block_id,
 plan_id: plan.plan_id,
 calander_id: planKey,
 farm_id: farm.farm_id,
@@ -445,14 +367,12 @@ activities,
 onDateClick,
 currentDateKey,
 pendingByDate,
-onFieldVisitClick,
 }: {
 monthDate: Date;
 activities: CalendarData;
 onDateClick: (dateStr: string) => void;
 currentDateKey: string;
 pendingByDate: PendingByDate;
-onFieldVisitClick: (monthDate: Date) => void;
 }) => {
 const year = monthDate.getFullYear();
 const month = monthDate.getMonth();
@@ -486,67 +406,10 @@ return dayActs.every(
 );
 };
 
-const monthVisitStats = useMemo(() => {
-let total = 0;
-let done = 0;
-
-for (let d = 1; d <= daysInMonth; d++) {
-const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-const dayActs = activities[dateStr];
-if (!Array.isArray(dayActs) || dayActs.length === 0) continue;
-
-const visitActs = dayActs.filter((a) => String(a?.activity || '').toLowerCase().includes('visit'));
-for (const act of visitActs) {
-const assignments = Array.isArray(act.assignments) ? act.assignments : [];
-for (const a of assignments) {
-const acres = Number(a?.assigned_area) || 0;
-total += acres;
-if (isCompletedAssignmentStatus(a?.status)) done += acres;
-}
-}
-}
-
-const progress = total > 0 ? Math.max(0, Math.min(1, done / total)) : 0;
-return { total, done, progress };
-}, [activities, daysInMonth, month, year]);
-
-const progressPct = Math.round(monthVisitStats.progress * 100);
-const r = 10;
-const c = 2 * Math.PI * r;
-const dash = monthVisitStats.progress * c;
-const gap = c - dash;
-
 return (
 <div className="bg-card border border-border rounded-xl p-4 flex flex-col h-full bg-white shadow-sm hover:shadow-md transition-shadow">
 <div className="flex items-start justify-between mb-6 pt-2 gap-3">
 <h3 className="text-sm font-medium text-foreground/80">{monthName} {year}</h3>
-
-<button
-type="button"
-onClick={() => onFieldVisitClick(monthDate)}
-title="View field visit weeks"
-aria-label="View field visit weeks"
-className="relative shrink-0 w-11 h-11 rounded-full bg-background border border-border hover:bg-muted transition-colors"
->
-<svg viewBox="0 0 28 28" className="absolute inset-1 w-auto h-auto pointer-events-none">
-<circle cx="14" cy="14" r={r} fill="none" stroke="currentColor" strokeWidth="4" className="text-muted-foreground/25" />
-<circle
-cx="14"
-cy="14"
-r={r}
-fill="none"
-stroke="currentColor"
-strokeWidth="4"
-strokeLinecap="round"
-strokeDasharray={`${dash} ${gap}`}
-transform="rotate(-90 14 14)"
-className="text-green-600"
-/>
-</svg>
-<span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-foreground leading-none">
-{progressPct}%
-</span>
-</button>
 </div>
 <div className="grid grid-cols-7 mb-4">
 {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
@@ -643,7 +506,6 @@ null
 // --- Main Component ---
 const CultivationCalendar = () => {
 const [searchParams] = useSearchParams();
-const [timelineMonth, setTimelineMonth] = useState<Date | null>(null);
 // Calendar shows a sliding window of 4 months at a time, anchored on this month,
 // defaulting to the ?month= deep link (see CeosDesk.tsx) or the current month.
 const [visibleMonthStart, setVisibleMonthStart] = useState(() => {
@@ -659,23 +521,8 @@ const [selectedDate, setSelectedDate] = useState<string | null>(null);
 const [isModalOpen, setIsModalOpen] = useState(false);
 // New State for Assignment
 const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
-// All sections (Assign Staff, Self Work/Vendor Scope, Choose Item) render together in one
-// scrollable popup — no step-by-step wizard.
-const [availableSupervisors, setAvailableSupervisors] = useState<{ supervisor_id: string; name: string; phone: string }[]>([]);
-const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>('');
-const [availableFieldManagers, setAvailableFieldManagers] = useState<{ manager_id: string; name: string; phone: string }[]>([]);
-const [isLoadingStaff, setIsLoadingStaff] = useState(false);
-const [selectedFieldManagerIds, setSelectedFieldManagerIds] = useState<string[]>([]);
-// "Self Work" (own vehicles + equipment) vs "Vendor Scope" (assign to an external vendor)
-const [vendorSectionTab, setVendorSectionTab] = useState<'self' | 'vendor'>('self');
-const [selectedTaskVendorId, setSelectedTaskVendorId] = useState<string | null>(null);
-const [taskVendor, setTaskVendor] = useState({ name: '', contact: '' });
-const [dosageRows, setDosageRows] = useState<DosageControlRowLite[]>([]);
-const [selectedDosageItemRowId, setSelectedDosageItemRowId] = useState<string>('');
 const [isAssigningTask, setIsAssigningTask] = useState(false);
-const [scopeVendors, setScopeVendors] = useState<Record<string, VendorScopeEntry>>({});
-const [isLoadingScope, setIsLoadingScope] = useState(false);
-// Self Work: vehicles (multi-select) + equipment (id -> quantity)
+// Step 1: vehicles (multi-select), Step 2: equipment (id -> quantity)
 const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
 const [equipmentCounts, setEquipmentCounts] = useState<Record<string, number>>({});
 const [vehiclesForAssignment, setVehiclesForAssignment] = useState<Asset[]>([]);
@@ -686,15 +533,11 @@ const [equipmentSearchTerm, setEquipmentSearchTerm] = useState('');
 
 const [activitiesData, setActivitiesData] = useState<CalendarData>({});
 const [farmsById, setFarmsById] = useState<FarmsById>({});
-const [farmerNames, setFarmerNames] = useState<Record<string, string>>({});
+const [landLabels, setLandLabels] = useState<Record<string, string>>({});
 const [selectedTaskKeys, setSelectedTaskKeys] = useState<Record<string, boolean>>({});
 const [pendingByDate, setPendingByDate] = useState<PendingByDate>({});
-const [dateSwapTaskKey, setDateSwapTaskKey] = useState<string | null>(null);
-const [dateSwapValue, setDateSwapValue] = useState<string>('');
-const [dateSwapPopupPos, setDateSwapPopupPos] = useState<{ top: number; left: number } | null>(null);
 const [viewPlotsTaskKey, setViewPlotsTaskKey] = useState<string | null>(null);
 const [monitorTask, setMonitorTask] = useState<MonitorTask | null>(null);
-const [mapViewTask, setMapViewTask] = useState<MapViewTask | null>(null);
 const [contactsById, setContactsById] = useState<Record<string, {
 supervisorName: string;
 supervisorContact: string;
@@ -703,7 +546,6 @@ fieldManagers: { name: string; contact: string }[];
 const [loading, setLoading] = useState(true);
 const [error, setError] = useState<string | null>(null);
 const taskModalRef = useRef<HTMLDivElement | null>(null);
-const [filterBlockId, setFilterBlockId] = useState<string>('all');
 const [filterCropType, setFilterCropType] = useState<string>('all');
 const [filterActivity, setFilterActivity] = useState<string>('all');
 const [filterFarmIds, setFilterFarmIds] = useState<string[]>([]);
@@ -715,17 +557,6 @@ const monthsToDisplay = useMemo(
 () => Array.from({ length: 4 }, (_, i) => new Date(visibleMonthStart.getFullYear(), visibleMonthStart.getMonth() + i, 1)),
 [visibleMonthStart]
 );
-
-const blockOptions = useMemo(() => {
-const set = new Set<string>();
-Object.values(activitiesData).forEach((acts) => {
-acts.forEach((a) => {
-const blockId = String(a?.block_id || '').trim();
-if (blockId) set.add(blockId);
-});
-});
-return Array.from(set).sort((a, b) => a.localeCompare(b));
-}, [activitiesData]);
 
 
 
@@ -762,27 +593,31 @@ if (farmId) set.add(farmId);
 return Array.from(set).sort((a, b) => a.localeCompare(b));
 }, [activitiesData]);
 
-// Load farmer names for visible farm options (cached)
+// Load land labels (village/district per farm_id) for AmritAgrotech's lands
 useEffect(() => {
-	const ids = farmOptions.filter((id) => id && !farmerNames[id]);
-	if (ids.length === 0) return;
 	let mounted = true;
-	getFarmerNames(ids).then((names) => {
-		if (!mounted) return;
-		setFarmerNames((prev) => {
-			const next = { ...prev };
-			ids.forEach((id) => { next[id] = names[id] || id; });
-			return next;
-		});
-	});
+	(async () => {
+		try {
+			const farmer = await findAmritAgrotech();
+			if (!farmer || !mounted) return;
+			const fetchedLands = await fetchLands(farmer.farmer_id);
+			if (!mounted) return;
+			const labels: Record<string, string> = {};
+			fetchedLands.forEach((land) => {
+				labels[land.farm_id] = [land.land_data.village, land.land_data.district].filter(Boolean).join(', ') || land.farm_id;
+			});
+			setLandLabels(labels);
+		} catch {
+			// land labels are a display nicety; fall back to raw farm_ids
+		}
+	})();
 	return () => { mounted = false; };
-}, [farmOptions]);
+}, []);
 
 const filteredActivitiesData = useMemo(() => {
 const next: CalendarData = {};
 for (const [dateStr, acts] of Object.entries(activitiesData)) {
 const filtered = acts.filter((task) => {
-if (filterBlockId !== 'all' && String(task.block_id || '') !== filterBlockId) return false;
 if (filterCropType !== 'all' && String(task.crop_type || '').trim().toLowerCase() !== filterCropType) return false;
 if (filterActivity !== 'all' && String(task.activity || '') !== filterActivity) return false;
 if (filterFarmIds.length > 0 && !filterFarmIds.includes(String(task.farm_id || ''))) return false;
@@ -791,91 +626,8 @@ return true;
 if (filtered.length > 0) next[dateStr] = filtered;
 }
 return next;
-}, [activitiesData, filterActivity, filterBlockId, filterCropType, filterFarmIds]);
+}, [activitiesData, filterActivity, filterCropType, filterFarmIds]);
 
-// Flattens the visible 4-month window's (already filtered) activities into the Task
-// Timeline panel's task list — one row per farm assignment, sorted chronologically.
-const timelineTasks = useMemo<TimelineTask[]>(() => {
-const startKey = formatDateKey(monthsToDisplay[0]);
-const lastVisibleMonth = monthsToDisplay[monthsToDisplay.length - 1];
-const endKey = formatDateKey(new Date(lastVisibleMonth.getFullYear(), lastVisibleMonth.getMonth() + 1, 0));
-const rows: TimelineTask[] = [];
-
-Object.entries(filteredActivitiesData).forEach(([dateStr, acts]) => {
-if (dateStr < startKey || dateStr > endKey) return;
-acts.forEach((act, index) => {
-const assignment = act.assignments[0];
-if (!assignment || !assignment.farm_id) return;
-rows.push({
-key: `${act.calander_id}-${dateStr}-${assignment.farm_id}-${assignment.status}-${index}`,
-date: dateStr,
-activity: act.activity,
-cropType: act.crop_type,
-farmId: assignment.farm_id,
-farmerName: farmerNames[assignment.farm_id] || assignment.farm_id,
-assignedArea: assignment.assigned_area,
-plots: assignment.plot ?? [],
-statusTone: timelineStatusTone(assignment.status),
-statusLabel: timelineStatusLabel(assignment.status),
-taskId: assignment.task_id,
-});
-});
-});
-
-return rows.sort((a, b) => a.date.localeCompare(b.date));
-}, [filteredActivitiesData, monthsToDisplay, farmerNames]);
-
-const [timelineAssignmentByFarm, setTimelineAssignmentByFarm] = useState<Record<string, TimelineAssignment>>({});
-const fetchedTimelineFarmIds = useRef<Set<string>>(new Set());
-
-// Team info (supervisor + field manager) for the Task Timeline panel — fetched once per
-// farm_id and cached, independent of the day-popup's own contactsById (which only covers
-// whichever single day is currently open in the modal).
-useEffect(() => {
-const farmIds = Array.from(new Set(timelineTasks.map((task) => task.farmId)));
-farmIds.forEach((farmId) => {
-if (fetchedTimelineFarmIds.current.has(farmId)) return;
-fetchedTimelineFarmIds.current.add(farmId);
-
-fetch(`${BASE_URL}/farmer_managment/get_assigned_supervisor_and_field_manager/${farmId}`)
-.then((res) => res.json())
-.then((data: { assigned_supervisor?: { supervisor_name?: string }; assigned_field_manager?: { name?: string } | { name?: string }[] }) => {
-const fm = Array.isArray(data?.assigned_field_manager) ? data.assigned_field_manager[0] : data?.assigned_field_manager;
-setTimelineAssignmentByFarm((prev) => ({
-...prev,
-[farmId]: {
-supervisorName: data?.assigned_supervisor?.supervisor_name ?? '',
-fieldManagerName: fm?.name ?? '',
-},
-}));
-})
-.catch(() =>
-setTimelineAssignmentByFarm((prev) => ({ ...prev, [farmId]: { supervisorName: '', fieldManagerName: '' } })),
-);
-});
-}, [timelineTasks]);
-
-const [timelineProgressImages, setTimelineProgressImages] = useState<Record<string, string[]>>({});
-const fetchedTimelineTaskIds = useRef<Set<string>>(new Set());
-
-// Progress photos for the Task Timeline panel — only fetched for completed tasks (per-task,
-// cached), since get_task_details is only worth calling once a task actually has photos.
-useEffect(() => {
-const taskIds = Array.from(new Set(
-timelineTasks.filter((task) => task.statusTone === 'green' && task.taskId).map((task) => task.taskId as string)
-));
-taskIds.forEach((taskId) => {
-if (fetchedTimelineTaskIds.current.has(taskId)) return;
-fetchedTimelineTaskIds.current.add(taskId);
-
-fetch(`${BASE_URL}/admin_all_task/get_task_details/${taskId}`)
-.then((res) => res.json())
-.then((data: { progress_images?: string[] }) => {
-setTimelineProgressImages((prev) => ({ ...prev, [taskId]: Array.isArray(data?.progress_images) ? data.progress_images : [] }));
-})
-.catch(() => setTimelineProgressImages((prev) => ({ ...prev, [taskId]: [] })));
-});
-}, [timelineTasks]);
 
 useEffect(() => {
 setLoading(true);
@@ -951,7 +703,7 @@ activityDate.setHours(0,0,0,0);
 
 activities.forEach((act, idx) => {
 const totalArea = act.assignments.reduce((sum, a) => sum + (Number(a.assigned_area) || 0), 0);
-const landStr = `Cluster A - Zone 1 - Block ${act.block_id || 'Gen'} - Field ${act.farm_id}`;
+const landStr = `${landLabels[act.farm_id] || 'Land'} - Field ${act.farm_id}`;
 
 const taskItem: SidebarTask = {
 id: `${act.plan_id}-${act.index}-${idx}`,
@@ -985,25 +737,14 @@ setIsModalOpen(true);
 const closeModal = () => {
 setIsModalOpen(false);
 setIsAssignmentOpen(false);
-setDateSwapTaskKey(null);
-setDateSwapValue('');
-setDateSwapPopupPos(null);
 setViewPlotsTaskKey(null);
 };
 
 const closeAssignmentModal = () => {
 setIsAssignmentOpen(false);
-setSelectedSupervisorId('');
-setSelectedFieldManagerIds([]);
-setVendorSectionTab('self');
-setScopeVendors({});
-setSelectedTaskVendorId(null);
-setTaskVendor({ name: '', contact: '' });
 setSelectedVehicleIds([]);
 setEquipmentCounts({});
 setEquipmentSearchTerm('');
-setDosageRows([]);
-setSelectedDosageItemRowId('');
 };
 
 const isTaskPending = (task: CalendarActivity) => {
@@ -1042,8 +783,8 @@ const getInventoryItemId = (item: ApiInventoryItem): string => {
 return String(item?.id || item?.Invent_id || item?.item || '');
 };
 
-// Dosage/crop-input categories belong in the "Choose Item" step (sourced from Dosage Control),
-// not here — this list is for physical equipment/machinery only.
+// Dosage/crop-input categories (seeds, fertilizer, etc.) are excluded here —
+// this list is for physical equipment/machinery only.
 const DOSAGE_INPUT_CATEGORY_KEYWORDS = ['seed', 'fertilizer', 'pesticide', 'fungicide', 'herbicide', 'chemical', 'manure', 'nutrient'];
 const isDosageInputCategory = (category: string) => {
 const normalized = category.trim().toLowerCase();
@@ -1082,7 +823,7 @@ return {};
 
 const getTaskKey = (task: CalendarActivity) => {
 const status = normalizeAssignmentStatus(Array.isArray(task.assignments) ? task.assignments[0]?.status : undefined);
-return `${task.calander_id}__${task.plan_id}__${task.block_id}__${task.index}__${task.activity}__${task.farm_id}__${status}`;
+return `${task.calander_id}__${task.plan_id}__${task.index}__${task.activity}__${task.farm_id}__${status}`;
 };
 
 useEffect(() => {
@@ -1091,110 +832,6 @@ setSelectedTaskKeys({});
 setMultiSelectGroups({});
 }
 }, [isModalOpen, selectedDate]);
-
-// Fetch scope-of-work vendors whenever the assignment popup is open (Choose Vendor section)
-useEffect(() => {
-if (!isAssignmentOpen) {
-setScopeVendors({});
-return;
-}
-const selectedTask = selectedActivities.find(
-(t) => selectedTaskKeys[getTaskKey(t)] && isTaskAssignable(t)
-);
-const farmId = selectedTask?.farm_id;
-if (!farmId) return;
-
-let mounted = true;
-setIsLoadingScope(true);
-setScopeVendors({});
-(async () => {
-try {
-const res = await fetch(`${BASE_URL}/admin_cultivation/get_scope_of_work_for_land/${farmId}`);
-const data = await res.json().catch(() => null);
-if (!mounted) return;
-if (data?.success && data?.scope_of_work && typeof data.scope_of_work === 'object') {
-setScopeVendors(data.scope_of_work as Record<string, VendorScopeEntry>);
-} else {
-setScopeVendors({});
-}
-} catch {
-if (mounted) setScopeVendors({});
-} finally {
-if (mounted) setIsLoadingScope(false);
-}
-})();
-return () => { mounted = false; };
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [isAssignmentOpen]);
-
-// Fetch supervisors + field managers when the popup opens; prefill from this land's currently-assigned staff
-useEffect(() => {
-if (!isAssignmentOpen) return;
-let mounted = true;
-setIsLoadingStaff(true);
-(async () => {
-try {
-const [supRes, fmRes] = await Promise.all([
-fetch(`${BASE_URL}/supervisor_management/get_all_supervisors`),
-fetch(`${BASE_URL}/field_manager/get_all_field_managers`),
-]);
-const supData: any = await supRes.json().catch(() => null);
-const fmData: any = await fmRes.json().catch(() => null);
-if (!mounted) return;
-
-const supervisors = (Array.isArray(supData?.supervisors) ? supData.supervisors : [])
-.filter((s: any) => !!s?.sup_id)
-.map((s: any) => ({
-supervisor_id: String(s.sup_id),
-name: s.supervisor_info?.staff_name || 'Unknown',
-phone: s.supervisor_info?.staff_phone || 'N/A',
-}));
-const fieldManagers = (Array.isArray(fmData?.field_managers) ? fmData.field_managers : [])
-.filter((m: any) => !!m?.manager_id)
-.map((m: any) => ({
-manager_id: String(m.manager_id),
-name: m.field_manager_info?.staff_name || 'Unknown',
-phone: m.field_manager_info?.staff_phone || 'N/A',
-}));
-setAvailableSupervisors(supervisors);
-setAvailableFieldManagers(fieldManagers);
-
-const selectedTask = selectedActivities.find((t) => selectedTaskKeys[getTaskKey(t)] && isTaskAssignable(t));
-const contact = selectedTask ? contactsById[selectedTask.farm_id] : undefined;
-if (contact?.supervisorName && !selectedSupervisorId) {
-const match = supervisors.find((s) => s.name === contact.supervisorName);
-if (match) setSelectedSupervisorId(match.supervisor_id);
-}
-if (contact?.fieldManagers?.length && selectedFieldManagerIds.length === 0) {
-const matchedIds = contact.fieldManagers
-.map((fm) => fieldManagers.find((f) => f.name === fm.name)?.manager_id)
-.filter((id): id is string => !!id);
-if (matchedIds.length > 0) setSelectedFieldManagerIds(matchedIds);
-}
-} catch {
-if (mounted) {
-setAvailableSupervisors([]);
-setAvailableFieldManagers([]);
-}
-} finally {
-if (mounted) setIsLoadingStaff(false);
-}
-})();
-return () => { mounted = false; };
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [isAssignmentOpen]);
-
-// Load Dosage Control rows (Operations Master → Dosage Control) whenever the popup is open
-useEffect(() => {
-if (!isAssignmentOpen) return;
-try {
-const raw = localStorage.getItem(DOSAGE_CONTROLS_STORAGE_KEY);
-const parsed = raw ? JSON.parse(raw) : [];
-setDosageRows(Array.isArray(parsed) ? parsed : []);
-} catch {
-setDosageRows([]);
-}
-}, [isAssignmentOpen]);
 
 const selectedActivities = selectedDate && filteredActivitiesData[selectedDate] ? filteredActivitiesData[selectedDate] : [];
 const selectedActivityGroups = useMemo(() => {
@@ -1252,94 +889,6 @@ return Array.from(groups.values());
 const allSelectedKeys = selectedActivities.map(getTaskKey);
 const anySelected = allSelectedKeys.some((k) => !!selectedTaskKeys[k]);
 const allSelected = allSelectedKeys.length > 0 && allSelectedKeys.every((k) => !!selectedTaskKeys[k]);
-const activeDateSwapTask = useMemo(
-() => selectedActivities.find((t) => getTaskKey(t) === dateSwapTaskKey) || null,
-[dateSwapTaskKey, selectedActivities]
-);
-
-const handleApplyDateSwap = async () => {
-if (!selectedDate) return;
-if (!dateSwapValue) {
-toast.error('Please select a new date');
-return;
-}
-if (!activeDateSwapTask) {
-toast.error('Task not found for date swap');
-return;
-}
-if (dateSwapValue === selectedDate) {
-toast.error('New date cannot be same as current date');
-return;
-}
-
-const payload = {
-calendar_id: activeDateSwapTask.calander_id,
-activity: activeDateSwapTask.activity,
-farm_id: activeDateSwapTask.farm_id,
-old_date: selectedDate,
-new_date: dateSwapValue,
-};
-
-try {
-const res = await fetch(`${BASE_URL}/admin_cultivation/change_task_date`, {
-method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify(payload),
-});
-const data: any = await res.json().catch(() => null);
-if (!res.ok || data?.success !== true) {
-throw new Error(data?.message || 'Failed to change task date');
-}
-
-setActivitiesData((prev) => {
-const next: CalendarData = { ...prev };
-const oldList = Array.isArray(next[selectedDate]) ? [...next[selectedDate]] : [];
-const movingTask = oldList.find((t) => getTaskKey(t) === getTaskKey(activeDateSwapTask));
-if (!movingTask) return prev;
-
-next[selectedDate] = oldList.filter((t) => getTaskKey(t) !== getTaskKey(activeDateSwapTask));
-if (next[selectedDate].length === 0) delete next[selectedDate];
-
-const newList = Array.isArray(next[dateSwapValue]) ? [...next[dateSwapValue]] : [];
-const existingIdx = newList.findIndex((t) => getTaskKey(t) === getTaskKey(movingTask));
-if (existingIdx >= 0) {
-const existing = newList[existingIdx];
-const mergedByFarm = new Map<string, { farm_id: string; assigned_area: number; status?: string; plot?: PlotItem[] }>();
-for (const a of [...(existing.assignments || []), ...(movingTask.assignments || [])]) {
-const fid = String(a?.farm_id || '');
-if (!fid) continue;
-const old = mergedByFarm.get(fid);
-if (!old) {
-mergedByFarm.set(fid, { farm_id: fid, assigned_area: Number(a?.assigned_area) || 0, status: a?.status, plot: a?.plot || [] });
-} else {
-const oldPlotIds = new Set((old.plot || []).map((p) => p.plot_id));
-const mergedPlots = [...(old.plot || []), ...(a?.plot || []).filter((p) => !oldPlotIds.has(p.plot_id))];
-mergedByFarm.set(fid, {
-farm_id: fid,
-assigned_area: (Number(old.assigned_area) || 0) + (Number(a?.assigned_area) || 0),
-status: combineAssignmentStatus(old.status, a?.status),
-plot: mergedPlots,
-});
-}
-}
-newList[existingIdx] = { ...existing, assignments: Array.from(mergedByFarm.values()) };
-} else {
-newList.push(movingTask);
-}
-
-next[dateSwapValue] = newList.sort((a, b) => a.index - b.index);
-return next;
-});
-
-toast.success(`Task moved to ${dateSwapValue}`);
-setDateSwapTaskKey(null);
-setDateSwapValue('');
-setDateSwapPopupPos(null);
-} catch (e: any) {
-toast.error(e?.message || 'Failed to change task date');
-}
-};
-
 const approvalSummary = useMemo(() => {
 let eligible = 0;
 let supDone = 0;
@@ -1561,15 +1110,12 @@ return true;
 })
 .map((p) => ({ plot_id: p.plot_id, plot_name: p.plot_name, plot_area: p.plot_area }));
 
-const vehicles = vendorSectionTab === 'self'
-? selectedVehicleIds.map((vehicleId) => {
+const vehicles = selectedVehicleIds.map((vehicleId) => {
 const v = vehiclesForAssignment.find((x) => x.id === vehicleId);
 return { vehicle_id: vehicleId, vehicle_number: v?.name || vehicleId };
-})
-: [];
+});
 
-const equipment = vendorSectionTab === 'self'
-? Object.entries(equipmentCounts)
+const equipment = Object.entries(equipmentCounts)
 .filter(([, qty]) => (Number(qty) || 0) > 0)
 .map(([equipmentId, qty]) => {
 const item = inventoryItems.find((it) => getInventoryItemId(it) === equipmentId);
@@ -1578,30 +1124,20 @@ equipment_id: equipmentId,
 equipment_name: String(item?.item_name || item?.name || item?.item || equipmentId),
 quantity: Math.max(0, Math.floor(Number(qty) || 0))
 };
-})
-: [];
+});
 
 const payload: Record<string, any> = {
 feild_id: feildIds,
 plot: plots,
 assigned_acres: assignedAcres,
 calander_id: calanderId,
-...(selectedSupervisorId && { supervisor_id: selectedSupervisorId }),
-...(selectedFieldManagerIds.length > 0 && { field_manager_id: selectedFieldManagerIds }),
-...(vendorSectionTab === 'self' && vehicles.length > 0 && { vehicles }),
-...(vendorSectionTab === 'self' && equipment.length > 0 && { equipment }),
-...(vendorSectionTab === 'vendor' && selectedTaskVendorId && taskVendor.name && {
-task_vendor: [{ vendor_id: selectedTaskVendorId, vendor_name: taskVendor.name }],
-}),
-...(selectedDosageItemRowId && (() => {
-const row = dosageRows.find((r) => r.id === selectedDosageItemRowId);
-return row ? { dosage_item: { item_id: row.inventoryItemId, dosage_per_acre: row.dosagePerAcre, uom: row.uom } } : {};
-})()),
+...(vehicles.length > 0 && { vehicles }),
+...(equipment.length > 0 && { equipment }),
 };
 
 const totalAssignedAcres = assignedAcres.reduce((sum, x) => sum + (Number(x.assigned_acres) || 0), 0);
 
-const updateVehicleCalendar = async (vehicleId: string, acresCovered: number, blockId: string, farmId: string, activity: string) => {
+const updateVehicleCalendar = async (vehicleId: string, acresCovered: number, farmId: string, activity: string) => {
 const res = await fetch(`${BASE_URL}/admin_vehicles/update_vehicle_calander`, {
 method: 'POST',
 headers: { 'Content-Type': 'application/json' },
@@ -1609,7 +1145,6 @@ body: JSON.stringify({
 date: selectedDate,
 acres_covered: acresCovered,
 vehicle_id: vehicleId,
-block_id: blockId,
 farm_id: farmId,
 activity: activity,
 }),
@@ -1648,12 +1183,11 @@ return await updateRes.json();
 
 if (updateCalls.length > 0) await Promise.allSettled(updateCalls);
 
-// Update vehicle calendars only when self-work vehicles were assigned
-if (vendorSectionTab === 'self' && vehicles.length > 0) {
+// Update vehicle calendars only when vehicles were assigned
+if (vehicles.length > 0) {
 const vehiclesCount = Math.max(1, vehicles.length);
 const acresPerVehicle = vehiclesCount > 0 ? totalAssignedAcres / vehiclesCount : 0;
 const taskDetails = selectedTasks.map(t => ({
-blockId: t.block_id,
 farmId: t.farm_id,
 activity: t.activity
 }));
@@ -1662,7 +1196,6 @@ taskDetails.map((detail) =>
 updateVehicleCalendar(
 String(v.vehicle_id),
 Number.isFinite(acresPerVehicle) ? acresPerVehicle : 0,
-detail.blockId,
 detail.farmId,
 detail.activity
 )
@@ -1808,10 +1341,6 @@ return (
 		</div>
 	</div>
 	<div className="flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-x-auto pb-1">
-		<select value={filterBlockId} onChange={(e) => setFilterBlockId(e.target.value)} className="h-10 w-[135px] shrink-0 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
-			<option value="all">{filterBlockId === 'all' ? '✓ ' : ''}All Blocks</option>
-			{blockOptions.map((b) => (<option key={b} value={b}>{filterBlockId === b ? '✓ ' : ''}{b}</option>))}
-		</select>
 		<select value={filterCropType} onChange={(e) => setFilterCropType(e.target.value)} className="h-10 w-[130px] shrink-0 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
 			<option value="all">{filterCropType === 'all' ? '✓ ' : ''}All Crops</option>
 			{cropTypeOptions.map((c) => (<option key={c} value={c}>{filterCropType === c ? '✓ ' : ''}{c.toUpperCase()}</option>))}
@@ -1822,12 +1351,11 @@ return (
 		</select>
 		<select value="" onChange={(e) => { const v = e.target.value; if (!v) return; setFilterFarmIds((prev) => (prev.includes(v) ? prev.filter((id) => id !== v) : [...prev, v])); }} className="h-10 w-[145px] shrink-0 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
 			<option value="">{filterFarmIds.length > 0 ? `${filterFarmIds.length} farm${filterFarmIds.length > 1 ? 's' : ''} selected` : 'Add farm'}</option>
-			{farmOptions.map((f) => (<option key={f} value={f}>{filterFarmIds.includes(f) ? '✓ ' : ''}{farmerNames[f] || f}</option>))}
+			{farmOptions.map((f) => (<option key={f} value={f}>{filterFarmIds.includes(f) ? '✓ ' : ''}{landLabels[f] || f}</option>))}
 		</select>
 		<button
 			type="button"
 			onClick={() => {
-				setFilterBlockId('all');
 				setFilterCropType('all');
 				setFilterActivity('all');
 				setFilterFarmIds([]);
@@ -1839,8 +1367,8 @@ return (
 	</div>
 </div>
 
-<div className="grid grid-cols-1 gap-6 xl:grid-cols-[3fr_2fr] xl:items-start">
-	{/* Calendar section — 60% */}
+<div className="grid grid-cols-1 gap-6">
+	{/* Calendar section */}
 	<div className="min-w-0 space-y-4">
 		<div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
 			<div className="flex items-center gap-3 bg-white border border-gray-200 px-3 py-2 rounded-lg shadow-sm">
@@ -1861,16 +1389,6 @@ return (
 			</div>
 		</div>
 
-		{/* ✅ REMOVED: Weekly Field Visit Calendar Section (Horizontal Strip) */}
-		{/* Inline Timeline is displayed when month progress is clicked */}
-		{!loading && !error && timelineMonth && (
-		<InlineTimeline
-		activities={filteredActivitiesData}
-		monthDate={timelineMonth}
-		onClose={() => setTimelineMonth(null)}
-		/>
-		)}
-
 		{!loading && !error && (
 		<div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
 		{monthsToDisplay.map((monthDate, index) => (
@@ -1881,35 +1399,10 @@ return (
 		onDateClick={handleDateClick}
 		currentDateKey={currentDateKey}
 		pendingByDate={pendingByDate}
-		onFieldVisitClick={(m) =>
-		setTimelineMonth((prev) => {
-		if (prev && prev.getFullYear() === m.getFullYear() && prev.getMonth() === m.getMonth()) return null;
-		return new Date(m);
-		})
-		}
 		/>
 		))}
 		</div>
 		)}
-	</div>
-
-	{/* Timeline section — 40% */}
-	<div className="min-w-0 xl:sticky xl:top-8 xl:h-[calc(100vh-10rem)]">
-		<TaskTimelinePanel
-			tasks={timelineTasks}
-			farmsById={farmsById}
-			assignmentByFarm={timelineAssignmentByFarm}
-			loading={loading}
-			renderActivityIcon={getActivityIcon}
-			onExpandMap={(task) => setMapViewTask({
-				activity: task.activity,
-				date: task.date,
-				farm_id: task.farmId,
-				farmerName: task.farmerName,
-				plots: task.plots,
-			})}
-			progressImagesByTaskId={timelineProgressImages}
-		/>
 	</div>
 </div>
 
@@ -2023,7 +1516,7 @@ const fmText = contact?.fieldManagers.length
 : '—';
 return (
 <div key={taskKey || `${group.key}-${idx}`} className="group bg-white transition-colors hover:bg-gray-50">
-<div className="grid grid-cols-[70px_2.2fr_0.85fr_0.85fr_0.85fr_250px] gap-x-4 px-5 py-4 items-center">
+<div className="grid grid-cols-[70px_2.2fr_0.85fr_0.85fr_130px_0.85fr_250px] gap-x-4 px-5 py-4 items-center">
 <div className="flex justify-center pt-0.5">
 {isMultiSelect ? (
 <button
@@ -2051,7 +1544,7 @@ title="Select task"
 <div className="min-w-0">
 <div className="flex flex-wrap items-center gap-2">
 <span className="text-[13px] font-extrabold text-[#0D3A35]">
-{farmerNames[act.farm_id] || act.farm_id || '—'}
+{landLabels[act.farm_id] || act.farm_id || '—'}
 </span>
 </div>
 <div className="mt-1 flex w-full min-w-0 items-center gap-1 text-[12px] font-semibold text-[#276152]">
@@ -2126,6 +1619,15 @@ isViewing
 </div>
 );
 })()}
+{/* Map column */}
+<InlineTaskPlotMap
+farmId={act.farm_id}
+plots={act.assignments.flatMap((a) => (a.plot ?? []).map((p) => ({
+plot_id:   p.plot_id,
+plot_name: p.plot_name,
+plot_area: p.plot_area,
+})))}
+/>
 <div className="flex justify-center">
 {(() => {
 const status = overdueTask
@@ -2161,34 +1663,6 @@ title="Assign task"
 </button>
 <span className="text-[10px] font-semibold leading-none text-[#276152]">Assign</span>
 </div>
-<div className="flex flex-col items-center gap-1">
-<button
-type="button"
-onClick={(e) => {
-if (dateSwapTaskKey === taskKey) {
-setDateSwapTaskKey(null);
-setDateSwapValue('');
-setDateSwapPopupPos(null);
-return;
-}
-setDateSwapTaskKey(taskKey);
-setDateSwapValue(selectedDate || '');
-const btnRect = e.currentTarget.getBoundingClientRect();
-const modalRect = taskModalRef.current?.getBoundingClientRect();
-if (modalRect) {
-setDateSwapPopupPos({
-top: Math.max(16, btnRect.top - 8),
-left: modalRect.right + 14,
-});
-}
-}}
-className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-sky-200 bg-white text-sky-600 hover:bg-sky-50 transition-colors"
-title="Prepone / Postpone"
->
-<CalendarIcon className="w-4 h-4" />
-</button>
-<span className="text-[10px] font-semibold text-sky-700 leading-none">Swap Date</span>
-</div>
 {normalizeAssignmentStatus(act.assignments[0]?.status) !== 'unassigned' && (
 <div className="flex flex-col items-center gap-1">
 <button
@@ -2197,8 +1671,7 @@ onClick={() => setMonitorTask({
 activity:   act.activity,
 date:       selectedDate!,
 farm_id:    act.farm_id,
-farmerName: farmerNames[act.farm_id] || act.farm_id,
-block_id:   act.block_id,
+farmerName: landLabels[act.farm_id] || act.farm_id,
 totalArea,
 assignments: act.assignments,
 task_id:    act.assignments.find(a => a.task_id)?.task_id,
@@ -2211,50 +1684,6 @@ title="Monitor task progress"
 <span className="text-[10px] font-semibold text-[#276152] leading-none">Monitor</span>
 </div>
 )}
-<div className="flex flex-col items-center gap-1">
-<button
-type="button"
-onClick={() => setMapViewTask({
-activity:   act.activity,
-date:       selectedDate!,
-farm_id:    act.farm_id,
-farmerName: farmerNames[act.farm_id] || act.farm_id,
-plots:      act.assignments.flatMap((a) => (a.plot ?? []).map((p) => ({
-plot_id:   p.plot_id,
-plot_name: p.plot_name,
-plot_area: p.plot_area,
-}))),
-})}
-className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-[#7A2533]/30 bg-white text-[#7A2533] hover:bg-[#7A2533] hover:text-white transition-colors"
-title="View plot map"
->
-<MapIcon className="w-4 h-4" />
-</button>
-<span className="text-[10px] font-semibold text-[#7A2533] leading-none">Map View</span>
-</div>
-<div className="flex flex-col items-center gap-1">
-<button
-type="button"
-onClick={() => {
-if (!selectedDate) return;
-setActivitiesData((prev) => {
-const list = prev[selectedDate] || [];
-return { ...prev, [selectedDate]: list.filter((item) => getTaskKey(item) !== taskKey) };
-});
-setSelectedTaskKeys((prev) => {
-const next = { ...prev };
-delete next[taskKey];
-return next;
-});
-toast.success('Task deleted');
-}}
-className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 bg-white text-red-600 transition-colors hover:bg-red-50"
-title="Delete task"
->
-<Trash2 className="h-4 w-4" />
-</button>
-<span className="text-[10px] font-semibold leading-none text-red-600">Delete</span>
-</div>
 </div>
 </div>
 </div>
@@ -2282,52 +1711,6 @@ title="Delete task"
 </div>
 )}
 </div>
-{dateSwapTaskKey && dateSwapPopupPos && (
-<div
-className="fixed z-[70] w-64 rounded-lg border border-[#276152]/30 bg-[#FBF6F0] shadow-2xl p-3"
-style={{ top: `${dateSwapPopupPos.top}px`, left: `${dateSwapPopupPos.left}px` }}
->
-<div className="text-xs font-semibold text-[#0D3A35] mb-1">Change Task Date</div>
-<div className="text-[11px] text-[#276152] mb-2">Pick a new date to prepone or postpone this task.</div>
-<div className="space-y-2">
-<div>
-<label className="text-[10px] font-medium text-[#276152]">Current Date</label>
-<div className="mt-1 h-8 rounded-md border border-[#B1B7AB] bg-[#B1B7AB]/25 px-2 text-xs flex items-center text-[#0D3A35]">
-{selectedDate}
-</div>
-</div>
-<div>
-<label className="text-[10px] font-medium text-[#276152]">New Date</label>
-<input
-type="date"
-value={dateSwapValue}
-onChange={(e) => setDateSwapValue(e.target.value)}
-className="mt-1 h-8 w-full rounded-md border border-[#B1B7AB] bg-[#FBF6F0] px-2 text-xs text-[#0D3A35] focus:border-[#276152] focus:outline-none"
-/>
-</div>
-<div className="pt-1 flex justify-end gap-2">
-<button
-type="button"
-onClick={() => {
-setDateSwapTaskKey(null);
-setDateSwapValue('');
-setDateSwapPopupPos(null);
-}}
-className="h-7 px-2 rounded-md border border-[#B1B7AB] bg-[#FBF6F0] text-[11px] font-medium text-[#0D3A35] hover:bg-[#B1B7AB]/25"
->
-Cancel
-</button>
-<button
-type="button"
-onClick={handleApplyDateSwap}
-className="h-7 px-2 rounded-md bg-[#0D3A35] text-white text-[11px] font-medium hover:bg-[#276152]"
->
-Apply
-</button>
-</div>
-</div>
-</div>
-)}
 </div>
 )}
 
@@ -2338,100 +1721,17 @@ Apply
 <div className="flex items-center justify-between p-4 border-b border-[#276152]/20 bg-[#0D3A35]">
 <div>
 <h3 className="text-lg font-semibold text-white">Assign Resources</h3>
-<p className="text-sm text-white/70">Staff, Vendor & Item • {new Date(selectedDate).toDateString()}</p>
+<p className="text-sm text-white/70">Vehicles & Equipment • {new Date(selectedDate).toDateString()}</p>
 </div>
 <button onClick={closeAssignmentModal} className="p-1 hover:bg-white/10 rounded-md"><X className="w-5 h-5 text-white/80" /></button>
 </div>
 
 <div className="flex-1 overflow-y-auto bg-[#FBF6F0] p-6 space-y-8">
 <div>
-<h4 className="mb-3 text-sm font-bold text-[#0D3A35] uppercase tracking-wide flex items-center gap-2">
-<User className="w-4 h-4" /> Assign Staff
-</h4>
-{isLoadingStaff ? (
-<div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground bg-white rounded-lg border border-[#276152]/15">
-<div className="w-4 h-4 border-2 border-[#276152] border-t-transparent rounded-full animate-spin" />
-Loading staff…
-</div>
-) : (
-<div className="grid gap-6 md:grid-cols-2">
-<div>
-<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#276152]">Supervisor</p>
-<div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-{availableSupervisors.length === 0 ? (
-<div className="p-3 text-sm text-muted-foreground bg-white rounded-lg border border-dashed border-gray-200">No supervisors found.</div>
-) : availableSupervisors.map((s) => {
-const isSelected = selectedSupervisorId === s.supervisor_id;
-return (
-<button
-key={s.supervisor_id}
-type="button"
-onClick={() => setSelectedSupervisorId(s.supervisor_id)}
-className={cn(
-"w-full flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left transition-all",
-isSelected ? "border-[#0D3A35] bg-[#0D3A35]/5" : "border-gray-200 bg-white hover:border-[#0D3A35]/30 hover:bg-[#0D3A35]/5"
-)}
->
-<div className="flex min-w-0 items-baseline gap-1.5">
-<span className="truncate text-xs font-semibold text-slate-800">{s.name}</span>
-<span className="shrink-0 text-[10px] text-slate-500">{s.phone}</span>
-</div>
-{isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-[#0D3A35]" />}
-</button>
-);
-})}
-</div>
-</div>
-<div>
-<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#276152]">Field Manager(s)</p>
-<div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-{availableFieldManagers.length === 0 ? (
-<div className="p-3 text-sm text-muted-foreground bg-white rounded-lg border border-dashed border-gray-200">No field managers found.</div>
-) : availableFieldManagers.map((m) => {
-const isSelected = selectedFieldManagerIds.includes(m.manager_id);
-return (
-<button
-key={m.manager_id}
-type="button"
-onClick={() => setSelectedFieldManagerIds((prev) => prev.includes(m.manager_id) ? prev.filter((id) => id !== m.manager_id) : [...prev, m.manager_id])}
-className={cn(
-"w-full flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left transition-all",
-isSelected ? "border-[#0D3A35] bg-[#0D3A35]/5" : "border-gray-200 bg-white hover:border-[#0D3A35]/30 hover:bg-[#0D3A35]/5"
-)}
->
-<div className="flex min-w-0 items-baseline gap-1.5">
-<span className="truncate text-xs font-semibold text-slate-800">{m.name}</span>
-<span className="shrink-0 text-[10px] text-slate-500">{m.phone}</span>
-</div>
-{isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-[#0D3A35]" />}
-</button>
-);
-})}
-</div>
-</div>
-</div>
-)}
-</div>
-
-<div className="border-t border-[#276152]/20 pt-8">
-<div className="mb-3 flex items-center justify-between">
-<h4 className="text-sm font-bold text-[#0D3A35] uppercase tracking-wide flex items-center gap-2">
-<User className="w-4 h-4" /> Self Work / Vendor Scope
-</h4>
-<div className="flex items-center rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold shadow-sm">
-<button type="button" onClick={() => setVendorSectionTab('self')} className={cn("px-3 py-1.5 flex items-center gap-1.5 transition-colors", vendorSectionTab === 'self' ? "bg-[#0D3A35] text-white" : "bg-white text-gray-600 hover:bg-gray-50")}>
-<Truck className="w-3 h-3" /> Self Work
-</button>
-<button type="button" onClick={() => setVendorSectionTab('vendor')} className={cn("px-3 py-1.5 flex items-center gap-1.5 border-l border-gray-200 transition-colors", vendorSectionTab === 'vendor' ? "bg-[#0D3A35] text-white" : "bg-white text-gray-600 hover:bg-gray-50")}>
-<User className="w-3 h-3" /> Vendor Scope
-</button>
-</div>
-</div>
-{vendorSectionTab === 'self' ? (
-<div className="space-y-6">
-<div>
 <div className="flex items-center justify-between mb-2">
-<p className="text-xs font-semibold uppercase tracking-wide text-[#0D3A35] flex items-center gap-1.5"><Truck className="w-3.5 h-3.5" /> Select Vehicles</p>
+<h4 className="text-sm font-bold text-[#0D3A35] uppercase tracking-wide flex items-center gap-2">
+<Truck className="w-4 h-4" /> Step 1: Select Vehicles
+</h4>
 {selectedVehicleIds.length > 0 && (
 <span className="text-xs font-medium text-[#0D3A35] bg-[#0D3A35]/10 px-2 py-0.5 rounded border border-[#0D3A35]/20">{selectedVehicleIds.length} Selected</span>
 )}
@@ -2448,8 +1748,11 @@ isSelected ? "border-[#0D3A35] bg-[#0D3A35]/5" : "border-gray-200 bg-white hover
 </div>
 </div>
 </div>
-<div>
-<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#0D3A35] flex items-center gap-1.5"><Wrench className="w-3.5 h-3.5" /> Select Equipment</p>
+
+<div className="border-t border-[#276152]/20 pt-8">
+<h4 className="mb-3 text-sm font-bold text-[#0D3A35] uppercase tracking-wide flex items-center gap-2">
+<Wrench className="w-4 h-4" /> Step 2: Select Equipment
+</h4>
 <div className="mb-3">
 <input
 type="text"
@@ -2465,118 +1768,6 @@ className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 te
 </div>
 </div>
 </div>
-</div>
-) : (
-<div className="space-y-2">
-{isLoadingScope ? (
-<div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground bg-white rounded-lg border border-[#276152]/15">
-<div className="w-4 h-4 border-2 border-[#276152] border-t-transparent rounded-full animate-spin" />
-Loading vendors for this land…
-</div>
-) : Object.keys(scopeVendors).length > 0 ? (
-<>
-<p className="text-xs font-semibold text-[#0D3A35] uppercase tracking-wide flex items-center gap-1.5">
-<CheckCircle2 className="w-3.5 h-3.5" /> Select a vendor scoped for this land
-</p>
-{Object.entries(scopeVendors).map(([vendorId, scope]) => {
-const isSelected = selectedTaskVendorId === vendorId;
-return (
-<button
-key={vendorId}
-type="button"
-onClick={() => {
-setSelectedTaskVendorId(vendorId);
-setTaskVendor({ name: scope.vendor_details.vendor_name, contact: scope.vendor_details.vendor_contact });
-}}
-className={cn(
-"w-full text-left rounded-lg border p-3 transition-all",
-isSelected ? "border-[#0D3A35] bg-[#0D3A35]/5 ring-1 ring-[#0D3A35]/30" : "border-gray-200 bg-white hover:border-[#0D3A35]/30 hover:bg-[#0D3A35]/5"
-)}
->
-<div className="flex items-start justify-between gap-3">
-<div className="min-w-0">
-<div className="flex items-center gap-2">
-<span className="text-sm font-semibold text-slate-800">{scope.vendor_details.vendor_name}</span>
-{isSelected && <span className="text-[10px] font-bold text-white bg-[#0D3A35] px-1.5 py-0.5 rounded">Selected</span>}
-</div>
-<div className="mt-0.5 text-xs text-slate-500 flex items-center gap-2 flex-wrap">
-<span className="font-mono text-slate-400">{vendorId}</span>
-{scope.vendor_details.vendor_contact && <span>· {scope.vendor_details.vendor_contact}</span>}
-</div>
-{scope.activities.length > 0 && (
-<div className="mt-1.5 flex flex-wrap gap-1">
-{scope.activities.map(a => (
-<span key={a} className="text-[10px] px-1.5 py-0.5 bg-[#0D3A35]/10 text-[#0D3A35] border border-[#0D3A35]/20 rounded font-medium">{a}</span>
-))}
-</div>
-)}
-</div>
-<div className="text-[10px] text-slate-400 text-right shrink-0">
-{scope.start_date && <div>{scope.start_date}</div>}
-{scope.end_date && <div>→ {scope.end_date}</div>}
-</div>
-</div>
-</button>
-);
-})}
-</>
-) : (
-<div className="flex flex-col items-center gap-2 py-8 text-center bg-white rounded-lg border border-dashed border-gray-200">
-<User className="w-6 h-6 text-gray-300" />
-<p className="text-sm text-slate-500 font-medium">No vendor scope found for this land</p>
-<p className="text-xs text-slate-400">Assign a vendor in Scope of Work before using this option.</p>
-</div>
-)}
-</div>
-)}
-</div>
-
-<div className="border-t border-[#276152]/20 pt-8">
-{(() => {
-const selectedTaskForItem = selectedActivities.find((t) => selectedTaskKeys[getTaskKey(t)] && isTaskAssignable(t));
-const taskCrop = String(selectedTaskForItem?.crop_type || '').trim().toLowerCase();
-const matchingDosageRows = dosageRows.filter((row) => String(row.cropName || '').trim().toLowerCase() === taskCrop);
-return (
-<div>
-<h4 className="mb-1 text-sm font-bold text-[#0D3A35] uppercase tracking-wide flex items-center gap-2">
-<ClipboardList className="w-4 h-4" /> Choose Item
-</h4>
-<p className="mb-3 text-xs text-muted-foreground">Items configured in Operations Master → Dosage Control for {selectedTaskForItem?.crop_type || 'this crop'}.</p>
-{matchingDosageRows.length === 0 ? (
-<div className="flex flex-col items-center gap-2 py-8 text-center bg-white rounded-lg border border-dashed border-gray-200">
-<ClipboardList className="w-6 h-6 text-gray-300" />
-<p className="text-sm text-slate-500 font-medium">No dosage items configured for this crop</p>
-<p className="text-xs text-slate-400">Add a dosage row in Operations Master → Dosage Control first.</p>
-</div>
-) : (
-<div className="grid gap-2 md:grid-cols-2">
-{matchingDosageRows.map((row) => {
-const isSelected = selectedDosageItemRowId === row.id;
-return (
-<button
-key={row.id}
-type="button"
-onClick={() => setSelectedDosageItemRowId(row.id)}
-className={cn(
-"w-full text-left rounded-lg border p-3 transition-all",
-isSelected ? "border-[#0D3A35] bg-[#0D3A35]/5 ring-1 ring-[#0D3A35]/30" : "border-gray-200 bg-white hover:border-[#0D3A35]/30 hover:bg-[#0D3A35]/5"
-)}
->
-<div className="flex items-center justify-between gap-2">
-<span className="text-sm font-semibold text-slate-800">{row.inventoryItemId}</span>
-{isSelected && <span className="text-[10px] font-bold text-white bg-[#0D3A35] px-1.5 py-0.5 rounded">Selected</span>}
-</div>
-<div className="mt-0.5 text-xs text-slate-500">{row.dosagePerAcre || '0'} {row.uom} / acre</div>
-</button>
-);
-})}
-</div>
-)}
-</div>
-);
-})()}
-</div>
-
 </div>
 
 <div className="p-4 border-t border-[#276152]/20 bg-[#FBF6F0] flex justify-end items-center">
@@ -2597,13 +1788,6 @@ onClose={() => setMonitorTask(null)}
 />
 )}
 
-{/* Plot Map View Modal */}
-{mapViewTask && (
-<PlotMapViewModal
-task={mapViewTask}
-onClose={() => setMapViewTask(null)}
-/>
-)}
 </div>
 );
 };

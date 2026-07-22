@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   CalendarDays,
+  ChevronDown,
   CheckCircle,
   Clock,
   CreditCard,
@@ -237,21 +238,24 @@ export default function AccountsPayments() {
           </div>
         </header>
 
-        {/* Tab bar */}
-        <div className="inline-flex flex-wrap rounded-lg bg-slate-100/80 p-1 shadow-sm gap-0.5">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              className={[
-                "h-9 rounded-md px-4 text-sm font-medium transition-colors whitespace-nowrap",
-                activeTab === tab ? "bg-white text-slate-900 shadow-sm font-semibold" : "text-slate-500 hover:text-slate-800",
-              ].join(" ")}
+        {/* View switcher */}
+        <div className="flex items-center gap-2.5">
+          <label htmlFor="accounts-payments-view" className="text-xs font-extrabold uppercase tracking-wide text-slate-400">
+            Viewing
+          </label>
+          <div className="relative">
+            <select
+              id="accounts-payments-view"
+              value={activeTab}
+              onChange={(e) => setActiveTab(e.target.value as VendorTab)}
+              className="h-10 appearance-none rounded-lg border border-slate-200 bg-white pl-4 pr-9 text-sm font-semibold text-slate-900 shadow-sm outline-none focus:border-[#173f70] focus:ring-1 focus:ring-[#173f70]/20"
             >
-              {tab}
-            </button>
-          ))}
+              {tabs.map((tab) => (
+                <option key={tab} value={tab}>{tab}</option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          </div>
         </div>
 
         {/* Tab content */}

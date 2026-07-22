@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, Trash2, Building2, Info, Edit2 } from 'lucide-react';
+import { Plus, Search, Trash2, Building2, Edit2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -629,78 +629,65 @@ const VendorDirectory = () => {
         </select>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        {/* Table header */}
-        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_100px] items-center px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b bg-gray-50/80">
-          <div>Vendor</div>
-          <div>GST</div>
-          <div>Contact</div>
-          <div>Address</div>
-          <div>Tags</div>
-          <div className="text-right">Actions</div>
+      {/* Directory card grid */}
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center py-16 text-gray-400">
+          <Building2 className="w-10 h-10 mb-3 opacity-30" />
+          <p className="text-sm">No vendors found.</p>
         </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          {filtered.map((v) => (
+            <div
+              key={v.id}
+              className="group relative bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-green-200 transition-all p-4 flex flex-col items-center text-center cursor-pointer"
+              onClick={() => openDetails(v)}
+            >
+              {/* Hover action icons */}
+              <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button title="Edit" onClick={(e) => { e.stopPropagation(); openEdit(v); }} className="p-1.5 rounded-md bg-white/90 text-gray-400 hover:text-blue-600 hover:bg-blue-50 shadow-sm transition-colors">
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+                <button title="Delete" type="button" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(v.id); }} className="p-1.5 rounded-md bg-white/90 text-gray-400 hover:text-red-600 hover:bg-red-50 shadow-sm transition-colors">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
-        {filtered.map((v) => (
-          <div
-            key={v.id}
-            className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_100px] items-center gap-x-4 px-6 py-4 border-b last:border-b-0 hover:bg-gray-50/60 transition-colors"
-          >
-            {/* Vendor name + type */}
-            <div className="min-w-0 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
+              {/* Avatar */}
+              <div className="w-14 h-14 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xl font-bold mb-3">
                 {v.name.charAt(0).toUpperCase()}
               </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-gray-900 truncate">{v.name}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{v.type}</p>
+
+              {/* Name + type */}
+              <p className="font-semibold text-gray-900 truncate w-full">{v.name}</p>
+              <span className="mt-1 inline-block px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[11px] font-medium border border-green-200">
+                {v.type}
+              </span>
+
+              {/* GST */}
+              <p className="mt-2.5 text-xs text-gray-400 font-mono truncate w-full">{v.gst || '—'}</p>
+
+              {/* Contact */}
+              <div className="mt-2 w-full space-y-0.5 border-t border-gray-50 pt-2.5">
+                <p className="text-xs text-gray-600 truncate">{v.contactNumber || v.phone || '—'}</p>
+                {v.contactEmail && <p className="text-[11px] text-gray-400 truncate">{v.contactEmail}</p>}
               </div>
-            </div>
 
-            {/* GST */}
-            <div className="text-sm text-gray-700 font-mono truncate">{v.gst || <span className="text-gray-400">—</span>}</div>
-
-            {/* Contact */}
-            <div className="min-w-0">
-              <p className="text-sm text-gray-700 truncate">{v.contactNumber || v.phone || <span className="text-gray-400">—</span>}</p>
-              {v.contactEmail && <p className="text-xs text-gray-400 truncate mt-0.5">{v.contactEmail}</p>}
-            </div>
-
-            {/* Address */}
-            <div className="text-xs text-gray-500 truncate">{v.address || <span className="text-gray-400">—</span>}</div>
-
-            {/* Tags */}
-            <div className="flex flex-wrap gap-1 min-w-0">
-              {(v.tags || []).slice(0, 2).map((t) => (
-                <span key={t} className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-medium truncate max-w-[80px]">{t}</span>
-              ))}
-              {(v.tags || []).length > 2 && (
-                <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 text-[10px]">+{(v.tags || []).length - 2}</span>
+              {/* Tags */}
+              {(v.tags || []).length > 0 && (
+                <div className="mt-2.5 flex flex-wrap justify-center gap-1">
+                  {(v.tags || []).slice(0, 2).map((t) => (
+                    <span key={t} className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-medium truncate max-w-[80px]">{t}</span>
+                  ))}
+                  {(v.tags || []).length > 2 && (
+                    <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 text-[10px]">+{(v.tags || []).length - 2}</span>
+                  )}
+                </div>
               )}
             </div>
-
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-1">
-              <button title="More details" onClick={() => openDetails(v)} className="p-2 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors">
-                <Info className="w-4 h-4" />
-              </button>
-              <button title="Edit" onClick={() => openEdit(v)} className="p-2 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                <Edit2 className="w-4 h-4" />
-              </button>
-              <button title="Delete" type="button" onClick={() => setDeleteConfirmId(v.id)} className="p-2 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        ))}
-
-        {filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-            <Building2 className="w-10 h-10 mb-3 opacity-30" />
-            <p className="text-sm">No vendors found.</p>
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       <p className="mt-3 text-xs text-gray-400">{filtered.length} vendor{filtered.length !== 1 ? 's' : ''} shown</p>
 

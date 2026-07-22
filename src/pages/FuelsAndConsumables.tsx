@@ -23,7 +23,7 @@ const COMPANY_CONTACT = '+91 75870 76870';
 // ─────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────
-type RequestStatus = 'pending' | 'sent_to_admin' | 'approved' | 'rejected';
+type RequestStatus = 'pending' | 'approved' | 'rejected';
 type RequestSource = 'driver_app' | 'manual' | 'vendor';
 
 type StaffDetails = {
@@ -67,8 +67,6 @@ type FuelRequest = {
   request_id: string;
   source: RequestSource;
   requestor_status: string;
-  admin_ops_status: string;
-  director_status: string;
   date: string;
   purpose: string;
   fuel_requested: number;
@@ -76,6 +74,9 @@ type FuelRequest = {
   vehicle_details: VehicleDetails;
   vendor_details?: VendorDetails;     // present for vendor-source requests
   requestor_approval_details?: { approver_name: string; approver_designation: string; approved_time: string; approved_date: string };
+  // Legacy fields — only present on requests created before the single-stage approval change
+  admin_ops_status?: string;
+  director_status?: string;
   admin_ops_approval_details?: { approver_name: string; approver_designation: string; approved_time: string; approved_date: string };
   director_approval_details?:  Record<string, { approver_name: string; approver_designation: string; approved_time: string; approved_date: string }>;
   // Optional — filled at manual-entry / receipt stage
@@ -94,26 +95,26 @@ type FuelRequest = {
   reference_wo?: string;
 };
 
-// Derives a tab bucket from the three API status fields
+// Requestor approval is the only stage now; "approved_and_forwarded" is kept as an
+// accepted value so requests created before this change still display correctly.
+const isRequestorApproved = (r: FuelRequest) =>
+  r.requestor_status === 'approved' || r.requestor_status === 'approved_and_forwarded';
+
+// Derives a tab bucket from the requestor status field
 const deriveStatus = (r: FuelRequest): RequestStatus => {
-  if (r.admin_ops_status === 'rejected' || r.director_status === 'rejected') return 'rejected';
-  if (r.director_status === 'approved' || r.director_status === 'approved_and_forwarded') return 'approved';
-  if (r.requestor_status === 'approved_and_forwarded') return 'sent_to_admin';
+  if (r.requestor_status === 'rejected') return 'rejected';
+  if (isRequestorApproved(r)) return 'approved';
   return 'pending';
 };
 
-type StageInfo = { label: string; pill: string; step: 0 | 1 | 2 | 3 };
+type StageInfo = { label: string; pill: string; step: 0 | 1 };
 
 // Returns the specific workflow stage for the status column
 const deriveStage = (r: FuelRequest): StageInfo => {
-  if (r.admin_ops_status === 'rejected' || r.director_status === 'rejected')
+  if (r.requestor_status === 'rejected')
     return { label: 'Rejected', pill: 'bg-red-50 text-red-700 ring-1 ring-red-200', step: 0 };
-  if (r.director_status === 'approved' || r.director_status === 'approved_and_forwarded')
-    return { label: 'Fully Approved', pill: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200', step: 3 };
-  if (r.admin_ops_status === 'approved_and_forwarded')
-    return { label: 'With Director', pill: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200', step: 2 };
-  if (r.requestor_status === 'approved_and_forwarded')
-    return { label: 'With Admin Ops', pill: 'bg-sky-50 text-sky-700 ring-1 ring-sky-200', step: 1 };
+  if (isRequestorApproved(r))
+    return { label: 'Approved', pill: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200', step: 1 };
   return { label: 'With Requestor', pill: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200', step: 0 };
 };
 
@@ -151,11 +152,6 @@ const STATUS_CONFIG: Record<RequestStatus, { label: string; pill: string; tabAct
     pill: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
     tabActive: 'bg-amber-500 text-white border-amber-500',
   },
-  sent_to_admin: {
-    label: 'Sent to Admin',
-    pill: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
-    tabActive: 'bg-blue-600 text-white border-blue-600',
-  },
   approved: {
     label: 'Approved',
     pill: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
@@ -168,13 +164,13 @@ const STATUS_CONFIG: Record<RequestStatus, { label: string; pill: string; tabAct
   },
 };
 
-const TAB_LIST: { key: ActiveTab; label: string; tabActive: string }[] = [
-  { key: 'all', label: 'All', tabActive: 'bg-gray-800 text-white border-gray-800' },
-  { key: 'pending', label: 'Pending', tabActive: STATUS_CONFIG.pending.tabActive },
-  { key: 'sent_to_admin', label: 'Sent to Admin', tabActive: STATUS_CONFIG.sent_to_admin.tabActive },
-  { key: 'approved', label: 'Approved', tabActive: STATUS_CONFIG.approved.tabActive },
-  { key: 'rejected', label: 'Rejected', tabActive: STATUS_CONFIG.rejected.tabActive },
-];
+const DOT_COLOR: Record<RequestStatus, string> = {
+  pending: 'bg-amber-400',
+  approved: 'bg-emerald-500',
+  rejected: 'bg-red-400',
+};
+
+const KANBAN_STATUSES: RequestStatus[] = ['pending', 'approved', 'rejected'];
 
 const genReceiptNo = () =>
   `DIS-${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}`;
@@ -213,7 +209,6 @@ const FuelsAndConsumables = () => {
   const [requests, setRequests] = useState<FuelRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<ActiveTab>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [newRequestOpen, setNewRequestOpen] = useState(false);
   const [viewRequest, setViewRequest] = useState<FuelRequest | null>(null);
@@ -251,12 +246,11 @@ const FuelsAndConsumables = () => {
         (r.vehicle_details?.model ?? '').toLowerCase().includes(q) ||
         (r.location ?? '').toLowerCase().includes(q) ||
         (r.purpose ?? '').toLowerCase().includes(q);
-      const matchTab    = activeTab === 'all' || deriveStatus(r) === activeTab;
       const matchDate   = !filterDate || r.date === filterDate;
       const matchSource = filterSource === 'all' || r.source === filterSource;
-      return matchSearch && matchTab && matchDate && matchSource;
+      return matchSearch && matchDate && matchSource;
     });
-  }, [requests, search, activeTab, filterDate, filterSource]);
+  }, [requests, search, filterDate, filterSource]);
 
   const pendingInFiltered = filtered.filter(r => deriveStatus(r) === 'pending');
   const allPendingSelected =
@@ -312,21 +306,21 @@ const FuelsAndConsumables = () => {
         }),
       });
       const data: any = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to send to Admin Ops');
+      if (!res.ok || !data?.success) throw new Error(data?.message || 'Failed to approve request');
       setRequests(prev =>
         prev.map(r =>
           selectedPendingIds.includes(r.request_id)
-            ? { ...r, requestor_status: 'forwarded' }
+            ? { ...r, requestor_status: 'approved' }
             : r
         )
       );
       setSelectedIds(new Set());
       toast.success(
-        `${selectedPendingIds.length} request${selectedPendingIds.length > 1 ? 's' : ''} sent to Admin Ops`
+        `${selectedPendingIds.length} request${selectedPendingIds.length > 1 ? 's' : ''} approved — fuel allocated`
       );
       window.location.reload();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to send to Admin Ops');
+      toast.error(e?.message || 'Failed to approve request');
     } finally {
       setSendingToAdmin(false);
     }
@@ -434,8 +428,8 @@ const FuelsAndConsumables = () => {
             >
               <Send className="w-4 h-4" />
               {sendingToAdmin
-                ? 'Sending…'
-                : `Send to Admin Ops (${selectedPendingIds.length})`}
+                ? 'Approving…'
+                : `Approve & Allocate Fuel (${selectedPendingIds.length})`}
             </Button>
           )}
           <Button
@@ -461,33 +455,6 @@ const FuelsAndConsumables = () => {
             <p className={cn('text-xl font-bold truncate mt-0.5', s.color)}>{s.value}</p>
           </div>
         ))}
-      </div>
-
-      {/* ── Tabs ── */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {TAB_LIST.map(tab => {
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => { setActiveTab(tab.key); setSelectedIds(new Set()); }}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold border transition-colors',
-                isActive
-                  ? tab.tabActive
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-              )}
-            >
-              {tab.label}
-              <span className={cn(
-                'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
-                isActive ? 'bg-white/25 text-current' : 'bg-gray-100 text-gray-600'
-              )}>
-                {countFor(tab.key)}
-              </span>
-            </button>
-          );
-        })}
       </div>
 
       {/* ── Search + Filters ── */}
@@ -537,7 +504,7 @@ const FuelsAndConsumables = () => {
         </div>
       </div>
 
-      {/* ── Table ── */}
+      {/* ── Kanban board ── */}
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400">
           <RefreshCw className="w-8 h-8 animate-spin opacity-40" />
@@ -550,185 +517,128 @@ const FuelsAndConsumables = () => {
           <p className="text-sm">Try a different filter or create a new request</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-100 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  {/* Select-all checkbox — only selects pending rows */}
-                  <th className="px-4 py-3 w-10">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+          {KANBAN_STATUSES.map(status => {
+            const columnItems = filtered.filter(r => deriveStatus(r) === status);
+            return (
+              <div key={status} className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col max-h-[calc(100vh-260px)]">
+                {/* Column header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50/60 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className={cn('w-2 h-2 rounded-full', DOT_COLOR[status])} />
+                    <span className="text-sm font-semibold text-gray-800">{STATUS_CONFIG[status].label}</span>
+                    <span className="rounded-full bg-gray-200/70 text-gray-600 text-[11px] font-bold px-1.5 py-0.5">
+                      {columnItems.length}
+                    </span>
+                  </div>
+                  {status === 'pending' && columnItems.length > 0 && (
                     <button
                       onClick={toggleSelectAll}
-                      className="text-gray-400 hover:text-gray-700 transition-colors"
+                      className="text-gray-400 hover:text-blue-600 transition-colors"
                       title="Select all pending"
                     >
                       {allPendingSelected
                         ? <CheckSquare className="w-4 h-4 text-blue-600" />
                         : <Square className="w-4 h-4" />}
                     </button>
-                  </th>
-                  {[
-                    'Request ID', 'Source', 'Person / Vehicle', 'Purpose',
-                    'Qty (Ltrs)', 'Date', 'Status', 'Actions',
-                  ].map(h => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map(req => {
-                  const status = deriveStatus(req);
-                  const isSelected = selectedIds.has(req.request_id);
-                  const isPending = status === 'pending';
-                  const vehicleLabel = [req.vehicle_details?.type, req.vehicle_details?.vehicle_number]
-                    .filter(Boolean).join(' · ');
-                  return (
-                    <tr
-                      key={req.request_id}
-                      className={cn(
-                        'hover:bg-gray-50/80 transition-colors',
-                        isSelected && 'bg-blue-50/50'
-                      )}
-                    >
-                      {/* Checkbox */}
-                      <td className="px-4 py-3">
-                        {isPending && (
-                          <button
-                            onClick={() => toggleSelect(req.request_id)}
-                            className="text-gray-400 hover:text-blue-600 transition-colors"
-                          >
-                            {isSelected
-                              ? <CheckSquare className="w-4 h-4 text-blue-600" />
-                              : <Square className="w-4 h-4" />}
-                          </button>
+                  )}
+                </div>
+
+                {/* Column body */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                  {columnItems.length === 0 ? (
+                    <p className="text-center text-xs text-gray-300 py-8">No requests</p>
+                  ) : columnItems.map(req => {
+                    const isSelected = selectedIds.has(req.request_id);
+                    const isPending = status === 'pending';
+                    const vehicleLabel = [req.vehicle_details?.type, req.vehicle_details?.vehicle_number]
+                      .filter(Boolean).join(' · ');
+                    return (
+                      <div
+                        key={req.request_id}
+                        className={cn(
+                          'rounded-lg border border-gray-100 p-3 shadow-sm hover:shadow-md transition-shadow bg-white',
+                          isSelected && 'ring-2 ring-blue-400 border-blue-200'
                         )}
-                      </td>
+                      >
+                        {/* Top row: id + select + source badge */}
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {isPending && (
+                              <button
+                                onClick={() => toggleSelect(req.request_id)}
+                                className="text-gray-400 hover:text-blue-600 transition-colors shrink-0"
+                              >
+                                {isSelected
+                                  ? <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+                                  : <Square className="w-3.5 h-3.5" />}
+                              </button>
+                            )}
+                            <p className="font-mono text-xs font-semibold text-gray-900 truncate">
+                              {req.request_id}
+                            </p>
+                          </div>
+                          <span className={cn(
+                            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap shrink-0',
+                            req.source === 'driver_app'
+                              ? 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
+                              : req.source === 'vendor'
+                                ? 'bg-orange-50 text-orange-700 ring-1 ring-orange-200'
+                                : 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
+                          )}>
+                            {req.source === 'driver_app'
+                              ? <><Smartphone className="w-2.5 h-2.5" /> App</>
+                              : req.source === 'vendor'
+                                ? <><Building2 className="w-2.5 h-2.5" /> Vendor</>
+                                : <><Edit3 className="w-2.5 h-2.5" /> Manual</>}
+                          </span>
+                        </div>
 
-                      {/* Request ID */}
-                      <td className="px-4 py-3">
-                        <p className="font-mono text-xs font-semibold text-gray-900">
-                          {req.request_id}
-                        </p>
-                        {req.receipt_no && (
-                          <p className="text-[10px] text-gray-400 mt-0.5">{req.receipt_no}</p>
-                        )}
-                      </td>
-
-                      {/* Source badge */}
-                      <td className="px-4 py-3">
-                        <span className={cn(
-                          'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap',
-                          req.source === 'driver_app'
-                            ? 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
-                            : req.source === 'vendor'
-                              ? 'bg-orange-50 text-orange-700 ring-1 ring-orange-200'
-                              : 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
-                        )}>
-                          {req.source === 'driver_app'
-                            ? <><Smartphone className="w-2.5 h-2.5" /> Driver App</>
-                            : req.source === 'vendor'
-                              ? <><Building2 className="w-2.5 h-2.5" /> Vendor</>
-                              : <><Edit3 className="w-2.5 h-2.5" /> Manual</>}
-                        </span>
-                      </td>
-
-                      {/* Person / Vehicle */}
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900 truncate max-w-[150px]">
+                        {/* Person / vehicle */}
+                        <p className="font-medium text-sm text-gray-900 truncate">
                           {req.source === 'vendor'
                             ? (req.vendor_details?.vendor_name || '—')
                             : (req.staff_details?.name || '—')}
                         </p>
-                        <p className="text-[11px] text-gray-400 truncate max-w-[150px] mt-0.5">
+                        <p className="text-[11px] text-gray-400 truncate mt-0.5">
                           {vehicleLabel || req.vehicle_details?.model || '—'}
                         </p>
-                      </td>
+                        <p className="text-xs text-gray-500 truncate mt-1">{req.purpose || '—'}</p>
 
-                      {/* Purpose */}
-                      <td className="px-4 py-3 text-gray-600 truncate max-w-[130px]">
-                        {req.purpose || '—'}
-                      </td>
-
-                      {/* Qty */}
-                      <td className="px-4 py-3">
-                        <span className="font-bold text-orange-600">
-                          {req.fuel_requested.toLocaleString('en-IN')} L
-                        </span>
-                      </td>
-
-                      {/* Date */}
-                      <td className="px-4 py-3 text-[11px] text-gray-400 whitespace-nowrap">
-                        {fmtDate(req.date)}
-                      </td>
-
-                      {/* Status — stage pill + 3-step progress dots */}
-                      <td className="px-4 py-3">
-                        {(() => {
-                          const stage = deriveStage(req);
-                          const steps = [
-                            { label: 'R', title: 'Requestor', done: stage.step >= 1 || status === 'approved' },
-                            { label: 'A', title: 'Admin Ops', done: stage.step >= 2 || status === 'approved' },
-                            { label: 'D', title: 'Director',  done: stage.step >= 3 || status === 'approved' },
-                          ];
-                          return (
-                            <div className="flex flex-col gap-1.5">
-                              <span className={cn(
-                                'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap',
-                                stage.pill
-                              )}>
-                                {stage.label}
-                              </span>
-                              <div className="flex items-center gap-1 pl-1">
-                                {steps.map((s, i) => (
-                                  <div key={i} className="flex items-center gap-1">
-                                    <div
-                                      title={s.title}
-                                      className={cn(
-                                        'w-2 h-2 rounded-full',
-                                        s.done ? 'bg-emerald-500' : 'bg-gray-200'
-                                      )}
-                                    />
-                                    {i < 2 && <div className={cn('w-3 h-px', s.done ? 'bg-emerald-300' : 'bg-gray-200')} />}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </td>
-
-                      {/* Actions */}
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setViewRequest(req)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                            title="View details"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                          {status === 'approved' && (
+                        {/* Footer: qty, date, actions */}
+                        <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-gray-50">
+                          <div>
+                            <span className="font-bold text-orange-600 text-sm">
+                              {req.fuel_requested.toLocaleString('en-IN')} L
+                            </span>
+                            <p className="text-[10px] text-gray-400 mt-0.5">{fmtDate(req.date)}</p>
+                          </div>
+                          <div className="flex items-center gap-1">
                             <button
-                              onClick={() => setReceiptRequest(req)}
-                              className="p-1.5 rounded-lg text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
-                              title="Print receipt"
+                              onClick={() => setViewRequest(req)}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                              title="View details"
                             >
-                              <Printer className="w-3.5 h-3.5" />
+                              <Eye className="w-3.5 h-3.5" />
                             </button>
-                          )}
+                            {status === 'approved' && (
+                              <button
+                                onClick={() => setReceiptRequest(req)}
+                                className="p-1.5 rounded-lg text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
+                                title="Print receipt"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1201,17 +1111,8 @@ const ReceiptModal = ({
     const absoluteLogoUrl = window.location.origin + logoUrl;
     const requestType     = req.staff_details ? 'For Staff' : 'For Vendor';
 
-    const directorEntries = Object.entries(req.director_approval_details ?? {});
     const approvalCols = [
-      { role: 'Indented By',  d: req.requestor_approval_details ?? null },
-      { role: 'Forwarded By', d: req.admin_ops_approval_details ?? null },
-      ...(directorEntries.length === 0
-        ? [{ role: 'Approved By', d: null as null }]
-        : directorEntries.map(([, d], i) => ({
-            role: directorEntries.length > 1 ? `Approved (${i + 1})` : 'Approved By',
-            d,
-          }))
-      ),
+      { role: 'Approved By', d: req.requestor_approval_details ?? null },
     ];
 
     const companyHeader = (badge: string) => `
@@ -1487,17 +1388,8 @@ const ReceiptModal = ({
                 </div>
 
                 {(() => {
-                  const dirEntries = Object.entries(req.director_approval_details ?? {});
                   const previewCols = [
-                    { role: 'Indented By',  details: req.requestor_approval_details ?? null },
-                    { role: 'Forwarded By', details: req.admin_ops_approval_details ?? null },
-                    ...(dirEntries.length === 0
-                      ? [{ role: 'Approved By', details: null as null }]
-                      : dirEntries.map(([, d], i) => ({
-                          role: dirEntries.length > 1 ? `Approved (${i + 1})` : 'Approved By',
-                          details: d,
-                        }))
-                    ),
+                    { role: 'Approved By', details: req.requestor_approval_details ?? null },
                   ];
                   return (
                     <div

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Paperclip, Plus, Printer, Trash2, X } from 'lucide-react';
+import { ChevronRight, Loader2, Paperclip, Plus, Printer, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -630,6 +630,7 @@ const WorkOrder = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<WorkOrderRecord | null>(null);
   const [attachingMap, setAttachingMap] = useState<Record<string, boolean>>({});
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -750,61 +751,76 @@ const WorkOrder = () => {
             <p className="text-xs">Click "Create Work Order" to raise a new SPR</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-100 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  {['SPR No.', 'Date', 'Plant', 'Area of Service', 'Nature of Service', 'Status', 'Actions'].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50 bg-white">
-                {records.map((r) => {
-                  const alreadySigned = Boolean(r.indentedBySignature);
-                  const isAttaching = Boolean(attachingMap[r.id]);
-                  return (
-                    <tr key={r.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">{r.sprNo || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{r.sprDate}</td>
-                      <td className="px-4 py-3 text-gray-600">{r.plant}</td>
-                      <td className="px-4 py-3 text-gray-600">{r.areaOfService || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{r.natureOfService || '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1',
-                          r.status === 'Approved' ? 'bg-green-50 text-green-700 ring-green-100' :
-                          r.status === 'Submitted' ? 'bg-blue-50 text-blue-700 ring-blue-100' :
-                          'bg-amber-50 text-amber-700 ring-amber-100'
-                        )}>{r.status}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <button
-                            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                            onClick={() => setPreviewRecord(r)}
-                          >
-                            View
-                          </button>
-                          <button
-                            className={cn(
-                              'flex items-center gap-1 text-xs font-medium',
-                              alreadySigned
-                                ? 'text-gray-400 cursor-default'
-                                : 'text-green-700 hover:text-green-900',
-                            )}
-                            onClick={() => { if (!alreadySigned && !isAttaching) void attachSign(r); }}
-                            disabled={alreadySigned || isAttaching}
-                          >
-                            <Paperclip className="w-3 h-3" />
-                            {alreadySigned ? 'Signed' : isAttaching ? 'Attaching…' : 'Attach Sign'}
-                          </button>
+          <div className="divide-y divide-gray-100">
+            {records.map((r) => {
+              const alreadySigned = Boolean(r.indentedBySignature);
+              const isAttaching = Boolean(attachingMap[r.id]);
+              const isExpanded = expandedId === r.id;
+              return (
+                <div key={r.id}>
+                  {/* Summary bar */}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(isExpanded ? null : r.id)}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
+                  >
+                    <ChevronRight className={cn('w-4 h-4 text-gray-400 shrink-0 transition-transform', isExpanded && 'rotate-90')} />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-gray-900 truncate">{r.sprNo || '—'}</p>
+                      <p className="text-xs text-gray-500 truncate mt-0.5">{r.plant}</p>
+                    </div>
+                    <span className="text-xs text-gray-400 shrink-0 hidden sm:block w-24">{r.sprDate}</span>
+                    <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 shrink-0',
+                      r.status === 'Approved' ? 'bg-green-50 text-green-700 ring-green-100' :
+                      r.status === 'Submitted' ? 'bg-blue-50 text-blue-700 ring-blue-100' :
+                      'bg-amber-50 text-amber-700 ring-amber-100'
+                    )}>{r.status}</span>
+                  </button>
+
+                  {/* Expanded detail */}
+                  {isExpanded && (
+                    <div className="px-4 pb-4 pl-11 bg-gray-50/60">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Date</p>
+                          <p className="text-sm text-gray-700 mt-0.5">{r.sprDate || '—'}</p>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Area of Service</p>
+                          <p className="text-sm text-gray-700 mt-0.5">{r.areaOfService || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Nature of Service</p>
+                          <p className="text-sm text-gray-700 mt-0.5">{r.natureOfService || '—'}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <button
+                          className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-semibold"
+                          onClick={() => setPreviewRecord(r)}
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          Full Preview / Print
+                        </button>
+                        <button
+                          className={cn(
+                            'flex items-center gap-1 text-xs font-medium',
+                            alreadySigned
+                              ? 'text-gray-400 cursor-default'
+                              : 'text-green-700 hover:text-green-900',
+                          )}
+                          onClick={() => { if (!alreadySigned && !isAttaching) void attachSign(r); }}
+                          disabled={alreadySigned || isAttaching}
+                        >
+                          <Paperclip className="w-3 h-3" />
+                          {alreadySigned ? 'Signed' : isAttaching ? 'Attaching…' : 'Attach Sign'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
