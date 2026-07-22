@@ -16,7 +16,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
-import agriLogo from '@/Assets/3f-logo.png';
 import loginBgVideo from '@/Assets/login-bg-video.mp4';
 
 const featureItems = [
@@ -68,9 +67,11 @@ const LoginPage = () => {
 
           <form onSubmit={handleSubmit} className="relative z-10">
             <div className="flex flex-col items-center text-center">
-              <img src={agriLogo} alt="3F Agri ERP" className="h-[82px] w-[82px] object-contain" />
-              <div className="-mt-1 text-[34px] font-extrabold leading-none tracking-normal">
-                <span className="text-[#238535]">Sai Bioresources</span> <span className="text-[#0e4e8f]">ERP</span>
+              <span className="flex h-[82px] w-[82px] items-center justify-center rounded-full bg-[#e7f5e9]">
+                <Sprout className="h-10 w-10 text-[#228b3c]" strokeWidth={2} />
+              </span>
+              <div className="-mt-1 text-[34px] font-extrabold leading-none tracking-normal text-[#142337]">
+                AgriScale
               </div>
               <div className="mt-2.5 flex items-center gap-2.5 text-[11px] font-bold text-[#102339]">
                 <span className="h-[2px] w-5 bg-[#218536]" />
@@ -81,7 +82,7 @@ const LoginPage = () => {
               </div>
 
               <h2 className="mt-5 text-[25px] font-extrabold leading-tight tracking-normal text-[#142337]">Welcome Back!</h2>
-              <p className="mt-1.5 text-[14px] font-medium text-[#566273]">Sign in to your SBR ERP account</p>
+              <p className="mt-1.5 text-[14px] font-medium text-[#566273]">Sign in to your account</p>
             </div>
 
             <div className="mt-5 space-y-3">

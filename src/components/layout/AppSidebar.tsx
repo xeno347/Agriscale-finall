@@ -164,7 +164,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
   const isSuperAdmin = user?.id === 'sbr-admin';
 
   useEffect(() => {
-    document.title = "SBR | Farm-connect";
+    document.title = "AgriScale";
   }, []);
 
   return (
@@ -319,7 +319,7 @@ const AppSidebar = ({ leadsComplete }: AppSidebarProps) => {
           {!isCollapsed && (
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-900 truncate">
-                {user?.name || 'SBR User'}
+                {user?.name || 'User'}
               </p>
               <p className="text-xs text-gray-500 truncate">
                 {user?.designation || '—'}

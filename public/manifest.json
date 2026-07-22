@@ -1,7 +1,7 @@
 {
-  "name": "SBR Farm-connect",
-  "short_name": "Farm-connect",
-  "description": "Smart Agriculture & Farm Operations Platform by SaiBioresources Pvt Ltd",
+  "name": "AgriScale",
+  "short_name": "AgriScale",
+  "description": "Smart Agriculture & Farm Operations Platform",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

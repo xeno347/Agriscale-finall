@@ -295,7 +295,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
 
   useEffect(() => {
-    document.title = "SBR | Farm-connect";
+    document.title = "AgriScale";
   }, []);
 
   // Auto-close the nav panel whenever the route changes

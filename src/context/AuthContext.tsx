@@ -32,11 +32,11 @@ type AuthContextValue = {
 const KEY = 'fc_auth_v1';
 
 // Hardcoded admin bypass — no API call, full module access
-const SBR_ADMIN_TOKEN = '__sbr_admin_bypass__';
-const SBR_ADMIN_USER: AuthUser = {
-  id: 'sbr-admin',
-  name: 'SBR Admin',
-  username: 'sbr@admin',
+const SUPERADMIN_TOKEN = '__superadmin_bypass__';
+const SUPERADMIN_USER: AuthUser = {
+  id: 'superadmin',
+  name: 'Super Admin',
+  username: 'admin@2026',
   department: 'Administration',
   designation: 'Super Admin',
   notification_permissions: true,
@@ -185,7 +185,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const validateToken = useCallback(async () => {
     if (!token) return false;
 
-    if (token === SBR_ADMIN_TOKEN) return true;
+    if (token === SUPERADMIN_TOKEN) return true;
 
     // Fast local check first (end-of-day/JWT exp if available)
     if (!isTokenValid()) {
@@ -206,9 +206,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [token, isTokenValid]);
 
   const login = async (username: string, password: string) => {
-    if (username === 'sbr@admin' && password === 'sbr@admin') {
+    if (username === 'admin@2026' && password === 'admin@2026') {
       // Far-future expiry so the session never auto-expires
-      persist(SBR_ADMIN_USER, SBR_ADMIN_TOKEN, new Date('2099-12-31T23:59:59').getTime());
+      persist(SUPERADMIN_USER, SUPERADMIN_TOKEN, new Date('2099-12-31T23:59:59').getTime());
       return;
     }
 
